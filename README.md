@@ -1,2 +1,2 @@
 # cheese-on-prem
-Cheese on-premises
+This is a public repository for installing the CHEESE on-premises version.
