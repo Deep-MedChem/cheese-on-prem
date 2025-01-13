@@ -1,0 +1,13 @@
+#!/bin/bash
+
+echo Downloading CHEESE images...
+REPO_NAME="themamaai.azurecr.io/cheese"
+echo docker login -u $CHEESE_CUSTOMER -p $CHEESE_PASSWORD $REPO_NAME
+
+# # Pull the CHEESE app images
+docker system prune -f 
+echo docker pull "themamaai.azurecr.io/cheese/cheese-ui/${CHEESE_CUSTOMER}"
+echo docker pull "themamaai.azurecr.io/cheese/cheese-database/${CHEESE_CUSTOMER}"
+echo docker pull "themamaai.azurecr.io/cheese/cheese-api/${CHEESE_CUSTOMER}"
+# docker pull $DOCS_IMAGE
+echo docker pull "themamaai.azurecr.io/cheese/cheese_inference/${CHEESE_CUSTOMER}"

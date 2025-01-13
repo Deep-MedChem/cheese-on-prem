@@ -1,0 +1,127 @@
+#!/bin/bash
+set -e
+# Function to display usage
+show_help() {
+  echo "Usage: cheese visualize"
+  echo "Compute CHEESE visualization coordinates for a file of molecules"
+  echo "Options:"
+  echo "  --input_file       Input file in the following formats : .csv , .txt , .smi"
+  echo "  --smiles_col       Smiles column in the CSV file (Default SMILES)"
+  echo "  --dest_folder      Destination folder of compouted coordinates"
+  echo "  --search_type    Search type : 'morgan', 'espsim_shape', 'espsim_electrostatic', 'active_pairs' (Default : 'morgan')"
+  echo "  --visualisation_method    Type of visualisation : 'pca' or 'umap'"  
+  echo "  --port             CHEESE Server port on which to run the computation"
+  echo "  -h, --help       Show this help message"
+  exit 1
+}
+
+
+# Check if no arguments are passed
+if [ $# -eq 0 ]; then
+    # Show help if no arguments
+    show_help
+    exit 0
+fi
+
+all_args=$@
+
+
+# Helpers 
+convert_to_absolute_path() {
+    local input_path="$1"
+
+    # Check if the path is already absolute
+    if [[ "$input_path" == /* ]]; then
+        # It's already absolute, just return it
+        echo "$input_path"
+    else
+        # It's a relative path, convert it to absolute
+        echo "$(pwd)/$input_path"
+    fi
+}
+
+# Automatically choosing port on which to start cheese 
+port=""
+
+get_port(){
+
+local container_name="$1"
+docker inspect $container_name | grep HostPort | sort | uniq | grep -o [0-9] | tr -d '\n'
+
+}
+
+check_cheese_server(){
+# Get all containers with a name containing "cheese_api"
+local container_substring="${USER}_cheese_api"
+containers=$(docker ps -a --format '{{.Names}}' | grep "$container_substring")
+# Check if we have any containers with that name
+if [[ -n "$containers" ]]; then
+  # Pick a random container from the list
+  random_container=$(echo "$containers" | shuf -n 1)
+  port=$(get_port $random_container)
+else
+  echo "No CHEESE Server is running. Please run cheese start-server !!"
+  exit 1
+fi
+}
+
+
+
+# Default values
+visualisation_method="pca"
+smiles_col="SMILES"
+dest_folder="${PWD}/visualization_coords"
+search_type="morgan"
+check_cheese_server
+
+
+
+# Parse command-line arguments manually
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --input_file)
+      input_file=$(convert_to_absolute_path $2)
+
+      # Check if inout file exists
+      if [ ! -e "$input_file" ]; then
+      echo "$input_file does not exist !!"
+      exit 1
+      fi
+
+      shift 2
+      ;;
+    --smiles_col)
+      smiles_col=$2
+      shift 2
+      ;;
+    --dest_folder)
+      dest_folder=$(convert_to_absolute_path $2)
+      shift 2
+      ;;
+    --search_type)
+      search_type=$2
+      shift 2
+      ;;
+    --visualisation_method)
+      visualisation_method=$2
+      shift 2
+      ;;
+    --port)
+      port=$2
+      shift 2
+      ;;
+    -h|--help)
+      show_help
+      ;;
+    *)
+      echo "Unknown option: $1"
+      show_help
+      ;;
+  esac
+done
+
+
+
+REQUEST="http://$IP:$port/visualize_file?input_file=$input_file&smiles_col=$smiles_col&dest_folder=$dest_folder&search_type=$search_type&visualisation_method=$visualisation_method"
+
+curl -GET $REQUEST

@@ -1,0 +1,47 @@
+#!/bin/bash
+while [ $# -gt 0 ]; do
+    if [[ $1 == "--"* ]]; then
+        v="${1/--/}"
+        declare "$v"="$2"
+        shift
+    fi
+    shift
+done
+
+
+EXTENSION=".csv"
+DELIMITER=","
+
+DEVICE="cuda"
+BATCH_SIZE=1024
+
+
+INPUT_FILE=$input_file
+DEST_INPUT_FILE="/data/"$input_file
+
+
+INDEX_TYPE="in_memory"
+
+
+# Specify save format
+if [ "$save_format" = "" ]; then
+    SAVE_FORMAT="numpy"
+else
+    SAVE_FORMAT=$save_format
+
+fi
+
+
+CHUNK_SIZE=100000  # Chunk size for embeddings computation
+
+echo "Running CHEESE embeddings computation..."
+OUTPUT_DIRECTORY="/data/${dest}"
+NEW_OUTPUT_DIRECTORY=$dest
+echo Saving outputs to $NEW_OUTPUT_DIRECTORY
+mkdir $NEW_OUTPUT_DIRECTORY
+
+docker run -u $UID -v /:/data -it --env CUPY_CACHE_DIR=/tmp --env NCCL_SHM_DISABLE=1 --env CHEESE_LICENSE_FILE=/data/$LICENSE_FILE --env LICENSING=True --gpus all --rm $INFERENCE_IMAGE --index_type $INDEX_TYPE --search_types $search_types --input_file $DEST_INPUT_FILE --extension $EXTENSION --delimiter $DELIMITER --output_directory $OUTPUT_DIRECTORY --gpu_device_ids $gpu_devices --batch_size $BATCH_SIZE --chunk_size $CHUNK_SIZE --process_file "true" --embeddings_computation "true" --make_indexes "false" --balance_clusters "false" --save_format $SAVE_FORMAT
+
+mv $NEW_OUTPUT_DIRECTORY $NEW_OUTPUT_DIRECTORY"_new"
+mv $NEW_OUTPUT_DIRECTORY"_new/embeddings" $NEW_OUTPUT_DIRECTORY
+rm -rf $NEW_OUTPUT_DIRECTORY"_new"

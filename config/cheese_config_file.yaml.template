@@ -1,0 +1,26 @@
+TRANSFORMERS:
+  morgan: "tanimoto"
+  espsim_electrostatic: "espsim"
+  espsim_shape: "shapesim"
+  active_pairs: "active_pairs"
+
+DIM: "256"
+
+VISUALISATION_MODELS_PATH: "/data/on-prem/visualisation_models/models"
+
+OUTPUT_DIRECTORIES: 
+  ENAMINE-REAL: "/data/enamine_real" 
+  ZINC15: "/data/zinc15"
+  CUSTOM: "/data/custom_output"
+
+DELIMITERS:
+  ENAMINE-REAL: "\t" 
+  ZINC15: ","
+  CUSTOM: ","
+
+INDEX_TYPES:
+  ENAMINE-REAL: "clustered"
+  ZINC15: "clustered"
+  CUSTOM: "in_memory"
+
+

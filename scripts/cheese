@@ -1,0 +1,109 @@
+#!/bin/bash
+
+
+# Function to display usage
+show_help() {
+  echo "Welcome to CHEESE !"
+  echo "Usage: cheese [options]"
+  echo "Commands:"
+  echo "  test                         Test CHEESE commands"
+  echo "  generate-license-key         Generate CHEESE license key"
+  echo "  start-server                 Run CHEESE server (API)"
+  echo "  stop-servers                 Stop all CHEESE servers"
+  echo "  start-app                    Run CHEESE UI"
+  echo "  embeddings-cpu               Run CHEESE Embeddings computation on CPU"
+  echo "  search                       Run CHEESE Search"
+  echo "  visualize                    Run CHEESE Embeddings visualization"
+  echo "  run-inference                Run CHEESE indexing"
+  echo "  update-scripts               Update CHEESE scripts"
+  echo "  update-env                   Update CHEESE environment file"
+  echo "  update-images                Update CHEESE Docker Images"
+  echo "  -h, --help                   Show this help message"
+  exit 1
+}
+
+# Check if no arguments are passed
+if [ $# -eq 0 ]; then
+    # Show help if no arguments
+    show_help
+    exit 0
+fi
+
+
+source ${HOME}/.config/cheese/cheese-env.sh
+
+
+
+# Parse command-line arguments manually
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    test)
+      shift 1
+      test-cheese $@
+      exit 0
+      ;;
+    update-images)
+      shift 1
+      update-images $@
+      exit 0
+      ;;
+    update-scripts)
+      shift 1
+      update-scripts $@
+      exit 0
+      ;;
+    update-env)
+      shift 1
+      update-env $@
+      exit 0
+      ;;
+    start-server)
+      shift 1
+      start-server $@
+      exit 0
+      ;;
+    stop-servers)
+      shift 1
+      stop-servers $@
+      exit 0
+      ;;
+    start-app)
+      shift 1
+      start-app $@
+      exit 0
+      ;;
+    run-inference)
+      shift 1
+      run-inference $@
+      exit 0
+      ;;
+    embeddings-cpu)
+      shift 1
+      embeddings-cpu $@
+      exit 0
+      ;;
+    search)
+      shift 1
+      search $@
+      exit 0
+      ;;
+    visualize)
+      shift 1
+      visualize $@
+      exit 0
+      ;;
+    generate-license-key)
+      shift 1
+      generate-license-key $@
+      exit 0
+      ;;
+    -h|--help)
+      show_help
+      ;;
+    *)
+      echo "Unknown command: $1"
+      exit 1
+      show_help
+      ;;
+  esac
+done

@@ -1,0 +1,4 @@
+CHEESE_CUSTOMER=test
+CHEESE_PASSWORD=XXX
+CHEESE_LICENSE_FILE=/data/on-prem/cheese_license_file.json
+CONFIG_FILE=/data/on-prem/cheese_config_file.yaml

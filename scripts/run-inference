@@ -1,0 +1,196 @@
+#!/bin/bash
+set -e
+
+
+
+# Function to display usage
+show_help() {
+  echo "Usage: cheese run-inference [options]"
+  echo "Options:"
+  echo "  --input_file      Input file in CSV format [REQUIRED]"
+  echo "  --dest            Destination folder [REQUIRED]"
+  echo "  --index_type      Index type : 'clustered', 'in_memory', 'auto' (Default : 'auto')"
+  echo "  --chunk_size      Number of lines of the file to be processed each time (Default : 100000)"
+  echo "  --batch_size      Batch size for CHEESE embeddings computation on GPU (Default : 32)"
+  echo "  --valid_smiles    Whether to check for SMILES string validity (Default : false)"
+  echo "  --canonicalize_smiles  Whether to canonicalize the SMILES string (Default : false) "
+  echo "  --skip_file_headers     Whether to skip the file headers (Default : true)"
+  echo "  --gpu_devices          The IDs of GPU devices to use (Default : 0)"
+  echo "  --clustering_batch_size The batch size for the clustering (Default : 10000)"
+  echo "  -h, --help       Show this help message"
+  exit 1
+}
+
+# Check if no arguments are passed
+if [ $# -eq 0 ]; then
+    # Show help if no arguments
+    show_help
+    exit 0
+fi
+
+# Default values
+chunk_size=100000
+batch_size=32
+valid_smiles=false
+canonicalize_smiles=false
+index_type=auto
+skip_file_headers=true
+gpu_devices=0
+clustering_batch_size=10000
+
+# Parse command-line arguments manually
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --input_file)
+      input_file="$2"
+      shift 2
+      ;;
+    --dest)
+      dest="$2"
+      if [ -z "$dest" ]; then
+        echo "Please specify a destination folder --dest"
+      fi
+      shift 2
+      ;;
+    --index_type)
+      index_type="$2"
+      shift 2
+      ;;
+    --chunk_size)
+      chunk_size="$2"
+      shift 2
+      ;;
+
+    --batch_size)
+      batch_size="$2"
+      shift 2
+      ;;
+    --valid_smiles)
+      valid_smiles="$2"
+      shift 2
+      ;;
+    --canonicalize_smiles)
+      canonicalize_smiles="$2"
+      shift 2
+      ;;
+    --skip_file_headers)
+      skip_file_headers="$2"
+      shift 2
+      ;;
+    --gpu_devices)
+      gpu_devices="$2"
+      shift 2
+      ;;
+    --clustering_batch_size)
+      clustering_batch_size="$2"
+      shift 2
+      ;;
+    
+    -h|--help)
+      show_help
+      ;;
+    *)
+      echo "Unknown option: $1"
+      show_help
+      ;;
+  esac
+done
+
+
+#!/bin/bash
+
+# Function to convert relative path to absolute path
+convert_to_absolute_path() {
+    local input_path="$1"
+
+    # Check if the path is already absolute
+    if [[ "$input_path" == /* ]]; then
+        # It's already absolute, just return it
+        echo "$input_path"
+    else
+        # It's a relative path, convert it to absolute
+        echo "$(pwd)/$input_path"
+    fi
+}
+
+
+
+EXTENSION=".csv"
+DELIMITER=","
+
+MAXSIZE=1000000
+
+INPUT_FILE=$(convert_to_absolute_path $input_file)
+
+DEST_INPUT_FILE="/data/"$INPUT_FILE
+# Check if file exists
+if [ ! -e "$INPUT_FILE" ]; then
+  echo "$INPUT_FILE does not exist !!"
+  exit 1
+fi
+
+
+# Get file size
+echo Getting file size of $INPUT_FILE
+FILESIZE=$(du $INPUT_FILE | awk '{print $1}')
+# Checkpoint
+echo "Size of $INPUT_FILE = $FILESIZE KB."
+
+if [ "$index_type" = "auto" ] ; then
+
+    if (( FILESIZE > MAXSIZE)); then
+        index_type="clustered"
+    else
+        index_type="in_memory"
+    fi
+fi
+
+DEST=$(convert_to_absolute_path $dest)
+
+INFERENCE_IMAGE="themamaai.azurecr.io/cheese/cheese_inference/${CHEESE_CUSTOMER}"
+OUTPUT_DIRECTORY="/data/${DEST}"
+NEW_OUTPUT_DIRECTORY="${DEST}"
+echo Saving outputs to $NEW_OUTPUT_DIRECTORY
+mkdir $NEW_OUTPUT_DIRECTORY || true
+
+
+echo "Running CHEESE inference with $index_type indexing ..."
+
+
+
+if command -v nvidia-smi > /dev/null; then
+echo "GPU is available !"
+
+docker run -u $UID -v /:/data -it \
+      --env CUPY_CACHE_DIR=/tmp \
+      --env NCCL_SHM_DISABLE=1 \
+      --env CUDA_VISIBLE_DEVICES=$gpu_devices \
+      --gpus all \
+      --env-file ${HOME}/.config/cheese/cheese-env-file.conf \
+      --rm $INFERENCE_IMAGE \
+      --index_type $index_type \
+      --input_file $DEST_INPUT_FILE \
+      --extension $EXTENSION \
+      --delimiter $DELIMITER \
+      --output_directory $OUTPUT_DIRECTORY --batch_size $batch_size --chunk_size $chunk_size --clustering_bs $clustering_batch_size --validate_smiles $valid_smiles --canonicalize_smiles $canonicalize_smiles --skip_headers $skip_file_headers
+      
+
+else
+
+echo "GPU is not available ! Running inference on CPU"
+
+docker run -u $UID -v /:/data -it \
+      --env CUPY_CACHE_DIR=/tmp \
+      --env NCCL_SHM_DISABLE=1 \
+      --env CUDA_VISIBLE_DEVICES=$gpu_devices \
+      --env-file ${HOME}/.config/cheese/cheese-env-file.conf \
+      --rm $INFERENCE_IMAGE \
+      --index_type $index_type \
+      --input_file $DEST_INPUT_FILE \
+      --extension $EXTENSION \
+      --delimiter $DELIMITER \
+      --output_directory $OUTPUT_DIRECTORY --batch_size $batch_size --chunk_size $chunk_size --clustering_bs $clustering_batch_size --validate_smiles $valid_smiles --canonicalize_smiles $canonicalize_smiles --skip_headers $skip_file_headers
+      
+
+fi
+
