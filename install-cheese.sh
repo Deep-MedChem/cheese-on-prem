@@ -62,7 +62,10 @@ convert_to_absolute_path() {
 
 env_file=$(convert_to_absolute_path $env_file) 
 
+set -e
+
 ip_address=$(hostname --ip-address)
+
 
 if [ ! "$env_file" = "" ]; then
     echo Setting from file $env_file
