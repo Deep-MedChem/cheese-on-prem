@@ -6,9 +6,7 @@ This is a public repository for installing the CHEESE on-premises version.
 
 - Ubuntu
 
-- Docker.
-
-- Python >= 3.8
+- Docker
 
 ### Installing CHEESE
 
