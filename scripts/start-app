@@ -1,17 +1,13 @@
 #!/bin/bash
-
-API_PORT=3000
+UI_PORT=3000
 random_uuid=$(uuidgen)
 ui_container="${USER}_cheese_ui_${random_uuid}"
-api_container="${USER}_cheese_api_${random_uuid}"
 
 # Function to display usage
 show_help() {
   echo "Usage: cheese start-app [options]"
   echo "Options:"
-  echo "  --ui_container   Specify ui_container (Optional)"
-  echo "  --db_container   Specify db_container (Optional)"
-  echo "  --api_container   Specify api_container (Optional)"
+  echo "  --api_port   Specify API port (Optional)"
   echo "  -p, --port      Specify UI port (Optional)"
   echo "  -h, --help       Show this help message"
   exit 1
@@ -25,8 +21,8 @@ while [[ $# -gt 0 ]]; do
       UI_PORT=$port:3000
       shift 2
       ;;
-    --api_container)
-      api_container="$2"
+    --api_port)
+      api_port="$2"
       shift 2
       ;;
     -h|--help)
@@ -40,29 +36,12 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-
 # Function to get Port number of container
 
 get_port(){
 
 local container_name="$1"
 docker inspect $container_name | grep HostPort | sort | uniq | grep -o [0-9] | tr -d '\n'
-
-}
-
-
-# Function to check if a Docker container exists
-check_container_exists() {
-
-    local container_name="$1"
-    
-    # Check if the container exists using docker inspect
-    if docker inspect "$container_name" > /dev/null 2>&1; then
-        echo "Container '$container_name' exists."
-    else
-        echo "Container '$container_name' does not exist."
-        start-api --api_container $api_container
-    fi
 
 }
 
@@ -75,18 +54,37 @@ docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' $co
 
 }
 
+
+check_cheese_server(){
+# Get all containers with a name containing "cheese_api"
+local container_substring="${USER}_cheese_api"
+containers=$(docker ps -a --format '{{.Names}}' | grep "$container_substring")
+# Check if we have any containers with that name
+if [[ -n "$containers" ]]; then
+  # Pick a random container from the list
+  random_container=$(echo "$containers" | shuf -n 1)
+  api_port=$(get_port $random_container)
+  echo Found cheese server running on port $api_port
+else
+  echo "No CHEESE Server is running. Please run cheese start-server !!"
+  exit 1
+fi
+}
+
+if [ -z "$api_port" ]; then
+echo "No CHEESE server port was specified, checking available CHEESE servers..."
+      
+check_cheese_server
+fi
+set -e
+
 IMAGE_NAME="themamaai.azurecr.io/cheese/cheese-ui"
 
 FULL_IMAGE_NAME="${IMAGE_NAME}/${CHEESE_CUSTOMER}"
-
-# Check if a container exists, otherwise create it
-check_api_container_exists $api_container
-
-# Get port from the API container
-api_port=$(get_port $api_container)
 
 API_URL="http://"$IP":"$api_port
 
 echo "Running cheese UI ..."
 docker run -d --env CHEESE_API=$API_URL --name $ui_container -p $UI_PORT --rm $FULL_IMAGE_NAME
-echo CHEESE UI is available here : http://"$IP":"$UI_PORT"
+port=$(get_port $ui_container)
+echo CHEESE UI is available here : http://"$IP":"$port"

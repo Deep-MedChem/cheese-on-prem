@@ -1,5 +1,4 @@
 #!/bin/bash
-set -e
 # Function to display usage
 show_help() {
   echo "Usage: cheese visualize"
@@ -74,7 +73,7 @@ dest_folder="${PWD}/visualization_coords"
 search_type="morgan"
 check_cheese_server
 
-
+set -e
 
 # Parse command-line arguments manually
 while [[ $# -gt 0 ]]; do

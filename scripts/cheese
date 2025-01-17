@@ -10,6 +10,7 @@ show_help() {
   echo "  generate-license-key         Generate CHEESE license key"
   echo "  start-server                 Run CHEESE server (API)"
   echo "  stop-servers                 Stop all CHEESE servers"
+  echo "  stop-apps                    Stop all CHEESE UIs"
   echo "  start-app                    Run CHEESE UI"
   echo "  embeddings-cpu               Run CHEESE Embeddings computation on CPU"
   echo "  search                       Run CHEESE Search"
@@ -65,6 +66,11 @@ while [[ $# -gt 0 ]]; do
     stop-servers)
       shift 1
       stop-servers $@
+      exit 0
+      ;;
+    stop-apps)
+      shift 1
+      stop-apps $@
       exit 0
       ;;
     start-app)

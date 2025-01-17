@@ -1,5 +1,4 @@
 #!/bin/bash
-set -e
 # Function to display usage
 show_help() {
   echo "Usage: cheese search"
@@ -76,6 +75,9 @@ n_neighbors="30"
 db_names="ZINC15,ENAMINE-REAL"
 
 check_cheese_server
+
+set -e
+
 
 # Parse command-line arguments manually
 while [[ $# -gt 0 ]]; do
