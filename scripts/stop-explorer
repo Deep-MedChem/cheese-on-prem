@@ -1,0 +1,28 @@
+#!/bin/bash
+
+# Function to display usage
+show_help() {
+  echo "Usage: cheese explorer stop-apps [options]"
+  echo "Stop all CHEESE Explorer apps"
+  echo "Options:"
+  echo "  -h, --help       Show this help message"
+  exit 1
+}
+
+
+# Parse command-line arguments manually
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    -h|--help)
+      usage
+      ;;
+    *)
+      echo "Unknown option: $1"
+      usage
+      ;;
+  esac
+done
+
+# Stop all CHEESE UI containers
+substring="${USER}_cheese_explorer"
+docker ps -q -a --filter "name=$substring" | xargs -r docker rm -f

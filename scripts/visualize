@@ -124,3 +124,13 @@ done
 REQUEST="http://$IP:$port/visualize_file?input_file=$input_file&smiles_col=$smiles_col&dest_folder=$dest_folder&search_type=$search_type&visualisation_method=$visualisation_method"
 
 curl -GET $REQUEST
+echo ""
+
+# status_code=$(curl -s -o /dev/null -I -w "%{http_code}" -GET $REQUEST)
+# status_code=$(curl -s -o /dev/null -I -w "%{http_code}" -GET $REQUEST)
+# echo $status
+# if [ "$status_code" -ne 200 ]; then
+#   echo "Request failed with status code $status_code"
+#   exit 1
+# fi
+

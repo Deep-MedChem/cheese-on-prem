@@ -66,6 +66,8 @@ set -e
 
 ip_address=$(hostname --ip-address)
 
+# Copy testing conf file
+cp "$PWD/config/cheese_test_config_file.yaml" "${HOME}/.config/cheese/cheese_test_config_file.yaml"
 
 if [ ! "$env_file" = "" ]; then
     echo Setting from file $env_file
@@ -73,10 +75,15 @@ if [ ! "$env_file" = "" ]; then
     echo "" >> "${HOME}/.config/cheese/cheese-env-file.conf";
     echo "REPO_FOLDER=$PWD" >> "${HOME}/.config/cheese/cheese-env-file.conf";
     echo "IP=$ip_address" >> "${HOME}/.config/cheese/cheese-env-file.conf";
+    cp "${HOME}/.config/cheese/cheese-env-file.conf" "${HOME}/.config/cheese/cheese-env-file-test.conf"
+    cp "$PWD/config/cheese_test_config_file.yaml" "${HOME}/.config/cheese/cheese_test_config_file.yaml"
+    echo "CONFIG_FILE=${HOME}/.config/cheese/cheese_test_config_file.yaml" >> "${HOME}/.config/cheese/cheese-env-file-test.conf";
 else
     exit "Please specify an environment configuration file. To do that, please modify the template in config/cheese-env.conf.template"    
 
 fi
+
+
 
 # Define a function to export environment variables from a file
 export_env_vars() {

@@ -1,0 +1,82 @@
+#!/bin/bash
+set -e
+EXPLORER_PORT=8507
+random_uuid=$(uuidgen)
+explorer_container="${USER}_cheese_explorer_${random_uuid}"
+
+# Function to display usage
+show_help() {
+  echo "Usage: cheese explorer start-app [options]"
+  echo "Options:"
+  echo "  --port      Specify app port (Optional)"
+  echo "  -h, --help       Show this help message"
+  exit 1
+}
+
+
+
+# Helpers 
+convert_to_absolute_path() {
+    local input_path="$1"
+
+    # Check if the path is already absolute
+    if [[ "$input_path" == /* ]]; then
+        # It's already absolute, just return it
+        echo "$input_path"
+    else
+        # It's a relative path, convert it to absolute
+        echo "$(pwd)/$input_path"
+    fi
+}
+
+
+# Parse command-line arguments manually
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --port)
+      port="$2"
+      EXPLORER_PORT=$port:8507
+      shift 2
+      ;;
+    -h|--help)
+      show_help
+      ;;
+    *)
+      echo "Unknown option: $1"
+      show_help
+      ;;
+  esac
+done
+
+# Function to get Port number of container
+
+get_port(){
+
+local container_name="$1"
+docker inspect $container_name | grep HostPort | sort | uniq | grep -o [0-9] | tr -d '\n'
+
+}
+
+
+
+
+IMAGE_NAME="themamaai.azurecr.io/cheese/cheese-explorer"
+FULL_IMAGE_NAME="${IMAGE_NAME}/${CHEESE_CUSTOMER}"
+current_config_file="${HOME}/.config/cheese/cheese-explorer-conf.yaml"
+
+if [ ! -e "$current_config_file" ]; then
+      echo "Configuration file $current_config_file doesn't exist !!"
+      echo "Please run cheese explorer configure to set up your config file."
+      exit 1
+fi
+
+docker run -d -u $UID -v /:/external -it -p $EXPLORER_PORT \
+  --env EXT="/external" --env CONFIG_FILE=$current_config_file \
+  --name $explorer_container $FULL_IMAGE_NAME
+
+port=$(get_port $explorer_container)
+
+echo "Starting cheese Explorer..."
+sleep 15
+
+echo CHEESE Explorer is available here : http://"$IP":"$port"

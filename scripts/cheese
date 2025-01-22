@@ -16,6 +16,7 @@ show_help() {
   echo "  search                       Run CHEESE Search"
   echo "  visualize                    Run CHEESE Embeddings visualization"
   echo "  run-inference                Run CHEESE indexing"
+  echo "  explorer                     Run CHEESE Explorer"
   echo "  update-scripts               Update CHEESE scripts"
   echo "  update-env                   Update CHEESE environment file"
   echo "  update-images                Update CHEESE Docker Images"
@@ -101,6 +102,11 @@ while [[ $# -gt 0 ]]; do
     generate-license-key)
       shift 1
       generate-license-key $@
+      exit 0
+      ;;
+    explorer)
+      shift 1
+      explorer $@
       exit 0
       ;;
     -h|--help)
