@@ -13,12 +13,12 @@ set -e
 cd "${REPO_FOLDER}/scripts"
 echo Installing CHEESE scripts...
 
+mkdir $HOME/.local/bin
 for file in *; do
   # Check if the file ends with .sh
   if [[ "$file" != *.sh ]]; then
     # If the file does not end with .sh, print its name
     echo "Moved $file to $HOME/.local/bin"
-    filename=$(basename $file)
     cp $file $HOME/.local/bin/
     echo Setting permissions for $HOME/.local/bin/$file
     chmod +x $HOME/.local/bin/$file
