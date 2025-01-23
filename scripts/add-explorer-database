@@ -5,7 +5,7 @@ set -e
 show_help() {
   echo "Usage: cheese explorer add-database [options]"
   echo "Options:"
-  echo "  --input_file     Input file in CSV format where SMILES column must be 'smiles' "
+  echo "  --input_file     Input file in CSV format where SMILES column must be 'SMILES' "
   echo "  --db_name        Name of your database [Default : 'MY_DB'] "
   echo "  -h, --help       Show this help message"
   exit 1

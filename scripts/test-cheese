@@ -10,27 +10,27 @@ echo ""
 
 echo "TESTING [2/6] : Starting CHEESE server"
 cheese start-server
-
+sleep 10
 echo Making test directory
 mkdir /tmp/cheese_test || true
 echo ""
 
-# echo "TESTING [3/6] : Testing CHEESE embeddings..."
-# cheese embeddings-cpu --input_file "${REPO_FOLDER}/tests/test_mols.csv" --dest_folder /tmp/cheese_test/embs --search_type morgan
-# echo ""
+echo "TESTING [3/6] : Testing CHEESE embeddings..."
+cheese embeddings-cpu --input_file "${REPO_FOLDER}/tests/test_mols.csv" --dest_folder /tmp/cheese_test/embs --search_type morgan
+echo ""
 
-# echo "TESTING [4/6] : Testing CHEESE search..."
-# cheese search --input_file "${REPO_FOLDER}/tests/test_mols.csv" --output_file /tmp/cheese_test/search_results.csv --db_names CUSTOM --search_type espsim_electrostatic --search_quality 'fast' --n_neighbors 50
+echo "TESTING [4/6] : Testing CHEESE search..."
+cheese search --input_file "${REPO_FOLDER}/tests/test_mols.csv" --output_file /tmp/cheese_test/search_results.csv --db_names CUSTOM --search_type espsim_electrostatic --search_quality 'fast' --n_neighbors 50
 
-# echo ""
-# echo "TESTING [5/6] : Testing CHEESE visualize..."
-# cheese visualize --input_file "${REPO_FOLDER}/tests/test_mols.csv" --dest_folder /tmp/cheese_test/visualize --search_type morgan --visualisation_method pca
-# echo ""
+echo ""
+echo "TESTING [5/6] : Testing CHEESE visualize..."
+cheese visualize --input_file "${REPO_FOLDER}/tests/test_mols.csv" --dest_folder /tmp/cheese_test/visualize --search_type morgan --visualisation_method pca
+echo ""
 
 
-# echo "TESTING [6/6] : Stopping CHEESE servers..."
-# rm -rf /tmp/cheese_test && rm -rf "/tmp/test_db" || true
-# cheese stop-servers
+echo "TESTING [6/6] : Stopping CHEESE servers..."
+rm -rf /tmp/cheese_test && rm -rf "/tmp/test_db" || true
+cheese stop-servers
 
 
 
