@@ -21,15 +21,16 @@ You can install CHEESE on your instance using the following steps :
     - `CHEESE_LICENSE_FILE` : The CHEESE license file
     - `CONFIG_FILE` : A YAML configuration file for running the CHEESE tool on-premises which contains paths to the data, models... A template can be found in `config/cheese_config_file.yaml.template`
 
-3. Run `bash install-cheese.sh --env_file <env_config_file>`. Where `<env_config_file>` is the path to your environment configuration file.
-
-4. Modify your `~/.bashrc` file and append the following script at the end of it :
+3. If needed, modify your `~/.bashrc` file and append the following script at the end of it :
 
 ```
 if [ -d "$HOME/.local/bin" ] ; then
     PATH="$HOME/.local/bin:$PATH"
 fi
 ```
+and run `source ~/.bashrc`
+
+4. Run `bash install-cheese.sh --env_file <env_config_file>`. Where `<env_config_file>` is the path to your environment configuration file.
 
 5. Check if CHEESE is installed by running `cheese` 
 6. Test if the installation is working by running the command `cheese test` 
