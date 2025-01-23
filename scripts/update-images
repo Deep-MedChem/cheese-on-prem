@@ -10,7 +10,6 @@ docker login -u $CHEESE_CUSTOMER -p $CHEESE_PASSWORD $REPO_NAME
 fi
 
 # Pull the CHEESE app images
-docker system prune -f 
 docker pull "themamaai.azurecr.io/cheese/cheese-ui/${CHEESE_CUSTOMER}"
 docker pull "themamaai.azurecr.io/cheese/cheese-database/${CHEESE_CUSTOMER}"
 docker pull "themamaai.azurecr.io/cheese/cheese-api/${CHEESE_CUSTOMER}"
