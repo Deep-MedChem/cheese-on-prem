@@ -5,7 +5,6 @@ set -e
 show_help() {
   echo "Usage: cheese explorer remove-database [options]"
   echo "Options:"
-  echo "  --input_file     Input file in CSV format where SMILES column must be 'smiles' "
   echo "  --db_name        Name of your database [Default : 'MY_DB'] "
   echo "  -h, --help       Show this help message"
   exit 1
@@ -23,38 +22,10 @@ fi
 
 db_name="MY_DB"
 
-# Helpers 
-convert_to_absolute_path() {
-    local input_path="$1"
-
-    # Check if the path is already absolute
-    if [[ "$input_path" == /* ]]; then
-        # It's already absolute, just return it
-        echo "$input_path"
-    else
-        # It's a relative path, convert it to absolute
-        echo "$(pwd)/$input_path"
-    fi
-}
-
 
 # Parse command-line arguments manually
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --input_file)
-      if [ -z "$2" ]; then
-        echo "Please specify an input file !!" 
-        exit 1
-    fi
-    input_file=$(convert_to_absolute_path $2)
-
-    # Check if inout file exists
-    if [ ! -e "$input_file" ]; then
-    echo "File $input_file does not exist !!"
-    exit 1
-    fi
-    shift 2
-    ;;
     # DB name
     --db_name)
     db_name=$2
@@ -78,8 +49,6 @@ done
 IMAGE_NAME="themamaai.azurecr.io/cheese/cheese-explorer"
 FULL_IMAGE_NAME="${IMAGE_NAME}/${CHEESE_CUSTOMER}"
 
-filename=$(basename $input_file)
-
 CONFIG_FILE="${HOME}/.config/cheese/cheese-env-file.conf"
 
 if [ "$TESTING" = "true" ] ; then
@@ -93,6 +62,5 @@ docker run -u $UID -v /:/external -it \
   --env EXT="/external" \
   --env EXPLORER_CONFIG_FILE="${HOME}/.config/cheese/cheese-explorer-conf.yaml" \
   --env-file $CONFIG_FILE \
-  --env INPUT_PATH=$input_file \
   --env DB_NAME=$db_name \
    $FULL_IMAGE_NAME remove_database.py
