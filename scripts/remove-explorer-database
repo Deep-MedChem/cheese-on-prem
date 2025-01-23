@@ -80,11 +80,19 @@ FULL_IMAGE_NAME="${IMAGE_NAME}/${CHEESE_CUSTOMER}"
 
 filename=$(basename $input_file)
 
+CONFIG_FILE="${HOME}/.config/cheese/cheese-env-file.conf"
+
+if [ "$TESTING" = "true" ] ; then
+    CONFIG_FILE="${HOME}/.config/cheese/cheese-env-file-test.conf"
+fi
+
+
 docker run -u $UID -v /:/external -it \
   -w "/opt/cheese/cheese_explorer_app/on_prem" \
   --entrypoint "python" \
   --env EXT="/external" \
-  --env CONFIG_FILE="${HOME}/.config/cheese/cheese-explorer-conf.yaml" \
+  --env EXPLORER_CONFIG_FILE="${HOME}/.config/cheese/cheese-explorer-conf.yaml" \
+  --env-file $CONFIG_FILE \
   --env INPUT_PATH=$input_file \
-  --env DB_NAME=$db_name\
+  --env DB_NAME=$db_name \
    $FULL_IMAGE_NAME remove_database.py

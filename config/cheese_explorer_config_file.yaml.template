@@ -1,0 +1,20 @@
+DEFAULT_DATABASES:
+  test_mols: MY_DB
+MOLECULAR_PROPERTIES:
+- MolecularWeight
+- NumLipinskiHBD
+- NumLipinskiHBA
+- TotalPolarSurfaceArea
+- NumRotatableBonds
+- FractionCSP3
+- NumAromaticRings
+- LogP
+NUM_POINTS:
+  HIGH: 10000
+  LOW: 1000
+TRANSFORMERS:
+  active_pairs: Activity
+  espsim: Electrostatic
+  shapesim: Shape
+  tanimoto: Fingerprint
+VISUALISATION_DATA_PATH: /home/my_data_path
