@@ -2,9 +2,14 @@
 
 echo Downloading CHEESE images...
 REPO_NAME="themamaai.azurecr.io/cheese"
-docker login -u $CHEESE_CUSTOMER -p $CHEESE_PASSWORD $REPO_NAME
 
-# # Pull the CHEESE app images
+if [ "$CHEESE_CUSTOMER" = 'test' ] ; then
+docker login -u cheese-test -p $CHEESE_PASSWORD $REPO_NAME
+else
+docker login -u $CHEESE_CUSTOMER -p $CHEESE_PASSWORD $REPO_NAME
+fi
+
+# Pull the CHEESE app images
 docker system prune -f 
 docker pull "themamaai.azurecr.io/cheese/cheese-ui/${CHEESE_CUSTOMER}"
 docker pull "themamaai.azurecr.io/cheese/cheese-database/${CHEESE_CUSTOMER}"
