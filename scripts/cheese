@@ -6,6 +6,7 @@ show_help() {
   echo "Welcome to CHEESE !"
   echo "Usage: cheese [options]"
   echo "Commands:"
+  echo "  configure                    Update CHEESE configuration file"
   echo "  test                         Test CHEESE commands"
   echo "  generate-license-key         Generate CHEESE license key"
   echo "  start-server                 Run CHEESE server (API)"
@@ -52,6 +53,11 @@ while [[ $# -gt 0 ]]; do
     update-scripts)
       shift 1
       update-scripts $@
+      exit 0
+      ;;
+    configure)
+      shift 1
+      cheese-configure $@
       exit 0
       ;;
     update-env)
