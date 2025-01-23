@@ -13,7 +13,12 @@ set -e
 cd "${REPO_FOLDER}/scripts"
 echo Installing CHEESE scripts...
 
-mkdir $HOME/.local/bin
+
+# Make bin folder
+if [ -z "$HOME/.local/bin" ]; then
+    mkdir $HOME/.local/bin
+fi
+
 for file in *; do
   # Check if the file ends with .sh
   if [[ "$file" != *.sh ]]; then
