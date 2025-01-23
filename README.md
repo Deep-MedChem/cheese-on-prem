@@ -31,7 +31,8 @@ if [ -d "$HOME/.local/bin" ] ; then
 fi
 ```
 
-5. Test if the installation is working by running the command `cheese`
+5. Check if CHEESE is installed by running `cheese` 
+6. Test if the installation is working by running the command `cheese test` 
 
 
 ### CHEESE on-prem Docs
