@@ -6,7 +6,7 @@ TRANSFORMERS:
 
 DIM: "256"
 
-VISUALISATION_MODELS_PATH: "/data/on-prem/visualisation_models/models"
+VISUALISATION_MODELS_PATH: "/home/myuser/visualisation_models"
 
 OUTPUT_DIRECTORIES: 
   ENAMINE-REAL: "/data/enamine_real" 

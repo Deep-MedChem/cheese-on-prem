@@ -6,8 +6,6 @@ TRANSFORMERS:
 
 DIM: "256"
 
-VISUALISATION_MODELS_PATH: "/data/on-prem/visualisation_models/models"
-
 OUTPUT_DIRECTORIES: 
   CUSTOM: "/tmp/test_db" 
 
