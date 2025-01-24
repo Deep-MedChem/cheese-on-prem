@@ -127,7 +127,7 @@ check_container_exists $db_container
 
 # Get port from the database container
 exposed_db_port=$(get_port $db_container)
-
+echo "DB_PORT -->" $exposed_db_port
 # Exit if there are any further errors
 set -e
 
