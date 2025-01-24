@@ -32,8 +32,9 @@ and run `source ~/.bashrc`
 
 4. Run `bash install-cheese.sh --env_file <env_config_file>`. Where `<env_config_file>` is the path to your environment configuration file.
 
-5. Check if CHEESE is installed by running `cheese` 
-6. Test if the installation is working by running the command `cheese test` 
+5. Check if CHEESE is installed by running `cheese`
+6. Download the CHEESE Visualisation_models and put all the files in `$HOME/visualisation_models`. Set up the YAML config file `VISUALISATION_MODELS_PATH` to the same path as well.
+7. Test if the installation is working by running the command `cheese test` 
 
 
 ### CHEESE on-prem Docs
