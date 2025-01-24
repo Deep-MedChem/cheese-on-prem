@@ -64,7 +64,7 @@ env_file=$(convert_to_absolute_path $env_file)
 
 set -e
 
-ip_address=$(hostname --ip-address)
+ip_address=$(hostname)
 
 # Copy testing conf file
 cp "$PWD/config/cheese_test_config_file.yaml" "${HOME}/.config/cheese/cheese_test_config_file.yaml"
