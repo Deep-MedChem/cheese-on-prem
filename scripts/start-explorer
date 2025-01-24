@@ -53,7 +53,7 @@ done
 get_port(){
 
 local container_name="$1"
-docker inspect $container_name | grep HostPort | sort | uniq | grep -o [0-9] | tr -d '\n'
+docker inspect -f '{{range .NetworkSettings.Ports}}{{range .}}{{if eq .HostIp "0.0.0.0"}}{{.HostPort}}{{end}}{{end}}{{end}}' $container_name
 
 }
 
