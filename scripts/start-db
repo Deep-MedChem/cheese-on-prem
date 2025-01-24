@@ -95,7 +95,8 @@ FULL_IMAGE_NAME="${IMAGE_NAME}/${CHEESE_CUSTOMER}"
 echo "Using config file : $CONFIG_FILE"
 docker run -d -u $UID -v /:/data --env-file $CONFIG_FILE --name $db_container -p $DB_PORT --rm $FULL_IMAGE_NAME
 
-exposed_db_port=$(docker inspect $db_container | grep HostPort | sort | uniq | grep -o [0-9] | tr -d '\n')
+# exposed_db_port=$(docker inspect $db_container | grep HostPort | sort | uniq | grep -o [0-9] | tr -d '\n')
+exposed_db_port=$(docker inspect -f '{{range .NetworkSettings.Ports}}{{range .}}{{if eq .HostIp "0.0.0.0"}}{{.HostPort}}{{end}}{{end}}{{end}}' $db_container)
 echo Starting CHEESE database server...
 check_server $db_container $exposed_db_port
 
