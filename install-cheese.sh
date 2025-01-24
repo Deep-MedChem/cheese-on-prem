@@ -68,7 +68,6 @@ ip_address=$(hostname)
 
 # Copy testing conf file
 cp "$PWD/config/cheese_test_config_file.yaml" "${HOME}/.config/cheese/cheese_test_config_file.yaml"
-echo "XX" >> "${HOME}/.config/cheese/cheese_test_config_file.yaml"
 echo "VISUALISATION_MODELS_PATH: ${HOME}/visualisation_models" >> "${HOME}/.config/cheese/cheese_test_config_file.yaml"
 
 
@@ -81,7 +80,6 @@ if [ ! "$env_file" = "" ]; then
     echo "IP=$ip_address" >> "${HOME}/.config/cheese/cheese-env-file.conf";
     sed -i '/^$/d' "${HOME}/.config/cheese/cheese-env-file.conf"
     cp "${HOME}/.config/cheese/cheese-env-file.conf" "${HOME}/.config/cheese/cheese-env-file-test.conf"
-    cp "$PWD/config/cheese_test_config_file.yaml" "${HOME}/.config/cheese/cheese_test_config_file.yaml"
     echo "CONFIG_FILE=${HOME}/.config/cheese/cheese_test_config_file.yaml" >> "${HOME}/.config/cheese/cheese-env-file-test.conf";
     sed -i '/^$/d' "${HOME}/.config/cheese/cheese-env-file-test.conf"
 else
