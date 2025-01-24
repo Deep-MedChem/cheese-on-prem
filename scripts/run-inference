@@ -35,7 +35,6 @@ valid_smiles=false
 canonicalize_smiles=false
 index_type=auto
 skip_file_headers=true
-gpu_devices=0
 clustering_batch_size=10000
 
 CONFIG_FILE="${HOME}/.config/cheese/cheese-env-file.conf"
@@ -165,27 +164,33 @@ mkdir $NEW_OUTPUT_DIRECTORY || true
 echo "Running CHEESE inference with $index_type indexing ..."
 
 
+if [ -n "$gpu_devices" ]; then
+    echo "Running inference on GPU devices : $gpu_devices"
 
-if command -v nvidia-smi > /dev/null; then
-echo "GPU is available !"
+  if command -v nvidia-smi > /dev/null; then
+  echo "GPU is available !"
 
-docker run -u $UID -v /:/data -it \
-      --env CUPY_CACHE_DIR=/tmp \
-      --env NCCL_SHM_DISABLE=1 \
-      --env CUDA_VISIBLE_DEVICES=$gpu_devices \
-      --gpus all \
-      --env-file $CONFIG_FILE \
-      --rm $INFERENCE_IMAGE \
-      --index_type $index_type \
-      --input_file $DEST_INPUT_FILE \
-      --extension $EXTENSION \
-      --delimiter $DELIMITER \
-      --output_directory $OUTPUT_DIRECTORY --batch_size $batch_size --chunk_size $chunk_size --clustering_bs $clustering_batch_size --validate_smiles $valid_smiles --canonicalize_smiles $canonicalize_smiles --skip_headers $skip_file_headers
-      
+  docker run -u $UID -v /:/data -it \
+        --env CUPY_CACHE_DIR=/tmp \
+        --env NCCL_SHM_DISABLE=1 \
+        --env CUDA_VISIBLE_DEVICES=$gpu_devices \
+        --gpus all \
+        --env-file $CONFIG_FILE \
+        --rm $INFERENCE_IMAGE \
+        --index_type $index_type \
+        --input_file $DEST_INPUT_FILE \
+        --extension $EXTENSION \
+        --delimiter $DELIMITER \
+        --output_directory $OUTPUT_DIRECTORY --batch_size $batch_size --chunk_size $chunk_size --clustering_bs $clustering_batch_size --validate_smiles $valid_smiles --canonicalize_smiles $canonicalize_smiles --skip_headers $skip_file_headers
+        
+  else
+    echo "GPU is not available !"
+  fi
+
 
 else
 
-echo "GPU is not available ! Running inference on CPU"
+echo "Running inference on CPU"
 
 docker run -u $UID -v /:/data -it \
       --env CUPY_CACHE_DIR=/tmp \
