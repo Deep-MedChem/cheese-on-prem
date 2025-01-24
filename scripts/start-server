@@ -137,7 +137,7 @@ if [ "$TESTING" = "true" ] ; then
     CONFIG_FILE="${HOME}/.config/cheese/cheese-env-file-test.conf"
 fi
 
-docker run -u $UID -v /:/data -it --env DB_PORT=$exposed_db_port --env TESTING=True --env-file $CONFIG_FILE --name $api_container -p $API_PORT --rm $FULL_IMAGE_NAME
+docker run -d -u $UID -v /:/data -it --env DB_PORT=$exposed_db_port --env TESTING=True --env-file $CONFIG_FILE --name $api_container -p $API_PORT --rm $FULL_IMAGE_NAME
 exposed_api_port=$(get_port $api_container)
 
 # check_server $api_container $exposed_api_port
