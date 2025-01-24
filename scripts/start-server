@@ -82,8 +82,8 @@ check_server(){
   
   url="http://$IP:$my_db_port/test"
 
-  # Set the timeout duration (3 mins seconds)
-  timeout_duration=150
+  # Set the timeout duration (5 mins)
+  timeout_duration=300
 
   # Start time for timeout check
   start_time=$(date +%s)
