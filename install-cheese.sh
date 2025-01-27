@@ -77,6 +77,9 @@ if [ ! "$env_file" = "" ]; then
     echo "IP=$ip_address" >> "${HOME}/.config/cheese/cheese-env-file.conf";
     echo "CONFIG_FILE=${HOME}/.config/cheese/cheese_config_file.yaml" >> "${HOME}/.config/cheese/cheese-env-file.conf";
     sed -i '/^$/d' "${HOME}/.config/cheese/cheese-env-file.conf"
+
+    echo "OUTPUT_DIRECTORIES:" >> "${HOME}/.config/cheese/cheese_config_file.yaml";
+    echo "  TEST: '$PWD/tests/test_db'" >> "${HOME}/.config/cheese/cheese_config_file.yaml";
 else
     exit "Please specify an environment configuration file. To do that, please modify the template in config/cheese-env.conf.template"    
 

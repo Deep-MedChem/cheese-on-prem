@@ -6,13 +6,9 @@ TRANSFORMERS:
 
 DIM: "256"
 
-OUTPUT_DIRECTORIES: 
-  TEST: "/tmp/test_db" 
-
 DELIMITERS:
   TEST: ","
 
 INDEX_TYPES:
   TEST: "in_memory"
-
 

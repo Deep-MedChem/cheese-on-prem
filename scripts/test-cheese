@@ -9,6 +9,8 @@ rm -rf /tmp/test_db
 
 cheese run-inference --input_file "${REPO_FOLDER}/tests/test_inference.csv" --dest "/tmp/test_db" --index_type in_memory --chunk_size 100 --batch_size 32 --valid_smiles 'false' --canonicalize_smiles 'false' --skip_file_headers 'false'
 echo ""
+# rm -rf /tmp/test_db
+exit 1
 
 echo "TESTING [2/6] : Starting CHEESE server"
 cheese start-server
