@@ -119,4 +119,4 @@ export_env_vars "${HOME}/.config/cheese/cheese-env-file.conf"
 cd "${REPO_FOLDER}/scripts"
 bash update-scripts
 
-# update-images
+update-images
