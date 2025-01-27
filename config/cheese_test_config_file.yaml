@@ -7,12 +7,12 @@ TRANSFORMERS:
 DIM: "256"
 
 OUTPUT_DIRECTORIES: 
-  CUSTOM: "/tmp/test_db" 
+  TEST: "/tmp/test_db" 
 
 DELIMITERS:
-  CUSTOM: ","
+  TEST: ","
 
 INDEX_TYPES:
-  CUSTOM: "in_memory"
+  TEST: "in_memory"
 
 

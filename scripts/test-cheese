@@ -3,8 +3,11 @@ set -e
 
 export TESTING="true"
 
+random_uuid=$(uuidgen)
+test_folder_name="${USER}_cheese_test_${random_uuid}"
+
 echo "TESTING [1/6] : Testing CHEESE inference..."
-rm -rf "/tmp/test_db"
+
 cheese run-inference --input_file "${REPO_FOLDER}/tests/test_inference.csv" --dest "/tmp/test_db" --index_type in_memory --chunk_size 100 --batch_size 32 --valid_smiles 'false' --canonicalize_smiles 'false' --skip_file_headers 'false'
 echo ""
 
@@ -12,7 +15,7 @@ echo "TESTING [2/6] : Starting CHEESE server"
 cheese start-server
 sleep 10
 echo Making test directory
-mkdir /tmp/cheese_test || true
+mkdir -p /tmp/$test_folder_name
 echo ""
 
 echo "TESTING [3/6] : Testing CHEESE embeddings..."
@@ -20,16 +23,16 @@ cheese embeddings-cpu --input_file "${REPO_FOLDER}/tests/test_mols.csv" --dest_f
 echo ""
 
 echo "TESTING [4/6] : Testing CHEESE search..."
-cheese search --input_file "${REPO_FOLDER}/tests/test_mols.csv" --output_file /tmp/cheese_test/search_results.csv --db_names CUSTOM --search_type espsim_electrostatic --search_quality 'fast' --n_neighbors 50
+cheese search --input_file "${REPO_FOLDER}/tests/test_mols.csv" --output_file /tmp/$test_folder_name/search_results.csv --db_names TEST --search_type espsim_electrostatic --search_quality 'fast' --n_neighbors 50
 
 echo ""
 echo "TESTING [5/6] : Testing CHEESE visualize..."
-cheese visualize --input_file "${REPO_FOLDER}/tests/test_mols.csv" --dest_folder /tmp/cheese_test/visualize --search_type morgan --visualisation_method pca
+cheese visualize --input_file "${REPO_FOLDER}/tests/test_mols.csv" --dest_folder /tmp/$test_folder_name/visualize --search_type morgan --visualisation_method pca
 echo ""
 
 
 echo "TESTING [6/6] : Stopping CHEESE servers..."
-rm -rf /tmp/cheese_test && rm -rf "/tmp/test_db" || true
+rm -rf /tmp/$test_folder_name || true
 cheese stop-servers
 
 

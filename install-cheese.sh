@@ -67,8 +67,7 @@ set -e
 ip_address=$(hostname)
 
 # Copy testing conf file
-cp "$PWD/config/cheese_test_config_file.yaml" "${HOME}/.config/cheese/cheese_test_config_file.yaml"
-
+cp "$PWD/config/cheese_test_config_file.yaml" "${HOME}/.config/cheese/cheese_config_file.yaml"
 # Set from provided env_file
 if [ ! "$env_file" = "" ]; then
     echo Setting from file $env_file
@@ -76,10 +75,8 @@ if [ ! "$env_file" = "" ]; then
     echo "" >> "${HOME}/.config/cheese/cheese-env-file.conf";
     echo "REPO_FOLDER=$PWD" >> "${HOME}/.config/cheese/cheese-env-file.conf";
     echo "IP=$ip_address" >> "${HOME}/.config/cheese/cheese-env-file.conf";
+    echo "CONFIG_FILE=${HOME}/.config/cheese/cheese_config_file.yaml" >> "${HOME}/.config/cheese/cheese-env-file.conf";
     sed -i '/^$/d' "${HOME}/.config/cheese/cheese-env-file.conf"
-    cp "${HOME}/.config/cheese/cheese-env-file.conf" "${HOME}/.config/cheese/cheese-env-file-test.conf"
-    echo "CONFIG_FILE=${HOME}/.config/cheese/cheese_test_config_file.yaml" >> "${HOME}/.config/cheese/cheese-env-file-test.conf";
-    sed -i '/^$/d' "${HOME}/.config/cheese/cheese-env-file-test.conf"
 else
     exit "Please specify an environment configuration file. To do that, please modify the template in config/cheese-env.conf.template"    
 
