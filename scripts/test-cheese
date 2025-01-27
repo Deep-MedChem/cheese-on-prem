@@ -1,8 +1,6 @@
 #!/bin/bash
 set -e
 
-export TESTING="true"
-
 random_uuid=$(uuidgen)
 test_folder_name="${USER}_cheese_test_${random_uuid}"
 
