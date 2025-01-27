@@ -158,7 +158,7 @@ INFERENCE_IMAGE="themamaai.azurecr.io/cheese/cheese_inference/${CHEESE_CUSTOMER}
 OUTPUT_DIRECTORY="/data/${DEST}"
 NEW_OUTPUT_DIRECTORY="${DEST}"
 echo Saving outputs to $NEW_OUTPUT_DIRECTORY
-mkdir $NEW_OUTPUT_DIRECTORY || true
+mkdir -p $NEW_OUTPUT_DIRECTORY
 
 
 echo "Running CHEESE inference with $index_type indexing ..."
