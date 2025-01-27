@@ -1,0 +1,8 @@
+{
+    "transformers_directory": null,
+    "input_file": "/data//tmp/test_db/database.txt",
+    "output_directory": "/data/tmp/test_db",
+    "batch_size": 32,
+    "chunk_size": 100,
+    "device_pool": []
+}

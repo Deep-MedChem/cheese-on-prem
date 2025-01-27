@@ -1,0 +1,3 @@
+#!/bin/bash
+
+nano ${HOME}/.config/cheese/cheese_license_file.json

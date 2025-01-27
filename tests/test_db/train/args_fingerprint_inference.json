@@ -1,0 +1,9 @@
+{
+    "fingerprints": [
+        "morgan2048"
+    ],
+    "input_file": "/data//tmp/test_db/database.txt",
+    "output_directory": "/data/tmp/test_db",
+    "chunk_size": 10000,
+    "n_jobs": 1
+}

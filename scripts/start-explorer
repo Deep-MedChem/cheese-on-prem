@@ -82,6 +82,6 @@ docker run -d -u $UID -v /:/external -it -p $EXPLORER_PORT \
   --name $explorer_container $FULL_IMAGE_NAME
 
 echo "Starting cheese Explorer..."
-sleep 15
+sleep 30
 port=$(get_port $explorer_container)
 echo CHEESE Explorer is available here : http://"$IP":"$port"

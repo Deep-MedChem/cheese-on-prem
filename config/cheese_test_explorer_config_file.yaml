@@ -1,12 +1,12 @@
 TRANSFORMERS:
-  espsim_electrostatic: "Electrostatic"
-  espsim_shape: "Shape"
-  morgan: "Fingerprint"
-  active_pairs: "Activity"
+  active_pairs: Activity
+  espsim: Electrostatic
+  shapesim: Shape
+  tanimoto: Fingerprint
 
 NUM_POINTS:
-  LOW: 25000
-  HIGH: 100000
+  LOW: 1000
+  HIGH: 50000
 
 DEFAULT_DATABASES:
   "chembl_34": "ChEMBL 34"

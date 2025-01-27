@@ -66,8 +66,12 @@ set -e
 
 ip_address=$(hostname)
 
-# Copy testing conf file
+# Copy testing conf files
 cp "$PWD/config/cheese_test_config_file.yaml" "${HOME}/.config/cheese/cheese_config_file.yaml"
+cp "$PWD/config/cheese_test_explorer_config_file.yaml" "${HOME}/.config/cheese/cheese-explorer-conf.yaml"
+
+# Setting license file
+echo "" > "${HOME}/.config/cheese/cheese_license_file.json"
 # Set from provided env_file
 if [ ! "$env_file" = "" ]; then
     echo Setting from file $env_file
@@ -76,10 +80,14 @@ if [ ! "$env_file" = "" ]; then
     echo "REPO_FOLDER=$PWD" >> "${HOME}/.config/cheese/cheese-env-file.conf";
     echo "IP=$ip_address" >> "${HOME}/.config/cheese/cheese-env-file.conf";
     echo "CONFIG_FILE=${HOME}/.config/cheese/cheese_config_file.yaml" >> "${HOME}/.config/cheese/cheese-env-file.conf";
+    echo "CHEESE_LICENSE_FILE=${HOME}/.config/cheese/cheese_license_file.json" >> "${HOME}/.config/cheese/cheese-env-file.conf";
     sed -i '/^$/d' "${HOME}/.config/cheese/cheese-env-file.conf"
 
     echo "OUTPUT_DIRECTORIES:" >> "${HOME}/.config/cheese/cheese_config_file.yaml";
     echo "  TEST: '$PWD/tests/test_db'" >> "${HOME}/.config/cheese/cheese_config_file.yaml";
+
+    # Initializing license file
+
 else
     exit "Please specify an environment configuration file. To do that, please modify the template in config/cheese-env.conf.template"    
 
@@ -111,4 +119,4 @@ export_env_vars "${HOME}/.config/cheese/cheese-env-file.conf"
 cd "${REPO_FOLDER}/scripts"
 bash update-scripts
 
-update-images
+# update-images

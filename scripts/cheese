@@ -21,6 +21,7 @@ show_help() {
   echo "  update-scripts               Update CHEESE scripts"
   echo "  update-env                   Update CHEESE environment file"
   echo "  update-images                Update CHEESE Docker Images"
+  echo "  update-license               Update CHEESE license file"
   echo "  -h, --help                   Show this help message"
   exit 1
 }
@@ -53,6 +54,11 @@ while [[ $# -gt 0 ]]; do
     update-scripts)
       shift 1
       update-scripts $@
+      exit 0
+      ;;
+    update-license)
+      shift 1
+      update-license $@
       exit 0
       ;;
     configure)
