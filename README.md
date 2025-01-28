@@ -42,7 +42,9 @@ and run `source ~/.bashrc`
 
 7. Check if CHEESE is installed by running `cheese`
 
-8. Test if the installation is working by running the command `cheese test` 
+8. Update your license file by running `cheese update-license` and paste the license file contents there. Please follow the instructions [here](https://cheese-docs.deepmedchem.com/on-prem-cli/#cheese-license-file).
+
+9. Test if the installation is working by running the command `cheese test` 
 
 
 ### CHEESE on-prem Docs
