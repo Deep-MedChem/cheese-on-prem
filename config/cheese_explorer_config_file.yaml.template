@@ -1,28 +1,20 @@
 TRANSFORMERS:
-  espsim_electrostatic: "Electrostatic"
-  espsim_shape: "Shape"
-  morgan: "Fingerprint"
-  active_pairs: "Activity"
+  espsim: Electrostatic
+  shapesim: Shape
+  tanimoto: Fingerprint
+  active_pairs: Activity
 
 NUM_POINTS:
   LOW: 25000
   HIGH: 100000
 
 DEFAULT_DATABASES:
+  "zinc22": "ZINC22"
   "chembl_34": "ChEMBL 34"
-  "drugbank_5": "DrugBank 5"
   "eXplore_diverse_2024": "eXplore Diverse 2024"
   "chemriya": "CHEMRIYA 1.2"
-  "GDB17": "GDB17"
   "pubchem_2024": "PubChem 2024"
-  "SureChEMBL_2024": "SureChEMBL 2024"
-  "zinc22": "ZINC22"
-  "chebi": "ChEBI"
-  "coconut": "COCONUT"
-  "foodb_2024": "FooDB"
-  "lotus": "LOTUS 2021"
-  "synple4": "Synple Chem 4"
-  "mcule": "Mcule 2024"
+  "drugbank_5": "DrugBank 5"
 
 MOLECULAR_PROPERTIES:
   - "MolecularWeight"
