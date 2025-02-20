@@ -175,7 +175,7 @@ if [ -n "$gpu_devices" ]; then
         --env NCCL_SHM_DISABLE=1 \
         --env CUDA_VISIBLE_DEVICES=$gpu_devices \
         --gpus all \
-        --env-file ${HOME}/.config/cheese/cheese-env-file.conf \
+        --env-file $CONFIG_FILE\
         --rm $INFERENCE_IMAGE \
         --index_type $index_type \
         --input_file $DEST_INPUT_FILE \
