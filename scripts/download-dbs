@@ -72,7 +72,7 @@ extract_data(){
 mkdir -p $dest
 echo  Downloading files to $dest ... 
 
-scp $CHEESE_CUSTOMER@files.themama.ai:/ $dest
+scp -r $CHEESE_CUSTOMER@files.themama.ai:/ $dest
 
 
 extracted_dir=$(find $dest -type f -name "*.tar-00" -exec dirname {} \; | sort -u | head -n 1)
