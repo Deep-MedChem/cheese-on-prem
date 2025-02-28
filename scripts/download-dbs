@@ -26,6 +26,13 @@ convert_to_absolute_path() {
 }
 
 
+# Check if no arguments are passed
+if [ $# -eq 0 ]; then
+    # Show help if no arguments
+    show_help
+    exit 0
+fi
+
 # Parse command-line arguments manually
 while [[ $# -gt 0 ]]; do
   case "$1" in
