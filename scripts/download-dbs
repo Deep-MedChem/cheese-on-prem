@@ -5,7 +5,7 @@ set -e
 show_help() {
   echo "Usage: cheese download-dbs [options]"
   echo "Options:"
-  echo "  --dest     Destination folder where to download the databases [Default : '/cheese_data'] "  
+  echo "  --dest     Destination folder where to download the databases"  
   echo "  -h, --help       Show this help message"
   exit 1
 }
