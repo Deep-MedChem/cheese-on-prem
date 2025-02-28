@@ -31,7 +31,7 @@ convert_to_absolute_path() {
 # Parse command-line arguments manually
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --input_file)
+    --dest)
     if [ -z "$2" ]; then
         echo "No destination folder was specified!!" 
     fi
