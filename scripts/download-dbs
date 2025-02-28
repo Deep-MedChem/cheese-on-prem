@@ -72,7 +72,7 @@ extract_data(){
 mkdir -p $dest
 echo  Downloading files to $dest ... 
 
-# scp -r $CHEESE_CUSTOMER@files.themama.ai:/ $dest
+scp -r $CHEESE_CUSTOMER@files.themama.ai:/ $dest
 
 
 cd $dest/$CHEESE_CUSTOMER
