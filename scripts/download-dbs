@@ -1,0 +1,85 @@
+#!/bin/bash
+set -e
+
+# Function to display usage
+show_help() {
+  echo "Usage: cheese download-dbs [options]"
+  echo "Options:"
+  echo "  --dest     Destination folder where to download the databases [Default : '/cheese_data'] "  
+  echo "  -h, --help       Show this help message"
+  exit 1
+}
+
+
+dest="/cheese_data"
+
+# Helpers 
+convert_to_absolute_path() {
+    local input_path="$1"
+
+    # Check if the path is already absolute
+    if [[ "$input_path" == /* ]]; then
+        # It's already absolute, just return it
+        echo "$input_path"
+    else
+        # It's a relative path, convert it to absolute
+        echo "$(pwd)/$input_path"
+    fi
+}
+
+
+# Parse command-line arguments manually
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --input_file)
+    if [ -z "$2" ]; then
+        echo "No destination folder was specified!!" 
+    fi
+    dest=$(convert_to_absolute_path $2)
+    shift 2
+    ;;
+    -h|--help)
+      show_help
+      ;;
+    *)
+      echo "Unknown option: $1"
+      show_help
+      ;;
+  esac
+done
+
+
+extract_data(){
+  local source_dir=$1
+  local parent=$2
+
+  for file in $source_dir/*.tar*; do
+
+  cat $file >> "$source_dir/my_data.tar.gz"
+  file_md5sum=$(md5sum $file | awk '{ print $1 }')
+  $file_md5sum
+  # rm -rf $file
+  done
+
+  cd $source_dir
+
+  echo tar -xzvf my_data.tar.gz
+  echo rm -rf my_data.tar.gz
+
+  cd $parent
+}
+
+mkdir -p $dest
+echo  Downloading files to $dest ... 
+
+scp $CHEESE_CUSTOMER@files.themama.ai:/* $dest
+
+cd $dest
+for folder in *; do
+  extract_data $folder $dest
+
+done
+
+
+
+
