@@ -52,17 +52,19 @@ done
 extract_data(){
   local source_dir=$1
   local parent=$2
-
+  rm -rf "$source_dir/my_data.tar.gz"
+  echo "Extracting data in folder $source_dir"
   for file in $source_dir/*.tar*; do
-
+  echo "Extracting file $file"
   cat $file >> "$source_dir/my_data.tar.gz"
-  # rm -rf $file
+  echo "Removing file $file"
+  rm -rf $file
   done
 
   cd $source_dir
 
-  echo tar -xzvf my_data.tar.gz
-  echo rm -rf my_data.tar.gz
+  tar -xzvf my_data.tar.gz
+  rm -rf my_data.tar.gz
 
   cd $parent
 }
@@ -73,15 +75,14 @@ echo  Downloading files to $dest ...
 # scp -r $CHEESE_CUSTOMER@files.themama.ai:/ $dest
 
 
-extracted_dir=$(find $dest -type f -name "*.tar-00" -exec dirname {} \; | sort -u | head -n 1)
-
-cd $extracted_dir
+cd $dest/$CHEESE_CUSTOMER
 
 for folder in *; do
-  extract_data $folder $extracted_dir
-
+  extract_data $folder $dest/$CHEESE_CUSTOMER
+  folder_basename=$(basename $folder)
+  mv $dest/$CHEESE_CUSTOMER/$folder_basename/$folder_basename $dest/$CHEESE_CUSTOMER/$folder_basename
+  mv $dest/$CHEESE_CUSTOMER/$folder_basename/md5_checksum.txt $dest/$CHEESE_CUSTOMER/$folder_basename/md5_checksum.txt   
 done
-
 
 
 
