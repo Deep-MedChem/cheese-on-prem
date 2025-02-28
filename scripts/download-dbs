@@ -56,8 +56,6 @@ extract_data(){
   for file in $source_dir/*.tar*; do
 
   cat $file >> "$source_dir/my_data.tar.gz"
-  file_md5sum=$(md5sum $file | awk '{ print $1 }')
-  $file_md5sum
   # rm -rf $file
   done
 
