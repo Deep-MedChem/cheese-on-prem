@@ -72,7 +72,7 @@ extract_data(){
 mkdir -p $dest
 echo  Downloading files to $dest ... 
 
-scp $CHEESE_CUSTOMER@files.themama.ai:/* $dest
+scp $CHEESE_CUSTOMER@files.themama.ai:/ $dest
 
 cd $dest
 for folder in *; do
