@@ -58,7 +58,7 @@ extract_data(){
   echo "Extracting file $file"
   cat $file >> "$source_dir/my_data.tar.gz"
   echo "Removing file $file"
-  # rm -rf $file
+  rm -rf $file
   done
 
   cd $source_dir
@@ -72,21 +72,21 @@ extract_data(){
 mkdir -p $dest
 echo  Downloading files to $dest ... 
 
-# scp -r $CHEESE_CUSTOMER@files.themama.ai:/ $dest
+scp -r $CHEESE_CUSTOMER@files.themama.ai:/ $dest
 
 
-mv $dest/$CHEESE_CUSTOMER $dest
+mv $dest/$CHEESE_CUSTOMER/* $dest || true
 
+rm -rf $dest/$CHEESE_CUSTOMER
 
+cd $dest
 for folder in *; do
-  if find "$folder" -maxdepth 1 -type f -name "*.tar-00" | grep -q .; then
+  if find "$folder" -maxdepth 1 -type f -name "*.tar*" | grep -q .; then
     extract_data $folder $dest
     folder_basename=$(basename $folder)
-    mv $dest/$folder_basename/$folder_basename $dest/$folder_basename
-    mv $dest/$folder_basename/md5_checksum.txt $dest/$folder_basename/md5_checksum.txt   
-    # rm -rf $dest/$CHEESE_CUSTOMER
+    mv $dest/$folder_basename/$folder_basename/* $dest/$folder_basename   
+    rm -rf $dest/$folder_basename/$folder_basename/
   fi
 done
-
 
 
