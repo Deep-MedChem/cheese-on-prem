@@ -77,11 +77,14 @@ scp -r $CHEESE_CUSTOMER@files.themama.ai:/ $dest
 
 cd $dest/$CHEESE_CUSTOMER
 
+
 for folder in *; do
-  extract_data $folder $dest/$CHEESE_CUSTOMER
-  folder_basename=$(basename $folder)
-  mv $dest/$CHEESE_CUSTOMER/$folder_basename/$folder_basename $dest/$CHEESE_CUSTOMER/$folder_basename
-  mv $dest/$CHEESE_CUSTOMER/$folder_basename/md5_checksum.txt $dest/$CHEESE_CUSTOMER/$folder_basename/md5_checksum.txt   
+  if find "$folder" -maxdepth 1 -type f -name "*.tar-00" | grep -q .; then
+    extract_data $folder $dest/$CHEESE_CUSTOMER
+    folder_basename=$(basename $folder)
+    mv $dest/$CHEESE_CUSTOMER/$folder_basename/$folder_basename $dest/$CHEESE_CUSTOMER/$folder_basename
+    mv $dest/$CHEESE_CUSTOMER/$folder_basename/md5_checksum.txt $dest/$CHEESE_CUSTOMER/$folder_basename/md5_checksum.txt   
+  fi
 done
 
 
