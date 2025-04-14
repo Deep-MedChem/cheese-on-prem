@@ -9,7 +9,7 @@ show_help() {
   echo "  --output_file      Destination file of search results"
   echo "  --search_type    Search type : 'morgan', 'espsim_shape','espsim_electrostatic', 'active_pairs','consensus' (Default : 'morgan')"
   echo "  --n_neighbors    Number of neighbors"  
-  echo "  --search_quality    Speed/Accuracy Tradeoff : 'fast', 'accurate', 'very accurate'" 
+  echo "  --search_quality    Speed/Accuracy Tradeoff : 'fast', 'accurate', 'very_accurate'" 
   echo "  --db_names    Names of the databases to search joined by ',' (Default 'ZINC15,ENAMINE-REAL')"  
   echo "  --port             CHEESE Server port on which to run the computation"
   echo "  -h, --help       Show this help message"
@@ -107,6 +107,11 @@ while [[ $# -gt 0 ]]; do
       ;;
     --search_quality)
       search_quality=$2
+
+      if [ "$search_quality" = "very_accurate" ]; then
+      search_quality='very%20accurate'
+      fi
+
       shift 2
       ;;
     --n_neighbors)
