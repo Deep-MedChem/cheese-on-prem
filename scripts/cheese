@@ -23,6 +23,7 @@ show_help() {
   echo "  update-images                Update CHEESE Docker Images"
   echo "  update-license               Update CHEESE license file"
   echo "  download-dbs                 Download CHEESE indexed databases"
+  echo "  extract-dbs                 Extracted downloaded CHEESE indexed databases"
   echo "  -h, --help                   Show this help message"
   exit 1
 }
@@ -125,6 +126,11 @@ while [[ $# -gt 0 ]]; do
     download-dbs)
       shift 1
       download-dbs $@
+      exit 0
+      ;;
+    extract-dbs)
+      shift 1
+      extract-dbs $@
       exit 0
       ;;
     -h|--help)
