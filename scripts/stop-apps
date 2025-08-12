@@ -26,3 +26,5 @@ done
 # Stop all CHEESE UI containers
 substring="${USER}_cheese_ui"
 docker ps -q -a --filter "name=$substring" | xargs -r docker rm -f
+substring="${USER}_cheese_new_ui"
+docker ps -q -a --filter "name=$substring" | xargs -r docker rm -f

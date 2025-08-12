@@ -1,0 +1,96 @@
+#!/bin/bash
+UI_PORT=3001
+random_uuid=$(uuidgen)
+ui_container="${USER}_cheese_new_ui_${random_uuid}"
+
+# Function to display usage
+show_help() {
+  echo "Usage: cheese start-new-app [options]"
+  echo "Options:"
+  echo "  --api_port   Specify API port (Optional)"
+  echo "  -p, --port      Specify UI port (Optional)"
+  echo "  -h, --help       Show this help message"
+  exit 1
+}
+
+# Parse command-line arguments manually
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    -p|--port)
+      port="$2"
+      UI_PORT=$port:3001
+      shift 2
+      ;;
+    --api_port)
+      api_port="$2"
+      shift 2
+      ;;
+    -h|--help)
+      show_help
+      ;;
+    *)
+      echo "Unknown option: $1"
+      exit 1
+      show_help
+      ;;
+  esac
+done
+
+# Function to get Port number of container
+
+get_port(){
+
+local container_name="$1"
+docker inspect -f '{{range .NetworkSettings.Ports}}{{range .}}{{if eq .HostIp "0.0.0.0"}}{{.HostPort}}{{end}}{{end}}{{end}}' $container_name
+
+}
+
+# Function to get host IP of a container
+
+get_host(){
+
+local container_name="$1"
+docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' $container_name
+
+}
+
+
+check_cheese_server(){
+# Get all containers with a name containing "cheese_api"
+local container_substring="${USER}_cheese_api"
+containers=$(docker ps -a --format '{{.Names}}' | grep "$container_substring")
+# Check if we have any containers with that name
+if [[ -n "$containers" ]]; then
+  # Pick a random container from the list
+  random_container=$(echo "$containers" | shuf -n 1)
+  api_port=$(get_port $random_container)
+  echo Found cheese server running on port $api_port
+else
+  echo "No CHEESE Server is running. Please run cheese start-server !!"
+  exit 1
+fi
+}
+
+if [ -z "$api_port" ]; then
+echo "No CHEESE server port was specified, checking available CHEESE servers..."
+      
+check_cheese_server
+fi
+set -e
+
+IMAGE_NAME="themamaai.azurecr.io/cheese/cheese-new-ui"
+
+FULL_IMAGE_NAME="${IMAGE_NAME}/${CHEESE_CUSTOMER}"
+
+API_URL="http://"$IP":"$api_port
+
+
+echo "Running cheese new UI ..."
+docker run -u $UID -d --env CHEESE_API=$API_URL \
+  --env CHEESE_UI_USER_SECRET=XXX \
+  --env SUPABASE_URL=https://XXX \
+  --env SUPABASE_ANON_KEY=XXX \
+  --env SUPABASE_SERVICE_ROLE_KEY=XXX \
+  --name $ui_container -p $UI_PORT --rm $FULL_IMAGE_NAME
+port=$(get_port $ui_container)
+echo CHEESE new UI is available here : http://"$IP":"$port"

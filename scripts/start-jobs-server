@@ -1,0 +1,169 @@
+#!/bin/bash
+
+API_PORT=8001
+random_uuid=$(uuidgen)
+api_container="${USER}_cheese_api_${random_uuid}"
+db_container="${USER}_cheese_db_${random_uuid}"
+jobs_db_container="${USER}_cheese_jobs_app_${random_uuid}"
+jobs_exec_container="${USER}_cheese_jobs_exec_${random_uuid}"
+download_exec_container="${USER}_cheese_download_exec_${random_uuid}"
+
+# Function to display usage
+show_help() {
+  echo "Usage: cheese start-jobs-server [options]"
+  echo "Options:"
+  echo "  --db_container   Specify db_container (Default : uuid_cheese_db)"
+  echo "  --jobs_db_container   Specify jobs_db_container (Default : uuid_cheese_jobs_app)"
+  echo "  --jobs_exec_container   Specify jobs_exec_container (Default : uuid_cheese_jobs_exec)"
+  echo "  --download_exec_container   Specify download_exec_container (Default : uuid_cheese_download_exec)"
+  echo "  --api_container   Specify api_container (Default : uuid_cheese_api)"
+  echo "  -p, --port      Specify server port (Optional)"
+  echo "  -h, --help       Show this help message"
+  exit 1
+}
+
+# Parse command-line arguments manually
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    -p|--port)
+      port="$2"
+      API_PORT=$port:8001
+      shift 2
+      ;;
+    --db_container)
+      db_container="$2"
+      shift 2
+      ;;
+    --jobs_db_container)
+      jobs_db_container="$2"
+      shift 2
+      ;;
+    --jobs_exec_container)
+      jobs_exec_container="$2"
+      shift 2
+      ;;
+    --download_exec_container)
+      download_exec_container="$2"
+      shift 2
+      ;;
+    --api_container)
+      api_container="$2"
+      shift 2
+      ;;
+    -h|--help)
+      show_help
+      ;;
+    *)
+      echo "Unknown option: $1"
+      exit 1
+      show_help
+      ;;
+  esac
+done
+
+
+# Function to get Port number of container
+
+get_port(){
+
+local container_name="$1"
+# docker inspect $container_name | grep HostPort | sort | uniq | grep -o [0-9] | tr -d '\n'
+docker inspect -f '{{range .NetworkSettings.Ports}}{{range .}}{{if eq .HostIp "0.0.0.0"}}{{.HostPort}}{{end}}{{end}}{{end}}' $container_name
+}
+
+
+# Function to check if a Docker container exists
+check_container_exists() {
+
+    local container_name="$1"
+    
+    # Check if the container exists using docker inspect
+    if docker inspect "$container_name" > /dev/null 2>&1; then
+        echo "Container '$container_name' exists."
+    else
+        set -e
+        start-jobs-db --db_container $db_container --jobs_db_container $jobs_db_container --jobs_exec_container $jobs_exec_container --download_exec_container $download_exec_container
+    fi
+
+}
+
+# Function to get host IP of a container
+
+get_host(){
+
+local container_name="$1"
+docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' $container_name
+
+}
+
+check_server(){
+  local my_db_container=$1
+  local my_db_port=$2
+  
+  url="http://$IP:$my_db_port/test"
+
+  # Set the timeout duration (5 mins)
+  timeout_duration=300
+
+  # Start time for timeout check
+  start_time=$(date +%s)
+
+
+  # Loop until the curl command succeeds or timeout occurs
+  while true; do
+    # Try the curl command (replace with your actual curl command)
+    curl -s --fail "$url" -o /dev/null && break
+
+    db_container_state=$(docker container inspect -f '{{.State.Running}}' $my_db_container)
+    
+    if [ ! "$db_container_state" == "true" ]; then
+    # If strings are equal
+    echo "CHEESE DB server is down !"
+    exit 1
+    fi
+
+    # Check if the elapsed time exceeds the timeout duration
+    current_time=$(date +%s)
+    elapsed_time=$((current_time - start_time))
+
+    if [ "$elapsed_time" -ge "$timeout_duration" ]; then
+      echo "Timeout reached after $elapsed_time seconds."
+      docker rm -f $my_db_container > /dev/null 2>&1
+      exit 1
+    fi
+  done
+
+
+}
+
+IMAGE_NAME="themamaai.azurecr.io/cheese/cheese-api"
+
+
+# Local testing
+FULL_IMAGE_NAME="${IMAGE_NAME}/${CHEESE_CUSTOMER}"
+
+# Check if a container exists, otherwise create it
+check_container_exists $db_container
+
+# Get port from the database container
+exposed_db_port=$(get_port $db_container)
+exposed_jobs_db_port=$(get_port $jobs_db_container)
+echo "DB_PORT -->" $exposed_db_port
+echo "JOBS_DB_PORT -->" $exposed_jobs_db_port
+# Exit if there are any further errors
+set -e
+
+CONFIG_FILE="${HOME}/.config/cheese/cheese-env-file.conf"
+
+if [ "$TESTING" = "true" ] ; then
+    CONFIG_FILE="${HOME}/.config/cheese/cheese-env-file-test.conf"
+fi
+
+docker run -d -u $UID -v /:/data -it --env DB_PORT=$exposed_db_port --env JOBS_DB_PORT=$exposed_jobs_db_port --env-file $CONFIG_FILE --name $api_container -p $API_PORT --rm $FULL_IMAGE_NAME
+exposed_api_port=$(get_port $api_container)
+
+# check_server $api_container $exposed_api_port
+
+
+echo "CHEESE API is available here : http://$IP:$exposed_api_port"
+echo Container name : $api_container
