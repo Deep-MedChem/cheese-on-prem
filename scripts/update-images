@@ -10,8 +10,33 @@ docker login -u $CHEESE_CUSTOMER -p $CHEESE_PASSWORD $REPO_NAME
 fi
 
 # Pull the CHEESE app images
-docker pull "themamaai.azurecr.io/cheese/cheese-ui/${CHEESE_CUSTOMER}"
-docker pull "themamaai.azurecr.io/cheese/cheese-database/${CHEESE_CUSTOMER}"
-docker pull "themamaai.azurecr.io/cheese/cheese-api/${CHEESE_CUSTOMER}"
-docker pull "themamaai.azurecr.io/cheese/cheese_inference/${CHEESE_CUSTOMER}"
-docker pull "themamaai.azurecr.io/cheese/cheese-explorer/${CHEESE_CUSTOMER}"
+echo "Images included in package :" $CHEESE_PACKAGE
+echo "To change the package contents please use cheese update-env"
+read -p "Do you want to pull the latest images? (y/n)" answer
+
+case "$answer" in
+    [Yy]* )
+        echo "Pulling the images according to the above package."
+        IFS=',' read -ra strings <<< "$CHEESE_PACKAGE"
+
+        for image_name in "${strings[@]}"; do
+            echo "Pulling $image_name"
+            docker pull "themamaai.azurecr.io/cheese/$image_name/${CHEESE_CUSTOMER}"
+
+        done
+        ;;
+    [Nn]* )
+        exit 0
+        ;;
+    * )
+        echo "Invalid response. Please enter y or n."
+        ;;
+esac
+
+
+
+# docker pull "themamaai.azurecr.io/cheese/cheese-ui/${CHEESE_CUSTOMER}"
+# docker pull "themamaai.azurecr.io/cheese/cheese-database/${CHEESE_CUSTOMER}"
+# docker pull "themamaai.azurecr.io/cheese/cheese-api/${CHEESE_CUSTOMER}"
+# docker pull "themamaai.azurecr.io/cheese/cheese_inference/${CHEESE_CUSTOMER}"
+# docker pull "themamaai.azurecr.io/cheese/cheese-explorer/${CHEESE_CUSTOMER}"

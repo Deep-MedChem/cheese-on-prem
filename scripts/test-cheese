@@ -28,16 +28,30 @@ echo "TESTING [5/8] : Testing CHEESE visualize..."
 cheese visualize --input_file "${REPO_FOLDER}/tests/test_mols.csv" --dest_folder /tmp/$test_folder_name/visualize --search_type morgan --visualisation_method pca
 echo ""
 
+# Testing explorer
+
+EXPLORER_IMAGE="themamaai.azurecr.io/cheese/cheese-explorer/${CHEESE_CUSTOMER}"
 echo ""
 echo "TESTING [6/8] : Testing CHEESE explorer - adding database..."
-cheese explorer add-database --input_file "${REPO_FOLDER}/tests/test_mols.csv" --db_name MY_DB
+
+if docker image inspect "$EXPLORER_IMAGE" > /dev/null 2>&1; then
+    cheese explorer add-database --input_file "${REPO_FOLDER}/tests/test_mols.csv" --db_name MY_DB
+else
+    echo "Image $EXPLORER_IMAGE does not exist for customer '$CHEESE_CUSTOMER'. Skipping test"
+fi
+
+
 echo ""
 
 echo ""
 echo "TESTING [7/8] : Testing CHEESE explorer - removing database..."
-cheese explorer remove-database --db_name MY_DB
-echo ""
+if docker image inspect "$EXPLORER_IMAGE" > /dev/null 2>&1; then
+    cheese explorer remove-database --db_name MY_DB
+else
+    echo "Image $EXPLORER_IMAGE does not exist for customer '$CHEESE_CUSTOMER'. Skipping test"
+fi
 
+echo ""
 
 echo "TESTING [8/8] : Stopping CHEESE servers..."
 rm -rf /tmp/$test_folder_name || true

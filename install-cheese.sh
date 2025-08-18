@@ -81,6 +81,7 @@ if [ ! "$env_file" = "" ]; then
     echo "IP=$ip_address" >> "${HOME}/.config/cheese/cheese-env-file.conf";
     echo "CONFIG_FILE=${HOME}/.config/cheese/cheese_config_file.yaml" >> "${HOME}/.config/cheese/cheese-env-file.conf";
     echo "CHEESE_LICENSE_FILE=${HOME}/.config/cheese/cheese_license_file.json" >> "${HOME}/.config/cheese/cheese-env-file.conf";
+    echo "CHEESE_PACKAGE=cheese-ui,cheese-new-ui,cheese-database,cheese-api,cheese_inference,cheese-explorer" >> "${HOME}/.config/cheese/cheese-env-file.conf";
     sed -i '/^$/d' "${HOME}/.config/cheese/cheese-env-file.conf"
 
     echo "OUTPUT_DIRECTORIES:" >> "${HOME}/.config/cheese/cheese_config_file.yaml";
