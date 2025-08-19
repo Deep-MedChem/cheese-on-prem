@@ -1,7 +1,7 @@
 #!/bin/bash
 
 API_PORT=8001
-random_uuid=$(uuidgen)
+random_uuid=$(uuidgen | cut -c1-8)
 db_container="${USER}_cheese_db_${random_uuid}"
 api_container="${USER}_cheese_api_${random_uuid}"
 
@@ -41,6 +41,9 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
+
+# Create a docker network to communicate between containers
+docker network create cheese-network
 
 # Function to get Port number of container
 
@@ -137,7 +140,9 @@ if [ "$TESTING" = "true" ] ; then
     CONFIG_FILE="${HOME}/.config/cheese/cheese-env-file-test.conf"
 fi
 
-docker run -d -u $UID -v /:/data -it --env DB_PORT=$exposed_db_port --env TESTING=True --env-file $CONFIG_FILE --name $api_container -p $API_PORT --rm $FULL_IMAGE_NAME
+DB_URL="http://$db_container:8001"
+echo "DB_URL" $DB_URL
+docker run -d -u $UID -v /:/data --network cheese-network -it --env DB_URL=$DB_URL --env TESTING=True --env-file $CONFIG_FILE --name $api_container -p $API_PORT --rm $FULL_IMAGE_NAME
 exposed_api_port=$(get_port $api_container)
 
 # check_server $api_container $exposed_api_port

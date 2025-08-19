@@ -1,6 +1,6 @@
 #!/bin/bash
 UI_PORT=3000
-random_uuid=$(uuidgen)
+random_uuid=$(uuidgen | cut -c1-8)
 ui_container="${USER}_cheese_ui_${random_uuid}"
 
 # Function to display usage
@@ -62,8 +62,8 @@ containers=$(docker ps -a --format '{{.Names}}' | grep "$container_substring")
 # Check if we have any containers with that name
 if [[ -n "$containers" ]]; then
   # Pick a random container from the list
-  random_container=$(echo "$containers" | shuf -n 1)
-  api_port=$(get_port $random_container)
+  api_container=$(echo "$containers" | shuf -n 1)
+  api_port=$(get_port $api_container)
   echo Found cheese server running on port $api_port
 else
   echo "No CHEESE Server is running. Please run cheese start-server !!"
@@ -82,9 +82,9 @@ IMAGE_NAME="themamaai.azurecr.io/cheese/cheese-ui"
 
 FULL_IMAGE_NAME="${IMAGE_NAME}/${CHEESE_CUSTOMER}"
 
-API_URL="http://"$IP":"$api_port
+API_URL="http://$api_container:8001"
 
 echo "Running cheese UI ..."
-docker run -u $UID -d --env CHEESE_API=$API_URL --name $ui_container -p $UI_PORT --rm $FULL_IMAGE_NAME
+docker run -u $UID -d --network cheese-network --env CHEESE_API=$API_URL --name $ui_container -p $UI_PORT --rm $FULL_IMAGE_NAME
 port=$(get_port $ui_container)
 echo CHEESE UI is available here : http://"$IP":"$port"

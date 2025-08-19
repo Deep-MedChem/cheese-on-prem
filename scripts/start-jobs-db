@@ -2,7 +2,7 @@
 set -e
 DB_PORT=8001
 JOBS_DB_PORT=8001
-random_uuid=$(uuidgen)
+random_uuid=$(uuidgen | cut -c1-8)
 db_container="${USER}_cheese_db_${random_uuid}"
 jobs_db_container="${USER}_cheese_jobs_app_${random_uuid}"
 jobs_exec_container="${USER}_cheese_jobs_exec_${random_uuid}"
@@ -117,12 +117,12 @@ fi
 FULL_IMAGE_NAME="${IMAGE_NAME}/${CHEESE_CUSTOMER}"
 
 echo "Using config file : $CONFIG_FILE"
-docker run -d -u $UID -v /:/data --env-file $CONFIG_FILE --name $db_container -p $DB_PORT --rm $FULL_IMAGE_NAME
+docker run -d -u $UID -v /:/data --network cheese-network --env-file $CONFIG_FILE --name $db_container -p $DB_PORT --rm $FULL_IMAGE_NAME
 
 # Making the jobs folder
 mkdir -p /tmp/cheese-jobs
 
-docker run -d -u $UID -v /:/data --entrypoint bash --env-file $CONFIG_FILE --env JOBS_DATA_PATH="/tmp/cheese-jobs" --name $db_container -p $JOBS_DB_PORT --name $jobs_db_container $FULL_IMAGE_NAME -c "python -um cheese_database.jobs_app"
+docker run -d -u $UID -v /:/data --network cheese-network --entrypoint bash --env-file $CONFIG_FILE --env JOBS_DATA_PATH="/tmp/cheese-jobs" --name $db_container -p $JOBS_DB_PORT --name $jobs_db_container $FULL_IMAGE_NAME -c "python -um cheese_database.jobs_app"
 docker run -d -u $UID -v /:/data --entrypoint python --env-file $CONFIG_FILE --env JOBS_DATA_PATH="/tmp/cheese-jobs" --name $jobs_exec_container $FULL_IMAGE_NAME -c "from cheese_database.jobs_executor import main; main()"
 docker run -d -u $UID -v /:/data --entrypoint python --env-file $CONFIG_FILE --env JOBS_DATA_PATH="/tmp/cheese-jobs" --name $download_exec_container $FULL_IMAGE_NAME -c "from cheese_database.download_executor import main; main()"
 

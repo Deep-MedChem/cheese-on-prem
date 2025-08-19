@@ -1,7 +1,7 @@
 #!/bin/bash
 set -e
 
-random_uuid=$(uuidgen)
+random_uuid=$(uuidgen | cut -c1-8)
 test_folder_name="${USER}_cheese_test_${random_uuid}"
 
 
