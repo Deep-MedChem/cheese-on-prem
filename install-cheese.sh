@@ -43,9 +43,13 @@ echo Installing CHEESE...
 # Define Env variables
 
 echo "Setting Environment configuration files..."
-mkdir "${HOME}/.config"
-mkdir "${HOME}/.config/cheese"
+mkdir -p "${HOME}/.config"
+mkdir -p "${HOME}/.config/cheese"
 chmod -R 777 "${HOME}/.config/cheese"
+
+mkdir -p "${HOME}/.local"
+mkdir -p "${HOME}/.local/bin"
+chmod -R 777 "${HOME}/.local/bin"
 
 convert_to_absolute_path() {
     local input_path="$1"
