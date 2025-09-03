@@ -86,7 +86,7 @@ API_URL="http://$api_container:8001"
 
 
 echo "Running cheese new UI ..."
-docker run -u $UID -d --network cheese-network --env CHEESE_API=$API_URL \
+docker run -u root -d --network cheese-network --env CHEESE_API=$API_URL \
   --env CHEESE_UI_USER_SECRET=XXX \
   --env SUPABASE_URL=https://XXX \
   --env SUPABASE_ANON_KEY=XXX \

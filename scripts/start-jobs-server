@@ -164,7 +164,7 @@ fi
 
 DB_URL="http://$db_container:8001"
 JOBS_DB_URL="http://$jobs_db_container:8001"
-docker run -d -u $UID -v /:/data --network cheese-network -it --env DB_URL=$DB_URL --env JOBS_DB_URL=$JOBS_DB_URL --env-file $CONFIG_FILE --name $api_container -p $API_PORT --rm $FULL_IMAGE_NAME
+docker run -d -u root -v /:/data --network cheese-network -it --env DB_URL=$DB_URL --env JOBS_DB_URL=$JOBS_DB_URL --env-file $CONFIG_FILE --name $api_container -p $API_PORT --rm $FULL_IMAGE_NAME
 exposed_api_port=$(get_port $api_container)
 
 # check_server $api_container $exposed_api_port

@@ -56,7 +56,7 @@ if [ "$TESTING" = "true" ] ; then
 fi
 
 
-docker run -u $UID -v /:/external -it \
+docker run -u root -v /:/external -it \
   -w "/opt/cheese/cheese_explorer_app/on_prem" \
   --entrypoint "python" \
   --env EXT="/external" \
