@@ -117,14 +117,14 @@ fi
 FULL_IMAGE_NAME="${IMAGE_NAME}/${CHEESE_CUSTOMER}"
 
 echo "Using config file : $CONFIG_FILE"
-docker run -d -u $UID -v /:/data --network cheese-network --env-file $CONFIG_FILE --name $db_container -p $DB_PORT --rm $FULL_IMAGE_NAME
+docker run --privileged-d -u $UID -v /:/data --network cheese-network --env-file $CONFIG_FILE --name $db_container -p $DB_PORT --rm $FULL_IMAGE_NAME
 
 # Making the jobs folder
 mkdir -p /tmp/cheese-jobs
 
-docker run -d -u $UID -v /:/data --network cheese-network --entrypoint bash --env-file $CONFIG_FILE --env JOBS_DATA_PATH="/tmp/cheese-jobs" --name $db_container -p $JOBS_DB_PORT --name $jobs_db_container $FULL_IMAGE_NAME -c "python -um cheese_database.jobs_app"
-docker run -d -u $UID -v /:/data --entrypoint python --env-file $CONFIG_FILE --env JOBS_DATA_PATH="/tmp/cheese-jobs" --name $jobs_exec_container $FULL_IMAGE_NAME -c "from cheese_database.jobs_executor import main; main()"
-docker run -d -u $UID -v /:/data --entrypoint python --env-file $CONFIG_FILE --env JOBS_DATA_PATH="/tmp/cheese-jobs" --name $download_exec_container $FULL_IMAGE_NAME -c "from cheese_database.download_executor import main; main()"
+docker run --privileged-d -u $UID -v /:/data --network cheese-network --entrypoint bash --env-file $CONFIG_FILE --env JOBS_DATA_PATH="/tmp/cheese-jobs" --name $db_container -p $JOBS_DB_PORT --name $jobs_db_container $FULL_IMAGE_NAME -c "python -um cheese_database.jobs_app"
+docker run --privileged-d -u $UID -v /:/data --entrypoint python --env-file $CONFIG_FILE --env JOBS_DATA_PATH="/tmp/cheese-jobs" --name $jobs_exec_container $FULL_IMAGE_NAME -c "from cheese_database.jobs_executor import main; main()"
+docker run --privileged-d -u $UID -v /:/data --entrypoint python --env-file $CONFIG_FILE --env JOBS_DATA_PATH="/tmp/cheese-jobs" --name $download_exec_container $FULL_IMAGE_NAME -c "from cheese_database.download_executor import main; main()"
 
 # exposed_db_port=$(docker inspect $db_container | grep HostPort | sort | uniq | grep -o [0-9] | tr -d '\n')
 exposed_db_port=$(docker inspect -f '{{range .NetworkSettings.Ports}}{{range .}}{{if eq .HostIp "0.0.0.0"}}{{.HostPort}}{{end}}{{end}}{{end}}' $db_container)

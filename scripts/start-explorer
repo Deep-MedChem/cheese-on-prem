@@ -76,7 +76,7 @@ if [ "$TESTING" = "true" ] ; then
     CONFIG_FILE="${HOME}/.config/cheese/cheese-env-file-test.conf"
 fi
 
-docker run -d -u $UID -v /:/external -it -p $EXPLORER_PORT \
+docker run --privileged-d -u $UID -v /:/external -it -p $EXPLORER_PORT \
   --env EXT="/external" --env-file $CONFIG_FILE \
   --env EXPLORER_CONFIG_FILE=$current_config_file \
   --name $explorer_container $FULL_IMAGE_NAME

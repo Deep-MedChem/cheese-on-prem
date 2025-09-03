@@ -170,7 +170,7 @@ if [ -n "$gpu_devices" ]; then
   if command -v nvidia-smi > /dev/null; then
   echo "GPU is available !"
 
-  docker run -u $UID -v /:/data -it \
+  docker run --privileged-u $UID -v /:/data -it \
         --env CUPY_CACHE_DIR=/tmp \
         --env NCCL_SHM_DISABLE=1 \
         --env CUDA_VISIBLE_DEVICES=$gpu_devices \
@@ -192,7 +192,7 @@ else
 
 echo "Running inference on CPU"
 
-docker run -u $UID -v /:/data -it \
+docker run --privileged-u $UID -v /:/data -it \
       --env CUPY_CACHE_DIR=/tmp \
       --env NCCL_SHM_DISABLE=1 \
       --env CUDA_VISIBLE_DEVICES=$gpu_devices \
