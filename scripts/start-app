@@ -85,6 +85,6 @@ FULL_IMAGE_NAME="${IMAGE_NAME}/${CHEESE_CUSTOMER}"
 API_URL="http://$api_container:8001"
 
 echo "Running cheese UI ..."
-docker run --privileged-u $UID -d --network cheese-network --env CHEESE_API=$API_URL --name $ui_container -p $UI_PORT --rm $FULL_IMAGE_NAME
+docker run --privileged -u $UID -d --network cheese-network --env CHEESE_API=$API_URL --name $ui_container -p $UI_PORT --rm $FULL_IMAGE_NAME
 port=$(get_port $ui_container)
 echo CHEESE UI is available here : http://"$IP":"$port"

@@ -29,4 +29,4 @@ FULL_IMAGE_NAME="${IMAGE_NAME}/${CHEESE_CUSTOMER}"
 
 set -e
 
-docker run --privileged-it -w /opt/cheese/cheese_orchestrator --entrypoint python $FULL_IMAGE_NAME -c "from generate_license_ID import main;print('Your license key is :',main())"
+docker run --privileged -it -w /opt/cheese/cheese_orchestrator --entrypoint python $FULL_IMAGE_NAME -c "from generate_license_ID import main;print('Your license key is :',main())"
