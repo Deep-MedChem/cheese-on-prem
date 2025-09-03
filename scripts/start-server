@@ -142,7 +142,7 @@ fi
 
 DB_URL="http://$db_container:8001"
 echo "DB_URL" $DB_URL
-docker run -d -v /:/data --network cheese-network -it --env DB_URL=$DB_URL --env TESTING=True --env-file $CONFIG_FILE --name $api_container -p $API_PORT --rm $FULL_IMAGE_NAME
+docker run -d -u $UID -v /:/data --network cheese-network -it --env DB_URL=$DB_URL --env TESTING=True --env-file $CONFIG_FILE --name $api_container -p $API_PORT --rm $FULL_IMAGE_NAME
 exposed_api_port=$(get_port $api_container)
 
 # check_server $api_container $exposed_api_port
