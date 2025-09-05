@@ -43,7 +43,7 @@ done
 
 
 # Create a docker network to communicate between containers
-docker network create cheese-network
+docker network inspect cheese-network >/dev/null 2>&1 || docker network create cheese-network
 
 # Function to get Port number of container
 

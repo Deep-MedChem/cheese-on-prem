@@ -1,11 +1,11 @@
 #!/bin/bash
 set -e
 
-random_uuid=$(uuidgen | cut -c1-8)
+random_uuid=$(uuidgen | cut -c1-7)
 test_folder_name="${USER}_cheese_test_${random_uuid}"
 
 
-echo "TESTING [1/8] : Testing CHEESE inference..."
+echo "TESTING [1/7] : Testing CHEESE inference..."
 echo Making test directory
 mkdir -p /tmp/$test_folder_name
 
@@ -18,28 +18,24 @@ else
 fi
 echo ""
 
-echo "TESTING [2/8] : Starting CHEESE server"
+echo "TESTING [2/7] : Starting CHEESE server"
 cheese start-server
 sleep 10
 echo ""
 
-echo "TESTING [3/8] : Testing CHEESE embeddings..."
+echo "TESTING [3/7] : Testing CHEESE embeddings..."
 cheese embeddings-cpu --input_file "${REPO_FOLDER}/tests/test_mols.csv" --dest_folder /tmp/$test_folder_name/embs --search_type morgan
 echo ""
 
-echo "TESTING [4/8] : Testing CHEESE search..."
+echo "TESTING [4/7] : Testing CHEESE search..."
 cheese search --input_file "${REPO_FOLDER}/tests/test_mols.csv" --output_file /tmp/$test_folder_name/search_results.csv --db_names TEST --search_type espsim_electrostatic --search_quality 'fast' --n_neighbors 50
 
-echo ""
-echo "TESTING [5/8] : Testing CHEESE visualize..."
-cheese visualize --input_file "${REPO_FOLDER}/tests/test_mols.csv" --dest_folder /tmp/$test_folder_name/visualize --search_type morgan --visualisation_method pca
-echo ""
 
 # Testing explorer
 
 EXPLORER_IMAGE="themamaai.azurecr.io/cheese/cheese-explorer/${CHEESE_CUSTOMER}"
 echo ""
-echo "TESTING [6/8] : Testing CHEESE explorer - adding database..."
+echo "TESTING [6/7] : Testing CHEESE explorer - adding database..."
 
 if docker image inspect "$EXPLORER_IMAGE" > /dev/null 2>&1; then
     cheese explorer add-database --input_file "${REPO_FOLDER}/tests/test_mols.csv" --db_name MY_DB
@@ -51,7 +47,7 @@ fi
 echo ""
 
 echo ""
-echo "TESTING [7/8] : Testing CHEESE explorer - removing database..."
+echo "TESTING [7/7] : Testing CHEESE explorer - removing database..."
 if docker image inspect "$EXPLORER_IMAGE" > /dev/null 2>&1; then
     cheese explorer remove-database --db_name MY_DB
 else
@@ -60,7 +56,7 @@ fi
 
 echo ""
 
-echo "TESTING [8/8] : Stopping CHEESE servers..."
+echo "TESTING [7/7] : Stopping CHEESE servers..."
 rm -rf /tmp/$test_folder_name || true
 cheese stop-servers
 

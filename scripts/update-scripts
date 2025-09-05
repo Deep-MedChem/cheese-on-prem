@@ -7,26 +7,20 @@ git pull
 
 
 set -e
-# This script moves all bash scripts to $HOME/.local/bin 
-# for the purpose of local & production testing on the CHEESE Dev VM
+# This script moves all bash scripts to $HOME/.local/bin/cheese
 
 cd "${REPO_FOLDER}/scripts"
 echo Installing CHEESE scripts...
 
 
-# Make bin folder
-if [ -z "$HOME/.local/bin" ]; then
-    mkdir $HOME/.local/bin
-fi
-
 for file in *; do
   # Check if the file ends with .sh
   if [[ "$file" != *.sh ]]; then
     # If the file does not end with .sh, print its name
-    echo "Moved $file to $HOME/.local/bin"
-    cp $file $HOME/.local/bin/
-    echo Setting permissions for $HOME/.local/bin/$file
-    chmod +x $HOME/.local/bin/$file
+    echo "Moved $file to $HOME/.local/bin/cheese"
+    cp $file $HOME/.local/bin/cheese
+    echo Setting permissions for $HOME/.local/bin/cheese/$file
+    chmod +x $HOME/.local/bin/cheese/$file
 
   fi
 done

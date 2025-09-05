@@ -137,7 +137,8 @@ check_server(){
 }
 
 # Create a docker network to communicate between containers
-docker network create cheese-network
+docker network inspect cheese-network >/dev/null 2>&1 || docker network create cheese-network
+
 
 IMAGE_NAME="themamaai.azurecr.io/cheese/cheese-api"
 

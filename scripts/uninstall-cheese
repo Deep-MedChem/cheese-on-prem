@@ -1,0 +1,50 @@
+#!/bin/bash
+
+echo "Uninstalling CHEESE..."
+
+read -p "1. Remove configuration files (y/n)? " remove_config
+read -p "2. Remove scripts (y/n)? " remove_scripts
+read -p "3. Remove images (y/n)? " remove_images
+
+# Example paths – change as needed
+CONFIG_DIR="${HOME}/.config/cheese"
+SCRIPTS_DIR="${HOME}/.local/bin/cheese"
+
+if [[ "$remove_config" == "y" || "$remove_config" == "Y" ]]; then
+    echo "Removing configuration files..."
+    rm -rf $CONFIG_DIR
+fi
+
+if [[ "$remove_scripts" == "y" || "$remove_scripts" == "Y" ]]; then
+    echo "Removing scripts..."
+    rm -rf $SCRIPTS_DIR
+fi
+
+
+if [[ "$remove_images" == "y" || "$remove_images" == "Y" ]]; then
+    echo "Removing Docker images..."
+
+    REPO_NAME="themamaai.azurecr.io/cheese"
+
+    # Find image IDs that match the repo
+    image_ids=$(docker images "$REPO_NAME" --format '{{.ID}}')
+
+    if [[ -z "$image_ids" ]]; then
+        echo "No Docker images found for $REPO_NAME."
+    else
+        for id in $image_ids; do
+            echo "Removing image ID: $id"
+            docker rmi "$id"
+        done
+        echo "Docker images for $REPO_NAME removed."
+    fi
+fi
+
+# Show final message only if all are 'y' or 'Y'
+if [[ "$remove_config" =~ ^[Yy]$ && "$remove_scripts" =~ ^[Yy]$ && "$remove_images" =~ ^[Yy]$ ]]; then
+    echo "CHEESE has been uninstalled."
+fi
+
+
+
+

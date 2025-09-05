@@ -1,55 +1,28 @@
 #!/bin/bash
 
-
-
-# Function to display usage
-show_help() {
-  echo "Welcome to CHEESE !"
-  echo "Usage: $0 [options]"
-  echo "Commands:"
-  echo "  --env_file        Specify environment configuration file. You can modify the template 'config/cheese-env.conf.template'"
-  echo "  --help       Show this help message"
-  exit 1
-}
-
-# Check if no arguments are passed
-if [ $# -eq 0 ]; then
-    # Show help if no arguments
-    show_help
-    exit 0
-fi
-
-
-# Parse command-line arguments manually
-while [[ $# -gt 0 ]]; do
-  case "$1" in
-    --env_file)
-      env_file="$2"
-      shift 2
-      ;;
-    --help)
-      show_help
-      ;;
-    *)
-      echo "Unknown command: $1"
-      exit 1
-      show_help
-      ;;
-  esac
-done
-
 echo Installing CHEESE...
+
+# Environment file is in ./config/cheese-env.conf.template
+env_file="./config/cheese-env.conf.template"
 
 # Define Env variables
 
-echo "Setting Environment configuration files..."
+echo "Preparing folders..."
+
 mkdir -p "${HOME}/.config"
 mkdir -p "${HOME}/.config/cheese"
 chmod -R 777 "${HOME}/.config/cheese"
 
 mkdir -p "${HOME}/.local"
 mkdir -p "${HOME}/.local/bin"
-chmod -R 777 "${HOME}/.local/bin"
+mkdir -p "${HOME}/.local/bin/cheese"
+chmod -R 777 "${HOME}/.local/bin/cheese"
+
+bash ./install/configure-bashrc.sh
+
+
+echo "Setting Environment configuration files..."
+
 
 convert_to_absolute_path() {
     local input_path="$1"

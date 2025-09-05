@@ -15,6 +15,7 @@ show_help() {
   echo "  stop-apps                    Stop all CHEESE UIs"
   echo "  start-app                    Run CHEESE UI"
   echo "  start-new-app                Run CHEESE new UI"
+  echo "  start                        Run CHEESE server + new UI"
   echo "  embeddings-cpu               Run CHEESE Embeddings computation on CPU"
   echo "  search                       Run CHEESE Search"
   echo "  visualize                    Run CHEESE Embeddings visualization"
@@ -105,6 +106,12 @@ while [[ $# -gt 0 ]]; do
       start-new-app $@
       exit 0
       ;;
+    start)
+      shift 1
+      start-jobs-server
+      start-new-app $@
+      exit 0
+      ;;
     run-inference)
       shift 1
       run-inference $@
@@ -143,6 +150,11 @@ while [[ $# -gt 0 ]]; do
     extract-dbs)
       shift 1
       extract-dbs $@
+      exit 0
+      ;;
+    uninstall)
+      shift 1
+      uninstall-cheese $@
       exit 0
       ;;
     -h|--help)
