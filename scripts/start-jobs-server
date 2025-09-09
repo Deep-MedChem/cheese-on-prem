@@ -7,6 +7,8 @@ db_container="${USER}_cheese_db_${random_uuid}"
 jobs_db_container="${USER}_cheese_jobs_app_${random_uuid}"
 jobs_exec_container="${USER}_cheese_jobs_exec_${random_uuid}"
 download_exec_container="${USER}_cheese_download_exec_${random_uuid}"
+jobs_file_server_container="${USER}_cheese_jobs_file_server_${random_uuid}"
+
 
 # Function to display usage
 show_help() {
@@ -16,6 +18,7 @@ show_help() {
   echo "  --jobs_db_container   Specify jobs_db_container (Default : uuid_cheese_jobs_app)"
   echo "  --jobs_exec_container   Specify jobs_exec_container (Default : uuid_cheese_jobs_exec)"
   echo "  --download_exec_container   Specify download_exec_container (Default : uuid_cheese_download_exec)"
+  echo "  --jobs_file_server_container   Specify jobs_file_server_container (Default : uuid_cheese_jobs_file_server)"
   echo "  --api_container   Specify api_container (Default : uuid_cheese_api)"
   echo "  -p, --port      Specify server port (Optional)"
   echo "  -h, --help       Show this help message"
@@ -44,6 +47,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --download_exec_container)
       download_exec_container="$2"
+      shift 2
+      ;;
+    --jobs_file_server_container)
+      jobs_file_server_container="$2"
       shift 2
       ;;
     --api_container)
@@ -82,7 +89,7 @@ check_container_exists() {
         echo "Container '$container_name' exists."
     else
         set -e
-        start-jobs-db --db_container $db_container --jobs_db_container $jobs_db_container --jobs_exec_container $jobs_exec_container --download_exec_container $download_exec_container
+        start-jobs-db --db_container $db_container --jobs_db_container $jobs_db_container --jobs_exec_container $jobs_exec_container --download_exec_container $download_exec_container --jobs_file_server_container $jobs_file_server_container
     fi
 
 }
@@ -152,8 +159,11 @@ check_container_exists $db_container
 # Get port from the database container
 exposed_db_port=$(get_port $db_container)
 exposed_jobs_db_port=$(get_port $jobs_db_container)
+exposed_jobs_file_server_port=$(get_port $jobs_file_server_container)
 echo "DB_PORT -->" $exposed_db_port
 echo "JOBS_DB_PORT -->" $exposed_jobs_db_port
+echo "JOBS_FILE_SERVER_PORT -->" $exposed_jobs_file_server_port
+
 # Exit if there are any further errors
 set -e
 
@@ -165,8 +175,9 @@ fi
 
 DB_URL="http://$db_container:8001"
 JOBS_DB_URL="http://$jobs_db_container:8001"
-docker run --privileged -d -u $UID -v /:/data --network cheese-network -it --env DB_URL=$DB_URL --env JOBS_DB_URL=$JOBS_DB_URL --env-file $CONFIG_FILE --name $api_container -p $API_PORT --rm $FULL_IMAGE_NAME
+docker run --privileged -d -u $UID -v /:/data --network cheese-network -it --env DB_URL=$DB_URL --env JOBS_DB_URL=$JOBS_DB_URL  --env-file $CONFIG_FILE --name $api_container -p $API_PORT --rm $FULL_IMAGE_NAME
 exposed_api_port=$(get_port $api_container)
+
 
 # check_server $api_container $exposed_api_port
 

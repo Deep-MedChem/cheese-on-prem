@@ -34,3 +34,5 @@ substring="${USER}_cheese_jobs"
 docker ps -q -a --filter "name=$substring" | xargs -r docker rm -f
 substring="${USER}_cheese_download"
 docker ps -q -a --filter "name=$substring" | xargs -r docker rm -f
+substring="${USER}_cheese_jobs_file_server"
+docker ps -q -a --filter "name=$substring" | xargs -r docker rm -f
