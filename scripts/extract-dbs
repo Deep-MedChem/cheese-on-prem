@@ -3,7 +3,7 @@ set -e
 
 # Function to display usage
 show_help() {
-  echo "Usage: cheese download-dbs [options]"
+  echo "Usage: cheese extract-dbs [options]"
   echo "Options:"
   echo "  --dest     Destination folder where databases are downloaded"
   echo "  --db_name    Database to extract" 

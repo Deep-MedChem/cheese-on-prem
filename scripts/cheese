@@ -10,12 +10,10 @@ show_help() {
   echo "  test                         Test CHEESE commands"
   echo "  generate-license-key         Generate CHEESE license key"
   echo "  start-server                 Run CHEESE server (API)"
-  echo "  start-jobs-server            Run CHEESE jobs server (API)"
   echo "  stop-servers                 Stop all CHEESE servers"
   echo "  stop-apps                    Stop all CHEESE UIs"
   echo "  start-app                    Run CHEESE UI"
-  echo "  start-new-app                Run CHEESE new UI"
-  echo "  start                        Run CHEESE server + new UI"
+  echo "  start                        Run CHEESE server + UI"
   echo "  embeddings-cpu               Run CHEESE Embeddings computation on CPU"
   echo "  search                       Run CHEESE Search"
   echo "  visualize                    Run CHEESE Embeddings visualization"
@@ -81,11 +79,6 @@ while [[ $# -gt 0 ]]; do
       start-server $@
       exit 0
       ;;
-    start-jobs-server)
-      shift 1
-      start-jobs-server $@
-      exit 0
-      ;;
     stop-servers)
       shift 1
       stop-servers $@
@@ -108,8 +101,8 @@ while [[ $# -gt 0 ]]; do
       ;;
     start)
       shift 1
-      start-jobs-server
-      start-new-app $@
+      start-server
+      start-app $@
       exit 0
       ;;
     run-inference)

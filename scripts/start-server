@@ -2,13 +2,24 @@
 
 API_PORT=8001
 random_uuid=$(uuidgen | cut -c1-8)
-db_container="${USER}_cheese_db_${random_uuid}"
 api_container="${USER}_cheese_api_${random_uuid}"
+db_container="${USER}_cheese_db_${random_uuid}"
+jobs_db_container="${USER}_cheese_jobs_app_${random_uuid}"
+jobs_exec_container="${USER}_cheese_jobs_exec_${random_uuid}"
+download_exec_container="${USER}_cheese_download_exec_${random_uuid}"
+jobs_file_server_container="${USER}_cheese_jobs_file_server_${random_uuid}"
+
 
 # Function to display usage
 show_help() {
-  echo "Usage: cheese start-server [options]"
+  echo "Usage: cheese start-jobs-server [options]"
   echo "Options:"
+  echo "  --db_container   Specify db_container (Default : uuid_cheese_db)"
+  echo "  --jobs_db_container   Specify jobs_db_container (Default : uuid_cheese_jobs_app)"
+  echo "  --jobs_exec_container   Specify jobs_exec_container (Default : uuid_cheese_jobs_exec)"
+  echo "  --download_exec_container   Specify download_exec_container (Default : uuid_cheese_download_exec)"
+  echo "  --jobs_file_server_container   Specify jobs_file_server_container (Default : uuid_cheese_jobs_file_server)"
+  echo "  --api_container   Specify api_container (Default : uuid_cheese_api)"
   echo "  -p, --port      Specify server port (Optional)"
   echo "  -h, --help       Show this help message"
   exit 1
@@ -26,6 +37,22 @@ while [[ $# -gt 0 ]]; do
       db_container="$2"
       shift 2
       ;;
+    --jobs_db_container)
+      jobs_db_container="$2"
+      shift 2
+      ;;
+    --jobs_exec_container)
+      jobs_exec_container="$2"
+      shift 2
+      ;;
+    --download_exec_container)
+      download_exec_container="$2"
+      shift 2
+      ;;
+    --jobs_file_server_container)
+      jobs_file_server_container="$2"
+      shift 2
+      ;;
     --api_container)
       api_container="$2"
       shift 2
@@ -41,9 +68,6 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-
-# Create a docker network to communicate between containers
-docker network inspect cheese-network >/dev/null 2>&1 || docker network create cheese-network
 
 # Function to get Port number of container
 
@@ -65,7 +89,7 @@ check_container_exists() {
         echo "Container '$container_name' exists."
     else
         set -e
-        start-db --db_container $db_container
+        start-db --db_container $db_container --jobs_db_container $jobs_db_container --jobs_exec_container $jobs_exec_container --download_exec_container $download_exec_container --jobs_file_server_container $jobs_file_server_container
     fi
 
 }
@@ -101,7 +125,7 @@ check_server(){
     
     if [ ! "$db_container_state" == "true" ]; then
     # If strings are equal
-    echo "CHEESE API server is down !"
+    echo "CHEESE DB server is down !"
     exit 1
     fi
 
@@ -119,6 +143,10 @@ check_server(){
 
 }
 
+# Create a docker network to communicate between containers
+docker network inspect cheese-network >/dev/null 2>&1 || docker network create cheese-network
+
+
 IMAGE_NAME="themamaai.azurecr.io/cheese/cheese-api"
 
 
@@ -130,7 +158,12 @@ check_container_exists $db_container
 
 # Get port from the database container
 exposed_db_port=$(get_port $db_container)
+exposed_jobs_db_port=$(get_port $jobs_db_container)
+exposed_jobs_file_server_port=$(get_port $jobs_file_server_container)
 echo "DB_PORT -->" $exposed_db_port
+echo "JOBS_DB_PORT -->" $exposed_jobs_db_port
+echo "JOBS_FILE_SERVER_PORT -->" $exposed_jobs_file_server_port
+
 # Exit if there are any further errors
 set -e
 
@@ -141,9 +174,10 @@ if [ "$TESTING" = "true" ] ; then
 fi
 
 DB_URL="http://$db_container:8001"
-echo "DB_URL" $DB_URL
-docker run --privileged -d -u $UID -v /:/data --network cheese-network -it --env DB_URL=$DB_URL --env TESTING=True --env-file $CONFIG_FILE --name $api_container -p $API_PORT --rm $FULL_IMAGE_NAME
+JOBS_DB_URL="http://$jobs_db_container:8001"
+docker run --privileged -d -u $UID -v /:/data --network cheese-network -it --env DB_URL=$DB_URL --env JOBS_DB_URL=$JOBS_DB_URL  --env-file $CONFIG_FILE --name $api_container -p $API_PORT --rm $FULL_IMAGE_NAME
 exposed_api_port=$(get_port $api_container)
+
 
 # check_server $api_container $exposed_api_port
 
