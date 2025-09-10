@@ -16,4 +16,4 @@ You can install CHEESE on your instance using the following steps :
 
 2. Install CHEESE by running `bash install-cheese.sh` then check if it is installed by running `cheese`
 
-3. To use CHEESE on-prem, please consult our [CHEESE Docs page](https://cheese-docs.deepmedchem.com/on-prem-showcase/)
+3. To use CHEESE on-prem, please consult our [CHEESE Docs page](https://cheese-docs.deepmedchem.com/on-prem-installation/#how-to-install-cheese)
