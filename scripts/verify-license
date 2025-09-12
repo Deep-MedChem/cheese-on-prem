@@ -1,0 +1,12 @@
+IMAGE_NAME="themamaai.azurecr.io/cheese/cheese-database"
+CHEESE_CUSTOMER="test"
+FULL_IMAGE_NAME="${IMAGE_NAME}/${CHEESE_CUSTOMER}"
+
+CONFIG_FILE="${HOME}/.config/cheese/cheese-env-file.conf"
+
+if [ "$TESTING" = "true" ] ; then
+    CONFIG_FILE="${HOME}/.config/cheese/cheese-env-file-test.conf"
+fi
+
+
+docker run --privileged -it -u $UID -v /:/data --entrypoint python --env-file $CONFIG_FILE $FULL_IMAGE_NAME -c "from cheese_database import verify_cheese_license; verify_cheese_license()"

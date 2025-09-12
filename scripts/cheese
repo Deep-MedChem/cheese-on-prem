@@ -23,6 +23,7 @@ show_help() {
   echo "  update-env                   Update CHEESE environment file"
   echo "  update-images                Update CHEESE Docker Images"
   echo "  update-license               Update CHEESE license file"
+  echo "  check-license               Check CHEESE license"
   echo "  download-dbs                 Download CHEESE indexed databases"
   echo "  extract-dbs                 Extracted downloaded CHEESE indexed databases"
   echo "  -h, --help                   Show this help message"
@@ -46,6 +47,8 @@ while [[ $# -gt 0 ]]; do
   case "$1" in
     test)
       shift 1
+      set -e
+      check-license
       test-cheese $@
       exit 0
       ;;
@@ -64,6 +67,10 @@ while [[ $# -gt 0 ]]; do
       update-license $@
       exit 0
       ;;
+    check-license)
+      shift 1
+      check-license $@
+      ;;
     configure)
       shift 1
       cheese-configure $@
@@ -76,6 +83,8 @@ while [[ $# -gt 0 ]]; do
       ;;
     start-server)
       shift 1
+      set -e
+      check-license
       start-server $@
       exit 0
       ;;
@@ -91,37 +100,44 @@ while [[ $# -gt 0 ]]; do
       ;;
     start-app)
       shift 1
+      set -e
+      check-license
       start-app $@
-      exit 0
-      ;;
-    start-new-app)
-      shift 1
-      start-new-app $@
       exit 0
       ;;
     start)
       shift 1
+      set -e
+      check-license
       start-server
       start-app $@
       exit 0
       ;;
     run-inference)
       shift 1
+      set -e
+      check-license
       run-inference $@
       exit 0
       ;;
     embeddings-cpu)
       shift 1
+      set -e
+      check-license
       embeddings-cpu $@
       exit 0
       ;;
     search)
       shift 1
+      set -e
+      check-license
       search $@
       exit 0
       ;;
     visualize)
       shift 1
+      set -e
+      check-license
       visualize $@
       exit 0
       ;;
@@ -132,6 +148,8 @@ while [[ $# -gt 0 ]]; do
       ;;
     explorer)
       shift 1
+      set -e
+      check-license
       explorer $@
       exit 0
       ;;

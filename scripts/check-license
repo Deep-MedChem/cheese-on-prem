@@ -1,0 +1,12 @@
+#!/bin/bash
+
+# Run the script
+verify-license > /dev/null 2>&1
+
+# Check if it succeeded
+if [ $? -eq 0 ]; then
+    echo "✅ Valid CHEESE license"
+else
+    echo "❌ Invalid CHEESE license"
+    exit 1
+fi
