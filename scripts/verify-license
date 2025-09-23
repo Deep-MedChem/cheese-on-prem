@@ -1,5 +1,4 @@
 IMAGE_NAME="themamaai.azurecr.io/cheese/cheese-database"
-CHEESE_CUSTOMER="test"
 FULL_IMAGE_NAME="${IMAGE_NAME}/${CHEESE_CUSTOMER}"
 
 CONFIG_FILE="${HOME}/.config/cheese/cheese-env-file.conf"
