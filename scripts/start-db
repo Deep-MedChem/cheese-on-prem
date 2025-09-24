@@ -42,7 +42,9 @@ while [[ $# -gt 0 ]]; do
       ;;
     --jobs_file_server_port)
       port="$2"
-      JOBS_FILE_SERVER_PORT=$port:8000
+      if [ -n "$port" ]; then
+        JOBS_FILE_SERVER_PORT="${port}:8000"
+      fi
       shift 2
       ;;
     --db_container)

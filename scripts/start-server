@@ -21,6 +21,7 @@ show_help() {
   echo "  --jobs_file_server_container   Specify jobs_file_server_container (Default : uuid_cheese_jobs_file_server)"
   echo "  --api_container   Specify api_container (Default : uuid_cheese_api)"
   echo "  -p, --port      Specify server port (Optional)"
+  echo "  --file_server_port      Specify file server port (Optional)"
   echo "  -h, --help       Show this help message"
   exit 1
 }
@@ -31,6 +32,10 @@ while [[ $# -gt 0 ]]; do
     -p|--port)
       port="$2"
       API_PORT=$port:8001
+      shift 2
+      ;;
+    --file_server_port)
+      jobs_file_server_port="$2"
       shift 2
       ;;
     --db_container)
@@ -89,7 +94,7 @@ check_container_exists() {
         echo "Container '$container_name' exists."
     else
         set -e
-        start-db --db_container $db_container --jobs_db_container $jobs_db_container --jobs_exec_container $jobs_exec_container --download_exec_container $download_exec_container --jobs_file_server_container $jobs_file_server_container
+        start-db --db_container $db_container --jobs_db_container $jobs_db_container --jobs_exec_container $jobs_exec_container --download_exec_container $download_exec_container --jobs_file_server_container $jobs_file_server_container --jobs_file_server_port $jobs_file_server_port
     fi
 
 }
