@@ -94,7 +94,13 @@ check_container_exists() {
         echo "Container '$container_name' exists."
     else
         set -e
+        # If file server port is specified run the start-db command with it
+        if [ -n "$jobs_file_server_port" ]; then
         start-db --db_container $db_container --jobs_db_container $jobs_db_container --jobs_exec_container $jobs_exec_container --download_exec_container $download_exec_container --jobs_file_server_container $jobs_file_server_container --jobs_file_server_port $jobs_file_server_port
+        else
+        start-db --db_container $db_container --jobs_db_container $jobs_db_container --jobs_exec_container $jobs_exec_container --download_exec_container $download_exec_container --jobs_file_server_container $jobs_file_server_container
+      fi
+        
     fi
 
 }
