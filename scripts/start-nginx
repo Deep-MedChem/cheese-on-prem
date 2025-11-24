@@ -1,0 +1,11 @@
+#!/bin/bash
+
+echo "Starting Nginx..."
+docker rm -f cheese-nginx-base &>/dev/null
+
+docker run -d --network cheese-network --name cheese-nginx-base \
+  -v $HOME/.config/cheese/nginx.conf:/etc/nginx/nginx.conf \
+  -v $HOME/.config/cheese/nginx.crt:/etc/ssl/certs/nginx.crt:ro \
+  -v $HOME/.config/cheese/nginx.key:/etc/ssl/private/nginx.key:ro \
+  -p 80:80 -p 443:443 nginx:alpine nginx -g 'daemon off;'
+

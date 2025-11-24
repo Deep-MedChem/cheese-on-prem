@@ -1,0 +1,3 @@
+#!/bin/bash
+
+nano ${HOME}/.config/cheese/oauth2.env

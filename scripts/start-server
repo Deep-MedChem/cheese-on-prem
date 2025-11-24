@@ -10,6 +10,7 @@ download_exec_container="${USER}_cheese_download_exec_${random_uuid}"
 jobs_file_server_container="${USER}_cheese_jobs_file_server_${random_uuid}"
 
 
+
 # Function to display usage
 show_help() {
   echo "Usage: cheese start-jobs-server [options]"
@@ -72,6 +73,16 @@ while [[ $# -gt 0 ]]; do
       ;;
   esac
 done
+
+
+if [ $NGINX=="true" ] ; then
+  api_container="main_cheese_api";
+  db_container="main_cheese_db";
+  jobs_db_container="main_cheese_jobs_db";
+  jobs_exec_container="main_cheese_jobs_exec";
+  download_exec_container="main_cheese_download_exec";
+  jobs_file_server_container="main_cheese_jobs_file_server";
+fi
 
 
 # Function to get Port number of container
@@ -154,16 +165,19 @@ check_server(){
 
 }
 
+## --------------------------- Script Starts here ---------------------------
+
+
+
 # Create a docker network to communicate between containers
 docker network inspect cheese-network >/dev/null 2>&1 || docker network create cheese-network
 
 
 IMAGE_NAME="themamaai.azurecr.io/cheese/cheese-api"
-
-
-# Local testing
 FULL_IMAGE_NAME="${IMAGE_NAME}/${CHEESE_CUSTOMER}"
 
+
+if [ "$NGINX" != "true" ]; then
 # Check if a container exists, otherwise create it
 check_container_exists $db_container
 
@@ -174,6 +188,9 @@ exposed_jobs_file_server_port=$(get_port $jobs_file_server_container)
 echo "DB_PORT -->" $exposed_db_port
 echo "JOBS_DB_PORT -->" $exposed_jobs_db_port
 echo "JOBS_FILE_SERVER_PORT -->" $exposed_jobs_file_server_port
+
+fi 
+
 
 # Exit if there are any further errors
 set -e
@@ -186,12 +203,19 @@ fi
 
 DB_URL="http://$db_container:8001"
 JOBS_DB_URL="http://$jobs_db_container:8001"
+
+
+if [ $NGINX=="true" ] ; then
+start-db --db_container $db_container --jobs_db_container $jobs_db_container --jobs_exec_container $jobs_exec_container --download_exec_container $download_exec_container --jobs_file_server_container $jobs_file_server_container
+docker run --privileged -d -u $UID -v /:/data --network cheese-network -it --env DB_URL=$DB_URL --env JOBS_DB_URL=$JOBS_DB_URL  --env-file $CONFIG_FILE --name $api_container --rm $FULL_IMAGE_NAME
+
+else
+
+
 docker run --privileged -d -u $UID -v /:/data --network cheese-network -it --env DB_URL=$DB_URL --env JOBS_DB_URL=$JOBS_DB_URL  --env-file $CONFIG_FILE --name $api_container -p $API_PORT --rm $FULL_IMAGE_NAME
 exposed_api_port=$(get_port $api_container)
 
-
-# check_server $api_container $exposed_api_port
-
-
 echo "CHEESE API is available here : http://$IP:$exposed_api_port"
 echo Container name : $api_container
+
+fi

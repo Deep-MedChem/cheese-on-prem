@@ -1,0 +1,44 @@
+#!/bin/bash
+
+# Function to display usage
+show_help() {
+  echo "Usage: cheese stop-servers [options]"
+  echo "Stop all CHEESE servers"
+  echo "Options:"
+  echo "  -h, --help       Show this help message"
+  exit 1
+}
+
+
+# Parse command-line arguments manually
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    -h|--help)
+      usage
+      ;;
+    *)
+      echo "Unknown option: $1"
+      usage
+      ;;
+  esac
+done
+
+# Stop all CHEESE API servers
+substring="main_cheese_api"
+docker ps -q -a --filter "name=$substring" | xargs -r docker rm -f
+
+# Stop all CHEESE DB servers
+substring="main_cheese_db"
+docker ps -q -a --filter "name=$substring" | xargs -r docker rm -f
+substring="main_cheese_jobs"
+docker ps -q -a --filter "name=$substring" | xargs -r docker rm -f
+substring="main_cheese_download"
+docker ps -q -a --filter "name=$substring" | xargs -r docker rm -f
+substring="main_cheese_jobs_file_server"
+docker ps -q -a --filter "name=$substring" | xargs -r docker rm -f
+substring="main_cheese_ui"
+docker ps -q -a --filter "name=$substring" | xargs -r docker rm -f
+substring="cheese-nginx-base"
+docker ps -q -a --filter "name=$substring" | xargs -r docker rm -f
+substring="cheese-oauth2-proxy"
+docker ps -q -a --filter "name=$substring" | xargs -r docker rm -f

@@ -46,6 +46,11 @@ ip_address=$(hostname)
 # Copy testing conf files
 cp "$PWD/config/cheese_test_config_file.yaml" "${HOME}/.config/cheese/cheese_config_file.yaml"
 cp "$PWD/config/cheese_test_explorer_config_file.yaml" "${HOME}/.config/cheese/cheese-explorer-conf.yaml"
+# Copy nginx and Oauth2 config files
+cp "$PWD/config/nginx.conf.template" "${HOME}/.config/cheese/nginx.conf"
+cp "$PWD/config/nginx.crt.template" "${HOME}/.config/cheese/nginx.crt"
+cp "$PWD/config/nginx.key.template" "${HOME}/.config/cheese/nginx.key"
+cp "$PWD/config/oauth2.env.template" "${HOME}/.config/cheese/oauth2.env"
 
 # Setting license file
 echo "" > "${HOME}/.config/cheese/cheese_license_file.json"

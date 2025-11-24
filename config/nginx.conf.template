@@ -1,0 +1,134 @@
+events {
+  worker_connections 1024;
+}
+
+http {
+
+  proxy_buffer_size 16k;
+    # optionally tune other proxy buffer directives
+    proxy_buffers 8 32k;
+    proxy_busy_buffers_size 64k;
+
+  upstream frontend {
+    server main_cheese_ui:3001;   # <–– using the container name here
+  }
+
+  upstream backend {
+    # server hamzagamouh_cheese_api_01516a03:8001;   # <–– using the container name here
+    server main_cheese_api:8001;   # <–– using the container name here
+  }
+
+  upstream fileserver {
+    server main_cheese_jobs_file_server:8000;   # <–– using the container name here
+  }
+
+  upstream oauth2-proxy {
+    server cheese-oauth2-proxy:4180;   # <–– using the container name here
+  }
+
+  server {
+    listen 80;
+    server_name domain.com;
+    return 301 https://$server_name$request_uri;
+  
+  }
+  server {
+    listen 443 ssl;
+    server_name domain.com;
+    ssl_certificate     /etc/ssl/certs/nginx.crt;
+    ssl_certificate_key /etc/ssl/private/nginx.key;
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_ciphers HIGH:!aNULL:!MD5;
+
+
+    location /oauth2/ {
+        proxy_pass http://oauth2-proxy;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Scheme $scheme;
+        proxy_set_header X-Auth-Request-Redirect $request_uri;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+
+    location = /oauth2/auth {
+        proxy_pass http://oauth2-proxy;
+        proxy_pass_request_body off;
+        proxy_set_header Content-Length "";
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Scheme $scheme;
+        proxy_set_header X-Original-URI $request_uri;
+        proxy_set_header X-Forwarded-Uri $request_uri;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        
+    }        
+
+
+    # Proxy to oauth2-proxy for sign_out too (optional, depending on setup)
+    location = /logout {
+        proxy_pass       http://oauth2-proxy/oauth2/sign_out;
+        proxy_set_header Host      $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Scheme  $scheme;
+
+        # Tell oauth2‑proxy where to redirect after clearing cookies
+        proxy_set_header X-Auth-Request-Redirect "https://login.microsoftonline.com/common/oauth2/v2.0/logout?post_logout_redirect_uri=https://domain.com";
+    }
+
+    location = /login {
+        proxy_pass       http://oauth2-proxy/oauth2/sign_in;
+        proxy_set_header Host      $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Scheme  $scheme;
+
+        # Tell oauth2‑proxy where to redirect after clearing cookies
+        proxy_set_header X-Auth-Request-Redirect "https://domain.com";
+    }
+
+    location / {
+      auth_request /oauth2/auth;
+
+      error_page 401 = /oauth2/sign_in;
+      auth_request_set $user   $upstream_http_x_forwarded_user;
+      auth_request_set $email  $upstream_http_x_forwarded_email;
+      auth_request_set $auth_status $upstream_status;
+      
+      proxy_pass http://frontend/;
+      proxy_set_header Host $host;
+      proxy_set_header X-Real-IP $remote_addr;
+      proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+      proxy_set_header X-Forwarded-Proto $scheme;
+    }
+
+    location /cheese-api/ {
+      auth_request /oauth2/auth;
+
+      error_page 401 = /oauth2/sign_in;
+
+      auth_request_set $user   $upstream_http_x_forwarded_user;
+      auth_request_set $email  $upstream_http_x_forwarded_email;
+
+      proxy_pass http://backend/;
+      proxy_set_header Host $host;
+      proxy_set_header X-Real-IP $remote_addr;
+      proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+      proxy_set_header X-Forwarded-Proto $scheme;
+    }
+
+    location /cheese-fileserver/ {
+      auth_request /oauth2/auth;
+
+      error_page 401 = /oauth2/sign_in;
+
+      auth_request_set $user   $upstream_http_x_forwarded_user;
+      auth_request_set $email  $upstream_http_x_forwarded_email;
+
+      proxy_pass http://fileserver/;
+      proxy_set_header Host $host;
+      proxy_set_header X-Real-IP $remote_addr;
+      proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+      proxy_set_header X-Forwarded-Proto $scheme;
+    }
+
+    
+  }
+}

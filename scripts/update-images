@@ -34,9 +34,9 @@ case "$answer" in
 esac
 
 
+# Pull Nginx and Oauth2-proxy images
 
-# docker pull "themamaai.azurecr.io/cheese/cheese-ui/${CHEESE_CUSTOMER}"
-# docker pull "themamaai.azurecr.io/cheese/cheese-database/${CHEESE_CUSTOMER}"
-# docker pull "themamaai.azurecr.io/cheese/cheese-api/${CHEESE_CUSTOMER}"
-# docker pull "themamaai.azurecr.io/cheese/cheese_inference/${CHEESE_CUSTOMER}"
-# docker pull "themamaai.azurecr.io/cheese/cheese-explorer/${CHEESE_CUSTOMER}"
+echo "Pulling nginx image..."
+docker pull docker.io/library/nginx:alpine
+echo "Pulling oauth2 image..."
+docker pull quay.io/oauth2-proxy/oauth2-proxy:latest

@@ -1,0 +1,10 @@
+#!/bin/bash
+
+echo "Starting Oauth2-proxy..."
+docker rm -f cheese-oauth2-proxy &>/dev/null
+docker run -d \
+  --name cheese-oauth2-proxy \
+  --env-file $HOME/.config/cheese/oauth2.env \
+  -p 4180:4180 \
+  --network cheese-network \
+  quay.io/oauth2-proxy/oauth2-proxy:latest

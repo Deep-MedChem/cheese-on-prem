@@ -135,26 +135,46 @@ FULL_IMAGE_NAME="${IMAGE_NAME}/${CHEESE_CUSTOMER}"
 JOBS_DATA_PATH="/tmp/cheese-jobs"
 
 echo "Using config file : $CONFIG_FILE"
+
+if [ $NGINX=="true" ] ; then
+docker run --privileged -d -u $UID -v /:/data --network cheese-network --env-file $CONFIG_FILE --name $db_container --rm $FULL_IMAGE_NAME
+
+else
 docker run --privileged -d -u $UID -v /:/data --network cheese-network --env-file $CONFIG_FILE --name $db_container -p $DB_PORT --rm $FULL_IMAGE_NAME
+fi
 
 # Making the jobs folder
 mkdir -p /tmp/cheese-jobs
 
 # Start file server for accessing jobs results
-docker run --privileged -d -u $UID -v /:/data --entrypoint bash --name $jobs_file_server_container -p $JOBS_FILE_SERVER_PORT $FULL_IMAGE_NAME -c "python3 -m http.server 8000 --directory /data/tmp/cheese-jobs"
+
+docker run --privileged -d -u $UID -v /:/data --network cheese-network --entrypoint bash --name $jobs_file_server_container -p $JOBS_FILE_SERVER_PORT $FULL_IMAGE_NAME -c "python3 -m http.server 8000 --directory /data/tmp/cheese-jobs"
 exposed_jobs_file_server_port=$(docker inspect -f '{{range .NetworkSettings.Ports}}{{range .}}{{if eq .HostIp "0.0.0.0"}}{{.HostPort}}{{end}}{{end}}{{end}}' $jobs_file_server_container)
 
-JOBS_FILE_SERVER_URL="http://$IP:$exposed_jobs_file_server_port/"
 
-docker run --privileged -d -u $UID -v /:/data --network cheese-network --entrypoint bash --env-file $CONFIG_FILE --env JOBS_DATA_PATH=$JOBS_DATA_PATH --name $db_container -p $JOBS_DB_PORT --name $jobs_db_container $FULL_IMAGE_NAME -c "python -um cheese_database.jobs_app"
+if [ $NGINX=="true" ] ; then
+JOBS_FILE_SERVER_URL="https://$IP/cheese-fileserver"
+
+else
+JOBS_FILE_SERVER_URL="http://$IP:$exposed_jobs_file_server_port/"
+fi
+
 docker run --privileged -d -u $UID -v /:/data --entrypoint python --env-file $CONFIG_FILE --env JOBS_DATA_PATH="/tmp/cheese-jobs" --name $jobs_exec_container $FULL_IMAGE_NAME -c "from cheese_database.jobs_executor import main; main()"
 docker run --privileged -d -u $UID -v /:/data --entrypoint python --env-file $CONFIG_FILE --env JOBS_DATA_PATH="/tmp/cheese-jobs" --env JOBS_FILE_SERVER_URL=$JOBS_FILE_SERVER_URL --name $download_exec_container $FULL_IMAGE_NAME -c "from cheese_database.download_executor import main; main()"
 
 
+
+if [ $NGINX=="true" ] ; then
+docker run --privileged -d -u $UID -v /:/data --network cheese-network --entrypoint bash --env-file $CONFIG_FILE --env JOBS_DATA_PATH=$JOBS_DATA_PATH --name $db_container --name $jobs_db_container $FULL_IMAGE_NAME -c "python -um cheese_database.jobs_app"
+echo "Starting CHEESE database server can take up to 2 min..."
+sleep 120
+
+else
+docker run --privileged -d -u $UID -v /:/data --network cheese-network --entrypoint bash --env-file $CONFIG_FILE --env JOBS_DATA_PATH=$JOBS_DATA_PATH --name $db_container -p $JOBS_DB_PORT --name $jobs_db_container $FULL_IMAGE_NAME -c "python -um cheese_database.jobs_app"
 # exposed_db_port=$(docker inspect $db_container | grep HostPort | sort | uniq | grep -o [0-9] | tr -d '\n')
 exposed_db_port=$(docker inspect -f '{{range .NetworkSettings.Ports}}{{range .}}{{if eq .HostIp "0.0.0.0"}}{{.HostPort}}{{end}}{{end}}{{end}}' $db_container)
 exposed_jobs_db_port=$(docker inspect -f '{{range .NetworkSettings.Ports}}{{range .}}{{if eq .HostIp "0.0.0.0"}}{{.HostPort}}{{end}}{{end}}{{end}}' $jobs_db_container)
-echo Starting CHEESE database server...
+echo "Starting CHEESE database server can take up to 2 min..."
 check_server $db_container $exposed_db_port
 
 echo Connected to CHEESE database server !
@@ -162,3 +182,5 @@ echo "Database server is available here : http://$IP:$exposed_db_port"
 echo "Jobs app server is available here : http://$IP:$exposed_jobs_db_port"
 echo "Jobs file server is available here : http://$IP:$exposed_jobs_file_server_port"
 echo Container names : $db_container $jobs_db_container
+fi
+

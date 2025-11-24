@@ -1,0 +1,23 @@
+#!/bin/bash
+
+nano ${HOME}/.config/cheese/nginx.conf
+
+while true; do
+  read -rp "Do you want to update your SSL certificates? (Y/N): " answer
+  case "$answer" in
+    [Yy]* )
+      echo "Updating certificates..."
+      # Put your update command here, for example:
+      nano ${HOME}/.config/cheese/nginx.crt
+      nano ${HOME}/.config/cheese/nginx.key
+      break
+      ;;
+    [Nn]* )
+      echo "Skipping certificate update."
+      break
+      ;;
+    * )
+      echo "Please answer Y or N."
+      ;;
+  esac
+done

@@ -1,9 +1,0 @@
-#!/bin/bash
-jobs_file_server_container="file_server"
-CHEESE_CUSTOMER="rejman"
-IMAGE_NAME="themamaai.azurecr.io/cheese/cheese-database"
-JOBS_FILE_SERVER_PORT="8000"
-
-FULL_IMAGE_NAME="${IMAGE_NAME}/${CHEESE_CUSTOMER}"
-
-docker run --privileged --rm -u $UID -v /:/data --entrypoint bash  --name $jobs_file_server_container -p $JOBS_FILE_SERVER_PORT $FULL_IMAGE_NAME -c "python -m http.server 8000 --directory /data/tmp/cheese-jobs"

@@ -76,6 +76,16 @@ while [[ $# -gt 0 ]]; do
       cheese-configure $@
       exit 0
       ;;
+    configure-nginx)
+      shift 1
+      configure-nginx $@
+      exit 0
+      ;;
+    configure-oauth2)
+      shift 1
+      configure-oauth2 $@
+      exit 0
+      ;;
     update-env)
       shift 1
       update-env $@
@@ -98,6 +108,11 @@ while [[ $# -gt 0 ]]; do
       stop-apps $@
       exit 0
       ;;
+    stop)
+      shift 1
+      stop-main-servers $@
+      exit 0
+      ;;
     start-app)
       shift 1
       set -e
@@ -111,6 +126,12 @@ while [[ $# -gt 0 ]]; do
       check-license
       start-server
       start-app $@
+
+      if [ $NGINX=="true" ] ; then
+      start-oauth2
+      start-nginx
+      echo "CHEESE is running here : https://$IP/"
+      fi
       exit 0
       ;;
     run-inference)
