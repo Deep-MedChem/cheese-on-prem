@@ -14,7 +14,6 @@ http {
   }
 
   upstream backend {
-    # server hamzagamouh_cheese_api_01516a03:8001;   # <–– using the container name here
     server main_cheese_api:8001;   # <–– using the container name here
   }
 
