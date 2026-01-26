@@ -154,7 +154,7 @@ fi
 
 DEST=$(convert_to_absolute_path $dest)
 
-INFERENCE_IMAGE="themamaai.azurecr.io/cheese/cheese_inference/${CHEESE_CUSTOMER}"
+INFERENCE_IMAGE="cheese.azurecr.io/on-prem/cheese_inference/${CHEESE_CUSTOMER}"
 OUTPUT_DIRECTORY="/data/${DEST}"
 NEW_OUTPUT_DIRECTORY="${DEST}"
 echo Saving outputs to $NEW_OUTPUT_DIRECTORY

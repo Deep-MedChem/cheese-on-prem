@@ -1,6 +1,8 @@
 #!/bin/bash
 
+
 # Run the script
+echo "Verifying CHEESE license"
 verify-license > /dev/null 2>&1
 
 # Check if it succeeded

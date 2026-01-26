@@ -73,14 +73,14 @@ fi
 
 
 
-IMAGE_NAME="themamaai.azurecr.io/cheese/cheese-new-ui"
+IMAGE_NAME="cheese.azurecr.io/on-prem/cheese-new-ui"
 
 FULL_IMAGE_NAME="${IMAGE_NAME}/${CHEESE_CUSTOMER}"
 
 set -e
 
 
-if [ $NGINX=="true" ] ; then
+if [ $NGINX == "true" ] ; then
     API_URL="https://$IP/cheese-api"
     INTERNAL_API_URL="http://main_cheese_api:8001"
     ui_container="main_cheese_ui"

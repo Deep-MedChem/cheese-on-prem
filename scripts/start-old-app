@@ -78,7 +78,7 @@ check_cheese_server
 fi
 set -e
 
-IMAGE_NAME="themamaai.azurecr.io/cheese/cheese-ui"
+IMAGE_NAME="cheese.azurecr.io/on-prem/cheese-ui"
 
 FULL_IMAGE_NAME="${IMAGE_NAME}/${CHEESE_CUSTOMER}"
 

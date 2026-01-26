@@ -2,7 +2,6 @@ TRANSFORMERS:
   espsim: Electrostatic
   shapesim: Shape
   tanimoto: Fingerprint
-  active_pairs: Activity
 
 NUM_POINTS:
   LOW: 1000

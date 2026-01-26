@@ -127,7 +127,7 @@ while [[ $# -gt 0 ]]; do
       start-server
       start-app $@
 
-      if [ $NGINX=="true" ] ; then
+      if [ $NGINX == "true" ] ; then
       start-oauth2
       start-nginx
       echo "CHEESE is running here : https://$IP/"

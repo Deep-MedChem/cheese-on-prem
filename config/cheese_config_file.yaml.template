@@ -2,7 +2,6 @@ TRANSFORMERS:
   morgan: "tanimoto"
   espsim_electrostatic: "espsim"
   espsim_shape: "shapesim"
-  active_pairs: "active_pairs"
 
 DIM: "256"
 

@@ -24,7 +24,7 @@ while [[ $# -gt 0 ]]; do
 done
 
 
-IMAGE_NAME="themamaai.azurecr.io/cheese/cheese-api"
+IMAGE_NAME="cheese.azurecr.io/on-prem/cheese-api"
 FULL_IMAGE_NAME="${IMAGE_NAME}/${CHEESE_CUSTOMER}"
 
 set -e

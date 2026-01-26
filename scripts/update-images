@@ -1,10 +1,10 @@
 #!/bin/bash
 
 echo Downloading CHEESE images...
-REPO_NAME="themamaai.azurecr.io/cheese"
+REPO_NAME="cheese.azurecr.io/on-prem"
 
 if [ "$CHEESE_CUSTOMER" = 'test' ] ; then
-docker login -u cheese-test -p $CHEESE_PASSWORD $REPO_NAME
+docker login -u admin -p $CHEESE_PASSWORD $REPO_NAME
 else
 docker login -u $CHEESE_CUSTOMER -p $CHEESE_PASSWORD $REPO_NAME
 fi
@@ -20,8 +20,8 @@ case "$answer" in
         IFS=',' read -ra strings <<< "$CHEESE_PACKAGE"
 
         for image_name in "${strings[@]}"; do
-            echo "Pulling $image_name"
-            docker pull "themamaai.azurecr.io/cheese/$image_name/${CHEESE_CUSTOMER}"
+            echo "Pulling $REPO_NAME/$image_name/${CHEESE_CUSTOMER}" #do$image_name"
+            docker pull "$REPO_NAME/$image_name/${CHEESE_CUSTOMER}"
 
         done
         ;;
@@ -35,8 +35,10 @@ esac
 
 
 # Pull Nginx and Oauth2-proxy images
-
+if [ $NGINX == "true" ];then
 echo "Pulling nginx image..."
 docker pull docker.io/library/nginx:alpine
 echo "Pulling oauth2 image..."
 docker pull quay.io/oauth2-proxy/oauth2-proxy:latest
+
+fi

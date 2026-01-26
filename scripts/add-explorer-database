@@ -75,7 +75,7 @@ done
 
 
 
-IMAGE_NAME="themamaai.azurecr.io/cheese/cheese-explorer"
+IMAGE_NAME="cheese.azurecr.io/on-prem/cheese-explorer"
 FULL_IMAGE_NAME="${IMAGE_NAME}/${CHEESE_CUSTOMER}"
 
 filename=$(basename $input_file)

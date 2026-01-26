@@ -75,7 +75,7 @@ while [[ $# -gt 0 ]]; do
 done
 
 
-if [ $NGINX=="true" ] ; then
+if [ $NGINX == "true" ] ; then
   api_container="main_cheese_api";
   db_container="main_cheese_db";
   jobs_db_container="main_cheese_jobs_db";
@@ -173,7 +173,7 @@ check_server(){
 docker network inspect cheese-network >/dev/null 2>&1 || docker network create cheese-network
 
 
-IMAGE_NAME="themamaai.azurecr.io/cheese/cheese-api"
+IMAGE_NAME="cheese.azurecr.io/on-prem/cheese-api"
 FULL_IMAGE_NAME="${IMAGE_NAME}/${CHEESE_CUSTOMER}"
 
 
@@ -205,7 +205,7 @@ DB_URL="http://$db_container:8001"
 JOBS_DB_URL="http://$jobs_db_container:8001"
 
 
-if [ $NGINX=="true" ] ; then
+if [ $NGINX == "true" ] ; then
 start-db --db_container $db_container --jobs_db_container $jobs_db_container --jobs_exec_container $jobs_exec_container --download_exec_container $download_exec_container --jobs_file_server_container $jobs_file_server_container
 docker run --privileged -d -u $UID -v /:/data --network cheese-network -it --env DB_URL=$DB_URL --env JOBS_DB_URL=$JOBS_DB_URL  --env-file $CONFIG_FILE --name $api_container --rm $FULL_IMAGE_NAME
 
