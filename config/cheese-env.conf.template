@@ -2,3 +2,4 @@ CHEESE_CUSTOMER=test
 CHEESE_PASSWORD=XXX
 VISUALISATION_MODELS_PATH=/data/on-prem/visualisation_models/models
 VISUALISATION_DATA_PATH=/data/on-prem/visualization_data
+NGINX=false
