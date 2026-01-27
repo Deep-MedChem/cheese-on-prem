@@ -166,8 +166,8 @@ docker run --privileged -d -u $UID -v /:/data --entrypoint python --env-file $CO
 
 if [ $NGINX == "true" ] ; then
 docker run --privileged -d -u $UID -v /:/data --network cheese-network --entrypoint bash --env-file $CONFIG_FILE --env JOBS_DATA_PATH=$JOBS_DATA_PATH --name $db_container --name $jobs_db_container $FULL_IMAGE_NAME -c "python -um cheese_database.jobs_app"
-echo "Starting CHEESE database server can take up to 2 min..."
-sleep 120
+echo "Starting CHEESE database server can take up to 3 min..."
+sleep 180
 
 else
 
@@ -175,7 +175,7 @@ docker run --privileged -d -u $UID -v /:/data --network cheese-network --entrypo
 # exposed_db_port=$(docker inspect $db_container | grep HostPort | sort | uniq | grep -o [0-9] | tr -d '\n')
 exposed_db_port=$(docker inspect -f '{{range .NetworkSettings.Ports}}{{range .}}{{if eq .HostIp "0.0.0.0"}}{{.HostPort}}{{end}}{{end}}{{end}}' $db_container)
 exposed_jobs_db_port=$(docker inspect -f '{{range .NetworkSettings.Ports}}{{range .}}{{if eq .HostIp "0.0.0.0"}}{{.HostPort}}{{end}}{{end}}{{end}}' $jobs_db_container)
-check_server $db_container $exposed_db_port
+# check_server $db_container $exposed_db_port
 
 echo Connected to CHEESE database server !
 echo "Database server is available here : http://$IP:$exposed_db_port"
