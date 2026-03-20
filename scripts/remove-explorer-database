@@ -46,8 +46,7 @@ done
 
 
 
-IMAGE_NAME="cheese.azurecr.io/on-prem/cheese-explorer"
-FULL_IMAGE_NAME="${IMAGE_NAME}/${CHEESE_CUSTOMER}"
+FULL_IMAGE_NAME="cheese.azurecr.io/cheese-explorer:on-prem"
 
 CONFIG_FILE="${HOME}/.config/cheese/cheese-env-file.conf"
 
