@@ -59,9 +59,7 @@ docker inspect -f '{{range .NetworkSettings.Ports}}{{range .}}{{if eq .HostIp "0
 
 
 
-
-IMAGE_NAME="cheese.azurecr.io/on-prem/cheese-explorer"
-FULL_IMAGE_NAME="${IMAGE_NAME}/${CHEESE_CUSTOMER}"
+FULL_IMAGE_NAME="cheese.azurecr.io/cheese-explorer:on-prem"
 current_config_file="${HOME}/.config/cheese/cheese-explorer-conf.yaml"
 
 if [ ! -e "$current_config_file" ]; then

@@ -1,5 +1,6 @@
-IMAGE_NAME="cheese.azurecr.io/on-prem/cheese-database"
-FULL_IMAGE_NAME="${IMAGE_NAME}/${CHEESE_CUSTOMER}"
+# !/bin/bash
+
+FULL_IMAGE_NAME="cheese.azurecr.io/cheese-database:on-prem"
 
 CONFIG_FILE="${HOME}/.config/cheese/cheese-env-file.conf"
 

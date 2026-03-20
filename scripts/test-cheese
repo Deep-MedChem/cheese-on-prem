@@ -9,7 +9,7 @@ echo "TESTING [1/7] : Testing CHEESE inference..."
 echo Making test directory
 mkdir -p /tmp/$test_folder_name
 
-INFERENCE_IMAGE="cheese.azurecr.io/on-prem/cheese_inference/${CHEESE_CUSTOMER}"
+INFRENCE_IMAGE="cheese.azurecr.io/cheese-inference:on-prem"
 
 if docker image inspect "$INFERENCE_IMAGE" > /dev/null 2>&1; then
 cheese run-inference --input_file "${REPO_FOLDER}/tests/test_inference.csv" --dest "/tmp/$test_folder_name/test_db" --index_type in_memory --chunk_size 100 --batch_size 32 --valid_smiles 'false' --canonicalize_smiles 'false' --skip_file_headers 'false'
@@ -33,7 +33,7 @@ cheese search --input_file "${REPO_FOLDER}/tests/test_mols.csv" --output_file /t
 
 # Testing explorer
 
-EXPLORER_IMAGE="cheese.azurecr.io/on-prem/cheese-explorer/${CHEESE_CUSTOMER}"
+EXPLORER_IMAGE="cheese.azurecr.io/cheese-explorer:on-prem"
 echo ""
 echo "TESTING [6/7] : Testing CHEESE explorer - adding database..."
 

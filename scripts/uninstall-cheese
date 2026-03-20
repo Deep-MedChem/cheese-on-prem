@@ -24,7 +24,7 @@ fi
 if [[ "$remove_images" == "y" || "$remove_images" == "Y" ]]; then
     echo "Removing Docker images..."
 
-    REPO_NAME="cheese.azurecr.io/on-prem"
+    REPO_NAME="cheese.azurecr.io"
 
     # Find image IDs that match the repo
     image_ids=$(docker images "$REPO_NAME" --format '{{.ID}}')
