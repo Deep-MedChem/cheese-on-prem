@@ -182,7 +182,7 @@ if [ -n "$gpu_devices" ]; then
         --input_file $DEST_INPUT_FILE \
         --extension $EXTENSION \
         --delimiter $DELIMITER \
-        --output_directory $OUTPUT_DIRECTORY --batch_size $batch_size --chunk_size $chunk_size --clustering_bs $clustering_batch_size --validate_smiles $valid_smiles --canonicalize_smiles $canonicalize_smiles --skip_headers $skip_file_headers
+        --output_directory $OUTPUT_DIRECTORY --batch_size $batch_size --chunk_size $chunk_size --clustering_bs $clustering_batch_size --validate_smiles $valid_smiles --canonicalize_smiles $canonicalize_smiles --skip_headers $skip_file_headers --restructure_database "true"
         
   else
     echo "GPU is not available !"
@@ -203,7 +203,7 @@ docker run --privileged -u $UID -v /:/data -it \
       --input_file $DEST_INPUT_FILE \
       --extension $EXTENSION \
       --delimiter $DELIMITER \
-      --output_directory $OUTPUT_DIRECTORY --batch_size $batch_size --chunk_size $chunk_size --clustering_bs $clustering_batch_size --validate_smiles $valid_smiles --canonicalize_smiles $canonicalize_smiles --skip_headers $skip_file_headers
+      --output_directory $OUTPUT_DIRECTORY --batch_size $batch_size --chunk_size $chunk_size --clustering_bs $clustering_batch_size --validate_smiles $valid_smiles --canonicalize_smiles $canonicalize_smiles --skip_headers $skip_file_headers --restructure_database "true"
       
 
 fi
