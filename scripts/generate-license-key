@@ -24,7 +24,7 @@ while [[ $# -gt 0 ]]; do
 done
 
 
-FULL_IMAGE_NAME="cheese.azurecr.io/cheese-orchestrator:on-prem"
+FULL_IMAGE_NAME="cheese.azurecr.io/on-prem/cheese-orchestrator/$CHEESE_CUSTOMER"
 
 set -e
 

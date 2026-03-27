@@ -73,8 +73,7 @@ fi
 
 
 
-FULL_IMAGE_NAME="cheese.azurecr.io/cheese-search-ui:on-prem"
-
+FULL_IMAGE_NAME="cheese.azurecr.io/on-prem/cheese-search-ui/$CHEESE_CUSTOMER"
 set -e
 
 

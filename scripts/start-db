@@ -120,7 +120,7 @@ check_server(){
 }
 
 
-FULL_IMAGE_NAME="cheese.azurecr.io/cheese-database:on-prem"
+FULL_IMAGE_NAME="cheese.azurecr.io/on-prem/cheese-database/$CHEESE_CUSTOMER"
 
 # echo Welcome to CHEESE Database !
 

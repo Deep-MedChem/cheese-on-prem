@@ -172,7 +172,7 @@ check_server(){
 # Create a docker network to communicate between containers
 docker network inspect cheese-network >/dev/null 2>&1 || docker network create cheese-network
 
-FULL_IMAGE_NAME="cheese.azurecr.io/cheese-orchestrator:on-prem"
+FULL_IMAGE_NAME="cheese.azurecr.io/on-prem/cheese-orchestrator/$CHEESE_CUSTOMER"
 
 
 # Exit if there are any further errors
