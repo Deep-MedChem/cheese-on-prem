@@ -77,7 +77,7 @@ fi
 docker run --privileged -d -u $UID -v /:/external -it -p $EXPLORER_PORT \
   --env EXT="/external" --env-file $CONFIG_FILE \
   --env EXPLORER_CONFIG_FILE=$current_config_file \
-  --name $explorer_container $FULL_IMAGE_NAME
+  --name $explorer_container --rm $FULL_IMAGE_NAME
 
 echo "Starting cheese Explorer..."
 sleep 30

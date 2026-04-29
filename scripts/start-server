@@ -1,6 +1,8 @@
 #!/bin/bash
 
-API_PORT=8001
+API_HOST_PORT=8001
+API_PORT="${API_HOST_PORT}:8001"
+API_PORT_SPECIFIED=false
 random_uuid=$(uuidgen | cut -c1-8)
 api_container="${USER}_cheese_api_${random_uuid}"
 db_container="${USER}_cheese_db_${random_uuid}"
@@ -31,8 +33,9 @@ show_help() {
 while [[ $# -gt 0 ]]; do
   case "$1" in
     -p|--port)
-      port="$2"
-      API_PORT=$port:8001
+      API_HOST_PORT="$2"
+      API_PORT="${API_HOST_PORT}:8001"
+      API_PORT_SPECIFIED=true
       shift 2
       ;;
     --file_server_port)
@@ -92,6 +95,14 @@ get_port(){
 local container_name="$1"
 # docker inspect $container_name | grep HostPort | sort | uniq | grep -o [0-9] | tr -d '\n'
 docker inspect -f '{{range .NetworkSettings.Ports}}{{range .}}{{if eq .HostIp "0.0.0.0"}}{{.HostPort}}{{end}}{{end}}{{end}}' $container_name
+}
+
+is_port_in_use(){
+local port="$1"
+if command -v ss >/dev/null 2>&1 && ss -ltn "sport = :$port" | grep -q LISTEN; then
+  return 0
+fi
+docker ps --format '{{.Ports}}' | grep -Eq "(^|[,:])${port}->|:${port}->"
 }
 
 
@@ -172,6 +183,12 @@ check_server(){
 # Create a docker network to communicate between containers
 docker network inspect cheese-network >/dev/null 2>&1 || docker network create cheese-network
 
+if [ "$API_PORT_SPECIFIED" = "false" ] && is_port_in_use "$API_HOST_PORT"; then
+  echo "Port $API_HOST_PORT is already in use. Please specify a different CHEESE API port with: cheese start-server --port <port>"
+  echo "For the full stack, run: cheese start --port <port>"
+  exit 1
+fi
+
 FULL_IMAGE_NAME="cheese.azurecr.io/on-prem/cheese-orchestrator/$CHEESE_CUSTOMER"
 
 
@@ -190,7 +207,7 @@ JOBS_DB_URL="http://$jobs_db_container:8001"
 
 start-db --db_container $db_container --jobs_db_container $jobs_db_container --jobs_exec_container $jobs_exec_container --download_exec_container $download_exec_container --jobs_file_server_container $jobs_file_server_container
 echo "Running CHEESE API $api_container ..."
-docker run --privileged -d -u $UID -v /:/data --network cheese-network -it --env DB_URL=$DB_URL --env JOBS_DB_URL=$JOBS_DB_URL  --env-file $CONFIG_FILE --name $api_container --rm $FULL_IMAGE_NAME
+docker run --privileged -d -u $UID -v /:/data --network cheese-network -it -p $API_PORT --env DB_URL=$DB_URL --env JOBS_DB_URL=$JOBS_DB_URL  --env-file $CONFIG_FILE --name $api_container --rm $FULL_IMAGE_NAME
 
 
 

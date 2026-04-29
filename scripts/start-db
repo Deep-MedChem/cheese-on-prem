@@ -143,17 +143,16 @@ mkdir -p /tmp/cheese-jobs
 
 # Start file server for accessing jobs results
 
-docker run --privileged -d -u $UID -v /:/data --network cheese-network --entrypoint bash --name $jobs_file_server_container -p $JOBS_FILE_SERVER_PORT $FULL_IMAGE_NAME -c "python3 -m http.server 8000 --directory /data/tmp/cheese-jobs"
+docker run --privileged -d -u $UID -v /:/data --network cheese-network --entrypoint bash --name $jobs_file_server_container -p $JOBS_FILE_SERVER_PORT --rm $FULL_IMAGE_NAME -c "python3 -m http.server 8000 --directory /data/tmp/cheese-jobs"
 exposed_jobs_file_server_port=$(docker inspect -f '{{range .NetworkSettings.Ports}}{{range .}}{{if eq .HostIp "0.0.0.0"}}{{.HostPort}}{{end}}{{end}}{{end}}' $jobs_file_server_container)
 
 JOBS_FILE_SERVER_URL="https://$IP/cheese-fileserver"
 
 
-docker run --privileged -d -u $UID -v /:/data --entrypoint python --env-file $CONFIG_FILE --env JOBS_DATA_PATH="/tmp/cheese-jobs" --name $jobs_exec_container $FULL_IMAGE_NAME -c "from cheese_database.jobs_executor import main; main()"
-docker run --privileged -d -u $UID -v /:/data --entrypoint python --env-file $CONFIG_FILE --env JOBS_DATA_PATH="/tmp/cheese-jobs" --env JOBS_FILE_SERVER_URL=$JOBS_FILE_SERVER_URL --name $download_exec_container $FULL_IMAGE_NAME -c "from cheese_database.download_executor import main; main()"
+docker run --privileged -d -u $UID -v /:/data --entrypoint python --env-file $CONFIG_FILE --env JOBS_DATA_PATH="/tmp/cheese-jobs" --name $jobs_exec_container --rm $FULL_IMAGE_NAME -c "from cheese_database.jobs_executor import main; main()"
+docker run --privileged -d -u $UID -v /:/data --entrypoint python --env-file $CONFIG_FILE --env JOBS_DATA_PATH="/tmp/cheese-jobs" --env JOBS_FILE_SERVER_URL=$JOBS_FILE_SERVER_URL --name $download_exec_container --rm $FULL_IMAGE_NAME -c "from cheese_database.download_executor import main; main()"
 
 
-docker run --privileged -d -u $UID -v /:/data --network cheese-network --entrypoint bash --env-file $CONFIG_FILE --env JOBS_DATA_PATH=$JOBS_DATA_PATH --name $db_container --name $jobs_db_container $FULL_IMAGE_NAME -c "python -um cheese_database.jobs_app"
+docker run --privileged -d -u $UID -v /:/data --network cheese-network --entrypoint bash --env-file $CONFIG_FILE --env JOBS_DATA_PATH=$JOBS_DATA_PATH --name $db_container --name $jobs_db_container --rm $FULL_IMAGE_NAME -c "python -um cheese_database.jobs_app"
 echo "Starting CHEESE database server can take up to 3 min..."
 sleep 180
-

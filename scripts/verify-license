@@ -9,4 +9,4 @@ if [ "$TESTING" = "true" ] ; then
 fi
 
 
-docker run -it -u $UID -v /:/data --entrypoint python --env-file $CONFIG_FILE $FULL_IMAGE_NAME -c "from cheese_orchestrator import verify_cheese_license; verify_cheese_license()"
+docker run -it -u $UID -v /:/data --entrypoint python --env-file $CONFIG_FILE --rm $FULL_IMAGE_NAME -c "from cheese_orchestrator import verify_cheese_license; verify_cheese_license()"
