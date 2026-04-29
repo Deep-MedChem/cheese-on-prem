@@ -4,6 +4,7 @@ echo "Starting Oauth2-proxy..."
 docker rm -f cheese-oauth2-proxy &>/dev/null
 docker run -d \
   --name cheese-oauth2-proxy \
+  --rm \
   --env-file $HOME/.config/cheese/oauth2.env \
   -p 4180:4180 \
   --network cheese-network \

@@ -58,6 +58,7 @@ fi
 docker run --privileged -u $UID -v /:/external -it \
   -w "/opt/cheese/cheese_explorer_app/on_prem" \
   --entrypoint "python" \
+  --rm \
   --env EXT="/external" \
   --env EXPLORER_CONFIG_FILE="${HOME}/.config/cheese/cheese-explorer-conf.yaml" \
   --env-file $CONFIG_FILE \
