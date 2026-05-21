@@ -62,7 +62,7 @@ containers=$(docker ps -a --format '{{.Names}}' | grep "$container_substring")
 # Check if we have any containers with that name
 if [[ -n "$containers" ]]; then
   # Pick a random container from the list
-  api_container=$(echo "$containers" | head -n 1)
+  api_container=$(echo "$containers" | shuf -n 1)
   api_port=$(get_port $api_container)
   echo Found cheese server running on port $api_port
 else
