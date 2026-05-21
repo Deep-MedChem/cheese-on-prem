@@ -83,7 +83,7 @@ if [ $NGINX == "true" ] ; then
     ui_container="main_cheese_ui"
 
     echo "Running cheese UI ..."
-    docker run --platform linux/amd64 --privileged -u $UID -d --network cheese-network --env CHEESE_API=$INTERNAL_API_URL \
+    docker run --privileged -u $UID -d --network cheese-network --env CHEESE_API=$INTERNAL_API_URL \
       --env VITE_CHEESE_API=$API_URL/docs \
       --env CHEESE_UI_USER_SECRET=XXX \
       --env SUPABASE_URL=https://XXX \
@@ -108,7 +108,7 @@ INTERNAL_API_URL="http://$api_container:8001"
 API_URL="http://$IP:$api_port"
 
 echo "Running cheese UI ..."
-docker run --platform linux/amd64 --privileged -u $UID -d --network cheese-network --env CHEESE_API=$INTERNAL_API_URL \
+docker run --privileged -u $UID -d --network cheese-network --env CHEESE_API=$INTERNAL_API_URL \
   --env VITE_CHEESE_API=$API_URL/docs \
   --env CHEESE_UI_USER_SECRET=XXX \
   --env SUPABASE_URL=https://XXX \
