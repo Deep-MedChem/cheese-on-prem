@@ -14,7 +14,7 @@ You can install CHEESE on your instance using the following steps :
 
 1. Clone this repository on your instance
 
-2. Install CHEESE CLI by running `bash install-cheese.sh` in the repo's directory then check if it is installed by running `cheese`
+2. Install CHEESE CLI by running `bash install-cheese.sh` in the repo's directory. Then re-log in to the shell (or run `source ~/.bashrc`) and check if the installation completed by running `cheese`
 
 3. Contact us to provide you with a `CHEESE_PASSWORD` to be able to download CHEESE docker images.
 
