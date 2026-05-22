@@ -1,0 +1,52 @@
+#!/bin/bash
+# Bring up the cheese-electrostatics-inference service (ESP / RESP / Gasteiger / MMFF
+# charge prediction for the UI's molecule detail view). Optional — the UI proxy
+# returns a graceful 503 when this service isn't running.
+
+set -e
+source "$(dirname "$(readlink -f "$0")")/_compose-env"
+
+show_help() {
+  echo "Usage: cheese start-inference [options]"
+  echo "Options:"
+  echo "  -p, --port PORT   Host port to publish (default: 8005; container :8000 internally)"
+  echo "  -h, --help        Show this help"
+  exit 1
+}
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    -p|--port)
+      export INFERENCE_HOST_PORT="$2"
+      shift 2
+      ;;
+    -h|--help)
+      show_help
+      ;;
+    *)
+      echo "Unknown option: $1"
+      show_help
+      ;;
+  esac
+done
+
+echo "Starting CHEESE electrostatics inference..."
+$COMPOSE_CMD up -d inference
+
+echo "Waiting for inference to be healthy..."
+end=$((SECONDS+120))
+while [ $SECONDS -lt $end ]; do
+  status=$(docker inspect -f '{{.State.Health.Status}}' cheese-inference 2>/dev/null || echo "missing")
+  if [ "$status" = "healthy" ]; then
+    echo "Inference service is available at http://${IP:-localhost}:${INFERENCE_HOST_PORT:-8005}"
+    echo "Network alias on cheese-network: cheese-inference"
+    exit 0
+  fi
+  printf "."
+  sleep 3
+done
+
+echo
+echo "Timeout waiting for inference. Last status: $status"
+echo "Check logs: $COMPOSE_CMD logs inference"
+exit 1
