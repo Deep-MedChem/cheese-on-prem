@@ -58,13 +58,27 @@ docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' $co
 check_cheese_server(){
 # Get all containers with a name containing "cheese_api"
 local container_substring="${USER}_cheese_api"
-containers=$(docker ps -a --format '{{.Names}}' | grep "$container_substring")
+containers=$(docker ps --format '{{.Names}}' | grep "$container_substring")
 # Check if we have any containers with that name
 if [[ -n "$containers" ]]; then
   # Pick a random container from the list
   api_container=$(echo "$containers" | shuf -n 1)
   api_port=$(get_port $api_container)
   echo Found cheese server running on port $api_port
+else
+  echo "No CHEESE Server is running. Please run cheese start-server !!"
+  exit 1
+  fi
+}
+
+find_cheese_server_container(){
+# Get all containers with a name containing "cheese_api"
+local container_substring="${USER}_cheese_api"
+containers=$(docker ps --format '{{.Names}}' | grep "$container_substring")
+# Check if we have any containers with that name
+if [[ -n "$containers" ]]; then
+  # Pick a random container from the list
+  api_container=$(echo "$containers" | shuf -n 1)
 else
   echo "No CHEESE Server is running. Please run cheese start-server !!"
   exit 1
@@ -76,6 +90,8 @@ fi
 FULL_IMAGE_NAME="cheese.azurecr.io/on-prem/cheese-search-ui/$CHEESE_CUSTOMER"
 set -e
 
+docker ps -q -a --filter "name=${USER}_cheese_ui" | xargs -r docker rm -f
+docker ps -q -a --filter "name=${USER}_cheese_new_ui" | xargs -r docker rm -f
 
 if [ $NGINX == "true" ] ; then
     API_URL="https://$IP/cheese-api"
@@ -98,6 +114,8 @@ if [ -z "$api_port" ]; then
 echo "No CHEESE server port was specified, checking available CHEESE servers..."
       
 check_cheese_server
+else
+find_cheese_server_container
 fi
 
 INTERNAL_API_URL="http://$api_container:8001"
@@ -116,8 +134,5 @@ echo CHEESE UI is available here : http://"$IP":"$port"
 
 
 fi
-
-
-
 
 
