@@ -89,6 +89,10 @@ if [ $NGINX == "true" ] ; then
       --env SUPABASE_URL=https://XXX \
       --env SUPABASE_ANON_KEY=XXX \
       --env SUPABASE_SERVICE_ROLE_KEY=XXX \
+      --env ENABLE_AUTH=false \
+      --env ENABLE_TRACKING=false \
+      --env ENABLE_STRIPE=false \
+      --env ENABLE_NOTIFICATIONS=false \
       --name $ui_container --rm $FULL_IMAGE_NAME
 
 
@@ -110,6 +114,10 @@ docker run --privileged -u $UID -d --network cheese-network --env CHEESE_API=$IN
   --env SUPABASE_URL=https://XXX \
   --env SUPABASE_ANON_KEY=XXX \
   --env SUPABASE_SERVICE_ROLE_KEY=XXX \
+  --env ENABLE_AUTH=false \
+  --env ENABLE_TRACKING=false \
+  --env ENABLE_STRIPE=false \
+  --env ENABLE_NOTIFICATIONS=false \
   --name $ui_container -p $UI_PORT --rm $FULL_IMAGE_NAME
 port=$(get_port $ui_container)
 echo CHEESE UI is available here : http://"$IP":"$port"
