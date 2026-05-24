@@ -1,11 +1,13 @@
 #!/bin/bash
+# Bring up oauth2-proxy (perimeter SSO via the customer's IdP). Pulls config from
+# ~/.config/cheese/oauth2.env — see config/oauth2.env.template (Entra) and
+# config/oauth2-okta.env.template (Okta).
 
-echo "Starting Oauth2-proxy..."
-docker rm -f cheese-oauth2-proxy &>/dev/null
-docker run -d \
-  --name cheese-oauth2-proxy \
-  --rm \
-  --env-file $HOME/.config/cheese/oauth2.env \
-  -p 4180:4180 \
-  --network cheese-network \
-  quay.io/oauth2-proxy/oauth2-proxy:latest
+set -e
+source "$(dirname "$(readlink -f "$0")")/_compose-env"
+
+export COMPOSE_PROFILES="sso"
+
+echo "Starting oauth2-proxy (sso profile)..."
+$COMPOSE_CMD --profile sso up -d oauth2-proxy
+echo "oauth2-proxy is up on :4180."

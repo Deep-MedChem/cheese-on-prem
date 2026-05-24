@@ -1,0 +1,202 @@
+# CHEESE on-prem stack.
+#
+# Default profile (no profile flag): db + jobs + orchestrator + ui + inference.
+# `--profile sso` adds nginx + oauth2-proxy for HTTPS + corporate IdP auth.
+#
+# Image tags interpolate ${CHEESE_CUSTOMER} (set by ~/.config/cheese/cheese-env.sh).
+# Per-container env comes from ~/.config/cheese/cheese-env-file.conf via env_file.
+#
+# Container names are stable (no random uuid) — restarting one service no longer
+# breaks others that referenced it by name (e.g. UI → orchestrator).
+
+x-cheese-db-image: &cheese-db-image
+  image: cheese.azurecr.io/on-prem/cheese-database/${CHEESE_CUSTOMER}:latest
+
+x-cheese-db-common: &cheese-db-common
+  <<: *cheese-db-image
+  env_file:
+    - ${HOME}/.config/cheese/cheese-env-file.conf
+  volumes:
+    - /:/data
+  user: "${UID:-1000}"
+  privileged: true
+  networks:
+    - cheese-network
+  restart: unless-stopped
+
+services:
+  # ── cheese-database: main search/embeddings API (port 8001 inside container) ─
+  db:
+    <<: *cheese-db-common
+    container_name: cheese-db
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8001/test"]
+      interval: 10s
+      timeout: 5s
+      retries: 60   # model load can take ~3 min
+      start_period: 30s
+
+  # ── jobs API (same image, different entrypoint) ───────────────────────────────
+  jobs-db:
+    <<: *cheese-db-common
+    container_name: cheese-jobs-db
+    entrypoint: ["bash", "-c", "python -um cheese_database.jobs_app"]
+    environment:
+      JOBS_DATA_PATH: /tmp/cheese-jobs
+
+  # ── jobs executor (background worker, no HTTP) ────────────────────────────────
+  jobs-exec:
+    <<: *cheese-db-common
+    container_name: cheese-jobs-exec
+    entrypoint: ["python", "-c", "from cheese_database.jobs_executor import main; main()"]
+    environment:
+      JOBS_DATA_PATH: /tmp/cheese-jobs
+
+  # ── download executor (background worker, no HTTP) ────────────────────────────
+  # JOBS_FILE_SERVER_URL is what the orchestrator embeds in download links sent
+  # to the browser, so it must be reachable from the user's machine. The wrapper
+  # script flips this to the NGINX-fronted HTTPS URL when COMPOSE_PROFILES=sso.
+  download-exec:
+    <<: *cheese-db-common
+    container_name: cheese-download-exec
+    entrypoint: ["python", "-c", "from cheese_database.download_executor import main; main()"]
+    environment:
+      JOBS_DATA_PATH: /tmp/cheese-jobs
+      JOBS_FILE_SERVER_URL: ${JOBS_FILE_SERVER_URL:-http://localhost:${JOBS_FILE_SERVER_PORT:-8000}}
+
+  # ── jobs file server (serves the /tmp/cheese-jobs directory over HTTP) ────────
+  file-server:
+    <<: *cheese-db-common
+    container_name: cheese-file-server
+    entrypoint: ["bash", "-c", "python3 -m http.server 8000 --directory /data/tmp/cheese-jobs"]
+    ports:
+      - "${JOBS_FILE_SERVER_PORT:-8000}:8000"
+
+  # ── cheese-orchestrator: the public CHEESE API ────────────────────────────────
+  api:
+    image: cheese.azurecr.io/on-prem/cheese-orchestrator/${CHEESE_CUSTOMER}:latest
+    container_name: cheese-api
+    env_file:
+      - ${HOME}/.config/cheese/cheese-env-file.conf
+    environment:
+      DB_URL: http://cheese-db:8001
+      JOBS_DB_URL: http://cheese-jobs-db:8001
+    volumes:
+      - /:/data
+    user: "${UID:-1000}"
+    privileged: true
+    networks:
+      - cheese-network
+    ports:
+      - "${API_HOST_PORT:-8001}:8001"
+    depends_on:
+      db:
+        condition: service_healthy
+      jobs-db:
+        condition: service_started
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:8001/available_databases || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 20s
+
+  # ── cheese-search-ui: Vite build + Express proxy ──────────────────────────────
+  # CHEESE_API points at the api service by name on cheese-network — stable, so
+  # restarting `api` no longer requires restarting `ui`.
+  # ELECTROSTATICS_API points at the inference service alias (always set; if the
+  # service isn't running, the UI's optional-service proxy returns 503 cleanly).
+  ui:
+    image: cheese.azurecr.io/on-prem/cheese-search-ui/${CHEESE_CUSTOMER}:latest
+    container_name: cheese-ui
+    environment:
+      CHEESE_API: http://cheese-api:8001
+      VITE_CHEESE_API: ${VITE_CHEESE_API:-http://${IP:-localhost}:${API_HOST_PORT:-8001}/docs}
+      ELECTROSTATICS_API: http://cheese-inference:8000
+      CHEESE_UI_USER_SECRET: ${CHEESE_UI_USER_SECRET:-local-dev}
+      SUPABASE_URL: ${SUPABASE_URL:-}
+      SUPABASE_ANON_KEY: ${SUPABASE_ANON_KEY:-}
+      SUPABASE_SERVICE_ROLE_KEY: ${SUPABASE_SERVICE_ROLE_KEY:-}
+      ENABLE_AUTH: ${ENABLE_AUTH:-false}
+      ENABLE_TRACKING: ${ENABLE_TRACKING:-false}
+      ENABLE_STRIPE: ${ENABLE_STRIPE:-false}
+      ENABLE_NOTIFICATIONS: ${ENABLE_NOTIFICATIONS:-false}
+      VITE_ENABLE_AUTH: ${ENABLE_AUTH:-false}
+      VITE_ENABLE_TRACKING: ${ENABLE_TRACKING:-false}
+      VITE_ENABLE_STRIPE: ${ENABLE_STRIPE:-false}
+      VITE_ENABLE_NOTIFICATIONS: ${ENABLE_NOTIFICATIONS:-false}
+      VITE_ENABLE_ANALYTICS: ${ENABLE_ANALYTICS:-false}
+      ENABLE_SUPABASE: ${ENABLE_SUPABASE:-false}
+      LOCAL: "True"
+    user: "${UID:-1000}"
+    privileged: true
+    networks:
+      - cheese-network
+    ports:
+      - "${UI_HOST_PORT:-3001}:3001"
+    depends_on:
+      api:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # ── cheese-electrostatics-inference: ESP/RESP charge prediction (optional) ────
+  # Registered on cheese-network under the alias 'cheese-inference' (which is the
+  # hardcoded default in the UI's server.ts, so no extra config needed).
+  inference:
+    image: cheese.azurecr.io/on-prem/cheese-electrostatics-inference/${CHEESE_CUSTOMER}:latest
+    container_name: cheese-inference
+    networks:
+      cheese-network:
+        aliases:
+          - cheese-inference
+    ports:
+      - "${INFERENCE_HOST_PORT:-8005}:8000"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8000/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 30s
+    restart: unless-stopped
+
+  # ── nginx + oauth2-proxy (perimeter auth) ─────────────────────────────────────
+  # Off by default. Brought up only via `--profile sso` (cheese wrapper sets
+  # COMPOSE_PROFILES=sso when NGINX=true in cheese-env-file.conf).
+  nginx:
+    image: nginx:alpine
+    container_name: cheese-nginx
+    profiles: [sso]
+    command: ["nginx", "-g", "daemon off;"]
+    volumes:
+      - ${HOME}/.config/cheese/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ${HOME}/.config/cheese/nginx.crt:/etc/ssl/certs/nginx.crt:ro
+      - ${HOME}/.config/cheese/nginx.key:/etc/ssl/private/nginx.key:ro
+    ports:
+      - "80:80"
+      - "443:443"
+    networks:
+      - cheese-network
+    depends_on:
+      - ui
+      - oauth2-proxy
+    restart: unless-stopped
+
+  oauth2-proxy:
+    image: quay.io/oauth2-proxy/oauth2-proxy:latest
+    container_name: cheese-oauth2-proxy
+    profiles: [sso]
+    env_file:
+      - ${HOME}/.config/cheese/oauth2.env
+    ports:
+      - "4180:4180"
+    networks:
+      - cheese-network
+    restart: unless-stopped
+
+networks:
+  cheese-network:
+    # Preserve the legacy network name so anything outside this compose project
+    # that explicitly references "cheese-network" (manual `docker run` flows,
+    # ad-hoc debugging) keeps resolving.
+    name: cheese-network

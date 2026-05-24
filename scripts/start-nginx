@@ -1,10 +1,13 @@
 #!/bin/bash
+# Bring up NGINX (perimeter TLS + auth routing). Requires the `sso` profile,
+# which the cheese wrapper sets automatically when NGINX=true. If invoked
+# directly, force the profile here.
 
-echo "Starting Nginx..."
-docker rm -f cheese-nginx-base &>/dev/null
+set -e
+source "$(dirname "$(readlink -f "$0")")/_compose-env"
 
-docker run -d --network cheese-network --name cheese-nginx-base --rm \
-  -v $HOME/.config/cheese/nginx.conf:/etc/nginx/nginx.conf \
-  -v $HOME/.config/cheese/nginx.crt:/etc/ssl/certs/nginx.crt:ro \
-  -v $HOME/.config/cheese/nginx.key:/etc/ssl/private/nginx.key:ro \
-  -p 80:80 -p 443:443 nginx:alpine nginx -g 'daemon off;'
+export COMPOSE_PROFILES="sso"
+
+echo "Starting NGINX (sso profile)..."
+$COMPOSE_CMD --profile sso up -d nginx
+echo "NGINX is up on :80 and :443."

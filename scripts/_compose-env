@@ -1,0 +1,35 @@
+#!/bin/bash
+# Sourced by every start-*/stop-* wrapper. Picks the compose project name and
+# project file path so `docker compose` invocations work no matter which
+# directory the user is in. Also maps the legacy NGINX=true env var to the SSO
+# compose profile (off by default).
+#
+# Exported for use by callers:
+#   COMPOSE_CMD  — the `docker compose -p ... -f ...` prefix to invoke
+#   IP, UID      — kept available for downstream scripts (legacy env)
+
+# Stable project name so `docker compose ...` from any cwd targets the same
+# stack. Mirrors the customer namespace used in image tags.
+export COMPOSE_PROJECT_NAME="${COMPOSE_PROJECT_NAME:-cheese}"
+
+# Locate docker-compose.yml: REPO_FOLDER is set by cheese-env.sh on install.
+COMPOSE_FILE="${REPO_FOLDER}/docker-compose.yml"
+if [ ! -f "$COMPOSE_FILE" ]; then
+  echo "docker-compose.yml not found at $COMPOSE_FILE"
+  echo "Set REPO_FOLDER in ~/.config/cheese/cheese-env-file.conf to your cheese-on-prem checkout."
+  exit 1
+fi
+
+# Map legacy NGINX=true → SSO profile.
+if [ "${NGINX:-false}" = "true" ]; then
+  export COMPOSE_PROFILES="sso"
+  # In SSO mode, downloads are served through NGINX, not the raw file-server port.
+  export JOBS_FILE_SERVER_URL="${JOBS_FILE_SERVER_URL:-https://${IP}/cheese-fileserver}"
+fi
+
+# Make UID available for the `user:` field in compose.yml (bash sets UID but
+# doesn't export it by default).
+export UID
+
+# Exported for the wrappers:
+export COMPOSE_CMD="docker compose -p ${COMPOSE_PROJECT_NAME} -f ${COMPOSE_FILE}"
