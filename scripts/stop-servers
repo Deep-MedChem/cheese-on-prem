@@ -1,38 +1,12 @@
 #!/bin/bash
+# Stop the cheese-database + cheese-orchestrator stack (preserves UI).
+# Use `cheese stop` (stop-main-servers) to bring everything down.
 
-# Function to display usage
-show_help() {
-  echo "Usage: cheese stop-servers [options]"
-  echo "Stop all CHEESE servers"
-  echo "Options:"
-  echo "  -h, --help       Show this help message"
-  exit 1
-}
+set -e
+source "$(dirname "$(readlink -f "$0")")/_compose-env"
 
-
-# Parse command-line arguments manually
-while [[ $# -gt 0 ]]; do
-  case "$1" in
-    -h|--help)
-      usage
-      ;;
-    *)
-      echo "Unknown option: $1"
-      usage
-      ;;
-  esac
-done
-
-# Stop all CHEESE API servers
-substring="${USER}_cheese_api"
-docker ps -q -a --filter "name=$substring" | xargs -r docker rm -f
-
-# Stop all CHEESE DB servers
-substring="${USER}_cheese_db"
-docker ps -q -a --filter "name=$substring" | xargs -r docker rm -f
-substring="${USER}_cheese_jobs"
-docker ps -q -a --filter "name=$substring" | xargs -r docker rm -f
-substring="${USER}_cheese_download"
-docker ps -q -a --filter "name=$substring" | xargs -r docker rm -f
-substring="${USER}_cheese_jobs_file_server"
-docker ps -q -a --filter "name=$substring" | xargs -r docker rm -f
+echo "Stopping CHEESE backend services..."
+$COMPOSE_CMD stop api jobs-db jobs-exec download-exec file-server db
+# Also stop the optional inference service (best-effort).
+$COMPOSE_CMD stop inference 2>/dev/null || true
+echo "Stopped."

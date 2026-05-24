@@ -10,10 +10,11 @@ show_help() {
   echo "  test                         Test CHEESE commands"
   echo "  generate-license-key         Generate CHEESE license key"
   echo "  start-server                 Run CHEESE server (API)"
+  echo "  start-inference              Run CHEESE electrostatics inference service (optional)"
   echo "  stop-servers                 Stop all CHEESE servers"
   echo "  stop-apps                    Stop all CHEESE UIs"
   echo "  start-app                    Run CHEESE UI"
-  echo "  start                        Run CHEESE server + UI"
+  echo "  start                        Run CHEESE server + UI (+ inference)"
   echo "  embeddings-cpu               Run CHEESE Embeddings computation on CPU"
   echo "  search                       Run CHEESE Search"
   echo "  visualize                    Run CHEESE Embeddings visualization"
@@ -98,6 +99,13 @@ while [[ $# -gt 0 ]]; do
       start-server $@
       exit 0
       ;;
+    start-inference)
+      shift 1
+      set -e
+      check-license
+      start-inference $@
+      exit 0
+      ;;
     stop-servers)
       shift 1
       stop-servers $@
@@ -138,13 +146,14 @@ while [[ $# -gt 0 ]]; do
         esac
       done
       start-server "${start_args[@]}"
+      start-inference || echo "(inference service failed to start; ESP charge feature will be hidden)"
       if [ -n "$api_port" ]; then
         start-app --api_port "$api_port"
       else
         start-app
       fi
 
-      if [ $NGINX == "true" ] ; then
+      if [ "$NGINX" = "true" ] ; then
       start-oauth2
       start-nginx
       echo "CHEESE is running here : https://$IP/"

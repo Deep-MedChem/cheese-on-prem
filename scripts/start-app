@@ -1,28 +1,26 @@
 #!/bin/bash
-UI_PORT=3001
-random_uuid=$(uuidgen | cut -c1-8)
-ui_container="${USER}_cheese_new_ui_${random_uuid}"
+# Bring up the cheese-search-ui. Depends on cheese-api being healthy.
 
-# Function to display usage
+set -e
+source "$(dirname "$(readlink -f "$0")")/_compose-env"
+
 show_help() {
-  echo "Usage: cheese start-new-app [options]"
+  echo "Usage: cheese start-app [options]"
   echo "Options:"
-  echo "  --api_port   Specify API port (Optional)"
-  echo "  -p, --port      Specify UI port (Optional)"
-  echo "  -h, --help       Show this help message"
+  echo "  -p, --port PORT       Host port to publish the UI on (default: 3001)"
+  echo "  --api_port PORT       Host port the orchestrator is published on (default: 8001)"
+  echo "  -h, --help            Show this help"
   exit 1
 }
 
-# Parse command-line arguments manually
 while [[ $# -gt 0 ]]; do
   case "$1" in
     -p|--port)
-      port="$2"
-      UI_PORT=$port:3001
+      export UI_HOST_PORT="$2"
       shift 2
       ;;
     --api_port)
-      api_port="$2"
+      export API_HOST_PORT="$2"
       shift 2
       ;;
     -h|--help)
@@ -30,109 +28,14 @@ while [[ $# -gt 0 ]]; do
       ;;
     *)
       echo "Unknown option: $1"
-      exit 1
       show_help
       ;;
   esac
 done
 
-# Function to get Port number of container
+echo "Starting CHEESE UI (compose will pull in the API + DB deps if needed)..."
+$COMPOSE_CMD up -d ui
 
-get_port(){
-
-local container_name="$1"
-docker inspect -f '{{range .NetworkSettings.Ports}}{{range .}}{{if eq .HostIp "0.0.0.0"}}{{.HostPort}}{{end}}{{end}}{{end}}' $container_name
-
-}
-
-# Function to get host IP of a container
-
-get_host(){
-
-local container_name="$1"
-docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' $container_name
-
-}
-
-
-check_cheese_server(){
-# Get all containers with a name containing "cheese_api"
-local container_substring="${USER}_cheese_api"
-containers=$(docker ps --format '{{.Names}}' | grep "$container_substring")
-# Check if we have any containers with that name
-if [[ -n "$containers" ]]; then
-  # Pick a random container from the list
-  api_container=$(echo "$containers" | shuf -n 1)
-  api_port=$(get_port $api_container)
-  echo Found cheese server running on port $api_port
-else
-  echo "No CHEESE Server is running. Please run cheese start-server !!"
-  exit 1
-  fi
-}
-
-find_cheese_server_container(){
-# Get all containers with a name containing "cheese_api"
-local container_substring="${USER}_cheese_api"
-containers=$(docker ps --format '{{.Names}}' | grep "$container_substring")
-# Check if we have any containers with that name
-if [[ -n "$containers" ]]; then
-  # Pick a random container from the list
-  api_container=$(echo "$containers" | shuf -n 1)
-else
-  echo "No CHEESE Server is running. Please run cheese start-server !!"
-  exit 1
-fi
-}
-
-
-
-FULL_IMAGE_NAME="cheese.azurecr.io/on-prem/cheese-search-ui/$CHEESE_CUSTOMER"
-set -e
-
-docker ps -q -a --filter "name=${USER}_cheese_ui" | xargs -r docker rm -f
-docker ps -q -a --filter "name=${USER}_cheese_new_ui" | xargs -r docker rm -f
-
-if [ $NGINX == "true" ] ; then
-    API_URL="https://$IP/cheese-api"
-    INTERNAL_API_URL="http://main_cheese_api:8001"
-    ui_container="main_cheese_ui"
-
-    echo "Running cheese UI ..."
-    docker run --privileged -u $UID -d --network cheese-network --env CHEESE_API=$INTERNAL_API_URL \
-      --env VITE_CHEESE_API=$API_URL/docs \
-      --env CHEESE_UI_USER_SECRET=XXX \
-      --env SUPABASE_URL=https://XXX \
-      --env SUPABASE_ANON_KEY=XXX \
-      --env SUPABASE_SERVICE_ROLE_KEY=XXX \
-      --name $ui_container --rm $FULL_IMAGE_NAME
-
-
-else
-
-if [ -z "$api_port" ]; then
-echo "No CHEESE server port was specified, checking available CHEESE servers..."
-      
-check_cheese_server
-else
-find_cheese_server_container
-fi
-
-INTERNAL_API_URL="http://$api_container:8001"
-API_URL="http://$IP:$api_port"
-
-echo "Running cheese UI ..."
-docker run --privileged -u $UID -d --network cheese-network --env CHEESE_API=$INTERNAL_API_URL \
-  --env VITE_CHEESE_API=$API_URL/docs \
-  --env CHEESE_UI_USER_SECRET=XXX \
-  --env SUPABASE_URL=https://XXX \
-  --env SUPABASE_ANON_KEY=XXX \
-  --env SUPABASE_SERVICE_ROLE_KEY=XXX \
-  --name $ui_container -p $UI_PORT --rm $FULL_IMAGE_NAME
-port=$(get_port $ui_container)
-echo CHEESE UI is available here : http://"$IP":"$port"
-
-
-fi
-
-
+# Best-effort readiness probe; the UI is up almost immediately once the API is.
+sleep 3
+echo "CHEESE UI is available at http://${IP:-localhost}:${UI_HOST_PORT:-3001}"
