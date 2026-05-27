@@ -39,6 +39,7 @@ if [ -n "${API_HOST_PORT}" ] && ss -ltn "sport = :${API_HOST_PORT}" 2>/dev/null 
 fi
 
 # Compose handles the database deps automatically.
+mkdir -p "${JOBS_DATA_PATH:-${HOME}/.local/share/cheese-jobs}"
 echo "Starting CHEESE API (compose will start the database stack if it isn't running)..."
 $COMPOSE_CMD up -d api
 
