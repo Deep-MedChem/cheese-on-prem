@@ -18,6 +18,8 @@ mkdir -p "${HOME}/.local/bin"
 mkdir -p "${HOME}/.local/bin/cheese"
 chmod -R 777 "${HOME}/.local/bin/cheese"
 
+mkdir -p "${HOME}/.local/share/cheese-jobs"
+
 bash ./install/configure-bashrc.sh
 
 
