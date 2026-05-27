@@ -81,6 +81,9 @@ services:
     environment:
       DB_URL: http://cheese-db:8001
       JOBS_DB_URL: http://cheese-jobs-db:8001
+      # SynthonGPT is a hosted service unreachable from on-prem; default to a closed local port so /available_databases fails fast instead of hitting the orchestrator's 30s connect timeout. Override in cheese-env-file.conf if a real backend is reachable.
+      SYNTHONGPT_API_URL: ${SYNTHONGPT_API_URL:-http://127.0.0.1:1}
+      SYNTHONGPT_API_TIMEOUT_SECONDS: ${SYNTHONGPT_API_TIMEOUT_SECONDS:-2}
     volumes:
       - /:/data
     user: "${UID:-1000}"
@@ -96,7 +99,7 @@ services:
         condition: service_started
     restart: unless-stopped
     healthcheck:
-      test: ["CMD-SHELL", "curl -fsS http://localhost:8001/available_databases || exit 1"]
+      test: ["CMD-SHELL", "curl -fsS http://localhost:8001/health || exit 1"]
       interval: 10s
       timeout: 5s
       retries: 6
