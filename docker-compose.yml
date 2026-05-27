@@ -97,6 +97,12 @@ services:
         condition: service_healthy
       jobs-db:
         condition: service_started
+      jobs-exec:
+        condition: service_started
+      download-exec:
+        condition: service_started
+      file-server:
+        condition: service_started
     restart: unless-stopped
     healthcheck:
       test: ["CMD-SHELL", "curl -fsS http://localhost:8001/health || exit 1"]
