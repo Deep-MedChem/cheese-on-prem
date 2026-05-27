@@ -42,7 +42,7 @@ services:
     container_name: cheese-jobs-db
     entrypoint: ["bash", "-c", "python -um cheese_database.jobs_app"]
     environment:
-      JOBS_DATA_PATH: /tmp/cheese-jobs
+      JOBS_DATA_PATH: ${JOBS_DATA_PATH:-${HOME}/.local/share/cheese-jobs}
 
   # ── jobs executor (background worker, no HTTP) ────────────────────────────────
   jobs-exec:
@@ -50,7 +50,7 @@ services:
     container_name: cheese-jobs-exec
     entrypoint: ["python", "-c", "from cheese_database.jobs_executor import main; main()"]
     environment:
-      JOBS_DATA_PATH: /tmp/cheese-jobs
+      JOBS_DATA_PATH: ${JOBS_DATA_PATH:-${HOME}/.local/share/cheese-jobs}
 
   # ── download executor (background worker, no HTTP) ────────────────────────────
   # JOBS_FILE_SERVER_URL is what the orchestrator embeds in download links sent
@@ -61,14 +61,14 @@ services:
     container_name: cheese-download-exec
     entrypoint: ["python", "-c", "from cheese_database.download_executor import main; main()"]
     environment:
-      JOBS_DATA_PATH: /tmp/cheese-jobs
+      JOBS_DATA_PATH: ${JOBS_DATA_PATH:-${HOME}/.local/share/cheese-jobs}
       JOBS_FILE_SERVER_URL: ${JOBS_FILE_SERVER_URL:-http://localhost:${JOBS_FILE_SERVER_PORT:-8000}}
 
-  # ── jobs file server (serves the /tmp/cheese-jobs directory over HTTP) ────────
+  # ── jobs file server (serves the JOBS_DATA_PATH directory over HTTP) ─────────
   file-server:
     <<: *cheese-db-common
     container_name: cheese-file-server
-    entrypoint: ["bash", "-c", "python3 -m http.server 8000 --directory /data/tmp/cheese-jobs"]
+    entrypoint: ["bash", "-c", "python3 -m http.server 8000 --directory /data${JOBS_DATA_PATH:-${HOME}/.local/share/cheese-jobs}"]
     ports:
       - "${JOBS_FILE_SERVER_PORT:-8000}:8000"
 
