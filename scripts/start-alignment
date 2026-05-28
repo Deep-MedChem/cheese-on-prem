@@ -1,0 +1,52 @@
+#!/bin/bash
+# Bring up the cheese-inference alignment HTTP service (conformer alignment
+# for the UI's molecule-card alignment viewer). Optional — the UI proxy returns
+# a graceful 5xx when this service isn't running.
+
+set -e
+source "$(dirname "$(readlink -f "$0")")/_compose-env"
+
+show_help() {
+  echo "Usage: cheese start-alignment [options]"
+  echo "Options:"
+  echo "  -p, --port PORT   Host port to publish (default: 8006; container :8000 internally)"
+  echo "  -h, --help        Show this help"
+  exit 1
+}
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    -p|--port)
+      export ALIGNMENT_HOST_PORT="$2"
+      shift 2
+      ;;
+    -h|--help)
+      show_help
+      ;;
+    *)
+      echo "Unknown option: $1"
+      show_help
+      ;;
+  esac
+done
+
+echo "Starting CHEESE alignment service..."
+$COMPOSE_CMD up -d alignment
+
+echo "Waiting for alignment to be healthy..."
+end=$((SECONDS+180))
+while [ $SECONDS -lt $end ]; do
+  status=$(docker inspect -f '{{.State.Health.Status}}' cheese-alignment 2>/dev/null || echo "missing")
+  if [ "$status" = "healthy" ]; then
+    echo "Alignment service is available at http://${IP:-localhost}:${ALIGNMENT_HOST_PORT:-8006}"
+    echo "Network alias on cheese-network: cheese-alignment-app"
+    exit 0
+  fi
+  printf "."
+  sleep 3
+done
+
+echo
+echo "Timeout waiting for alignment. Last status: $status"
+echo "Check logs: $COMPOSE_CMD logs alignment"
+exit 1
