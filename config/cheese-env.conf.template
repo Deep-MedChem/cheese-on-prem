@@ -4,6 +4,14 @@ VISUALISATION_MODELS_PATH=/data/on-prem/visualisation_models/models
 VISUALISATION_DATA_PATH=/data/on-prem/visualization_data
 NGINX=false
 
+# Images pulled by `cheese update-images`. Drop entries you don't need.
+#   cheese-search-ui                — web UI
+#   cheese-database                 — search/embeddings DB
+#   cheese-orchestrator             — public CHEESE API
+#   cheese-electrostatics-inference — ESP/RESP charge prediction (optional ESP viewer)
+#   cheese-inference                — embedding/indexing inference (alignment, `cheese run-inference`)
+CHEESE_PACKAGE=cheese-search-ui,cheese-database,cheese-orchestrator,cheese-electrostatics-inference,cheese-inference
+
 # Dummy values keep the UI's Supabase client constructor happy when ENABLE_AUTH=false.
 SUPABASE_URL=http://localhost
 SUPABASE_ANON_KEY=dummy
