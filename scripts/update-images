@@ -1,12 +1,19 @@
 #!/bin/bash
 
-echo Downloading CHEESE images...
-REPO_NAME="cheese.azurecr.io/on-prem"
+set -e
 
+echo Downloading CHEESE images...
+REGISTRY="cheese.azurecr.io"
+REPO_NAME="${REGISTRY}/on-prem"
+
+# docker login takes a registry hostname, not a repo path. The previous form
+# (`docker login ... cheese.azurecr.io/on-prem`) returned UNAUTHORIZED from ACR;
+# pulls only kept working because earlier installs had cached creds for the
+# bare host. Also use --password-stdin to avoid the insecure-CLI-password warning.
 if [ "$CHEESE_CUSTOMER" = 'test' ] ; then
-docker login -u admin -p $CHEESE_PASSWORD $REPO_NAME
+  echo "$CHEESE_PASSWORD" | docker login -u admin --password-stdin "$REGISTRY"
 else
-docker login -u $CHEESE_CUSTOMER -p $CHEESE_PASSWORD $REPO_NAME
+  echo "$CHEESE_PASSWORD" | docker login -u "$CHEESE_CUSTOMER" --password-stdin "$REGISTRY"
 fi
 
 # Pull the CHEESE app images
