@@ -162,12 +162,47 @@ services:
     ports:
       - "${INFERENCE_HOST_PORT:-8005}:8000"
     healthcheck:
-      test: ["CMD-SHELL", "wget -qO- http://localhost:8000/health || exit 1"]
+      # The inference image ships without wget/curl, so probe via python (which is always present).
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8000/health',timeout=3).status==200 else 1)"]
       interval: 10s
       timeout: 5s
       retries: 6
       start_period: 30s
     restart: unless-stopped
+
+  # ── cheese-inference: conformer alignment HTTP service (optional) ─────────────
+  # Same image the `cheese run-inference` CLI uses for building indices, but
+  # launched in HTTP-server mode here. The image's default entrypoint runs the
+  # index-building pipeline, so we override it to start the FastAPI app.
+  # Registered on cheese-network under the alias 'cheese-alignment-app' (which
+  # is the hardcoded default in the UI's server.ts, so no extra config needed).
+  alignment:
+    image: cheese.azurecr.io/on-prem/cheese-inference/${CHEESE_CUSTOMER}:latest
+    container_name: cheese-alignment
+    entrypoint: ["python", "-um", "cheese_inference.app"]
+    networks:
+      cheese-network:
+        aliases:
+          - cheese-alignment-app
+    ports:
+      - "${ALIGNMENT_HOST_PORT:-8006}:8000"
+    healthcheck:
+      # Image ships without wget/curl, so probe via python.
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8000/health',timeout=3).status==200 else 1)"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 60s
+    restart: unless-stopped
+    # Uncomment to enable GPU acceleration (requires nvidia-container-toolkit on
+    # the host). Without GPU the service still works but is considerably slower.
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: all
+    #           capabilities: [gpu]
 
   # ── nginx + oauth2-proxy (perimeter auth) ─────────────────────────────────────
   # Off by default. Brought up only via `--profile sso` (cheese wrapper sets
