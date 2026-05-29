@@ -12,18 +12,28 @@ set -e
 cd "${REPO_FOLDER}/scripts"
 echo Installing CHEESE scripts...
 
+# On a (re)install, don't clobber already-installed scripts by default; let the
+# user opt in to overwriting. Standalone `cheese update-scripts` leaves
+# INSTALL_MODE unset and always refreshes.
+overwrite_scripts="y"
+if [ "$INSTALL_MODE" = "1" ] && [ -n "$(ls -A "$HOME/.local/bin/cheese" 2>/dev/null)" ]; then
+    read -p "Existing CHEESE scripts found in $HOME/.local/bin/cheese. Overwrite them (y/N)? " overwrite_scripts || true
+fi
 
-for file in *; do
-  # Check if the file ends with .sh
-  if [[ "$file" != *.sh ]]; then
-    # If the file does not end with .sh, print its name
-    echo "Moved $file to $HOME/.local/bin/cheese"
-    cp $file $HOME/.local/bin/cheese
-    echo Setting permissions for $HOME/.local/bin/cheese/$file
-    chmod +x $HOME/.local/bin/cheese/$file
-
-  fi
-done
+if [[ "$overwrite_scripts" =~ ^[Yy]$ ]]; then
+    count=0
+    for file in *; do
+      # Install everything except the *.sh helpers.
+      if [[ "$file" != *.sh ]]; then
+        cp "$file" "$HOME/.local/bin/cheese/"
+        chmod +x "$HOME/.local/bin/cheese/$file"
+        count=$((count + 1))
+      fi
+    done
+    echo "Installed $count scripts to $HOME/.local/bin/cheese"
+else
+    echo "Preserving existing scripts in $HOME/.local/bin/cheese."
+fi
 
 cp "${REPO_FOLDER}/install/cheese-env.sh" ${HOME}/.config/cheese
 cp "${REPO_FOLDER}/assets/check_database_server.py" ${HOME}/.config/cheese
