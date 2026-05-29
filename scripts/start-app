@@ -33,20 +33,8 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-# Pick free host ports automatically if the requested/default ones are taken.
-# `up -d ui` starts the api and file-server deps, and VITE_CHEESE_API tracks
-# API_HOST_PORT.
-ensure_free_port JOBS_FILE_SERVER_PORT 8000 cheese-file-server
-ensure_free_port API_HOST_PORT 8001 cheese-api
-while [ "${API_HOST_PORT:-8001}" = "${JOBS_FILE_SERVER_PORT:-8000}" ]; do
-  API_HOST_PORT=$((API_HOST_PORT + 1))
-  while port_in_use "$API_HOST_PORT"; do
-    API_HOST_PORT=$((API_HOST_PORT + 1))
-  done
-  export API_HOST_PORT
-  echo "⚠️  API port conflicted with jobs file-server port — publishing cheese-api on ${API_HOST_PORT} instead." >&2
-done
-ensure_free_port UI_HOST_PORT 3001 cheese-ui
+# `up -d ui` pulls in the api + db deps, and VITE_CHEESE_API tracks API_HOST_PORT.
+ensure_all_free_ports
 
 echo "Starting CHEESE UI (compose will pull in the API + DB deps if needed)..."
 $COMPOSE_CMD up -d ui

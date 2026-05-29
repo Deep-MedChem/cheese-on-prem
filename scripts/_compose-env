@@ -37,15 +37,22 @@ export UID
 docker network inspect cheese-network >/dev/null 2>&1 || docker network create cheese-network >/dev/null
 
 # ── Automatic host-port adaptation ────────────────────────────────────────────
-# The start-* wrappers call ensure_free_port before `compose up` so a busy host
-# port no longer aborts the launch with "port is already allocated" — we pick the
-# next free port instead.
+# The start-* wrappers call ensure_all_free_ports before `compose up` so a busy
+# host port no longer aborts the launch with "port is already allocated" — we pick
+# the next free port instead.
 
-# port_in_use PORT → returns 0 (true) if PORT is already bound on the host.
-# Checks both host listeners (ss) and docker-published ports, since iptables-only
-# docker setups don't surface published ports through ss.
+# Ports already assigned during this invocation, so two services that scan from
+# nearby defaults can't both pick the same not-yet-bound port.
+_claimed_ports=" "
+_claim_port() { _claimed_ports="${_claimed_ports}$1 "; }
+
+# port_in_use PORT → returns 0 (true) if PORT is already taken: claimed earlier in
+# this run, bound by a host listener (ss), or published by a container. The ss +
+# docker pair matters because iptables-only docker setups don't surface published
+# ports through ss.
 port_in_use() {
   local p="$1"
+  case "$_claimed_ports" in *" $p "*) return 0 ;; esac
   ss -ltnH "sport = :$p" 2>/dev/null | grep -q . && return 0
   docker ps --format '{{.Ports}}' 2>/dev/null \
     | grep -qE "(0\.0\.0\.0|\[::\]|127\.0\.0\.1):$p->" && return 0
@@ -66,8 +73,7 @@ ensure_free_port() {
     running=$(docker ps --filter "name=^${own}$" --format '{{.Ports}}' 2>/dev/null \
       | grep -oE ':[0-9]+->' | grep -oE '[0-9]+' | head -1)
     if [ -n "$running" ]; then
-      export "$var=$running"
-      return 0
+      _claim_port "$running"; export "$var=$running"; return 0
     fi
   fi
 
@@ -77,12 +83,24 @@ ensure_free_port() {
     p=$((p + 1)); tries=$((tries + 1))
     if [ "$tries" -gt 50 ]; then
       echo "⚠️  No free port found near $want for ${own:-$var}; keeping $want." >&2
-      export "$var=$want"
-      return 0
+      _claim_port "$want"; export "$var=$want"; return 0
     fi
   done
   [ "$p" != "$want" ] && echo "⚠️  Port $want is in use — publishing ${own:-$var} on $p instead." >&2
-  export "$var=$p"
+  _claim_port "$p"; export "$var=$p"
+}
+
+# ensure_all_free_ports — adapt every published host port up front. Called by the
+# start-* wrappers so transitively-started dependencies (e.g. file-server, pulled
+# in by `compose up -d api`) get a free port too, not just the directly-named one.
+# Services not started by a given wrapper are unaffected: setting their var has no
+# effect unless compose actually brings them up.
+ensure_all_free_ports() {
+  ensure_free_port JOBS_FILE_SERVER_PORT 8000 cheese-file-server
+  ensure_free_port API_HOST_PORT         8001 cheese-api
+  ensure_free_port UI_HOST_PORT          3001 cheese-ui
+  ensure_free_port INFERENCE_HOST_PORT   8005 cheese-inference
+  ensure_free_port ALIGNMENT_HOST_PORT   8006 cheese-alignment
 }
 
 # Exported for the wrappers:

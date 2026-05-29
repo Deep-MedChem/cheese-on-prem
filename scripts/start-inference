@@ -30,8 +30,8 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-# Pick a free host port automatically if the requested/default one is taken.
-ensure_free_port INFERENCE_HOST_PORT 8005 cheese-inference
+# Pick free host ports automatically if the requested/default ones are taken.
+ensure_all_free_ports
 
 echo "Starting CHEESE electrostatics inference..."
 $COMPOSE_CMD up -d inference
