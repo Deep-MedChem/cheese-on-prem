@@ -38,7 +38,7 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-mkdir -p /tmp/cheese-jobs
+# Job-data directory is ensured by _compose-env (sourced above).
 
 # Pick free host ports automatically if the requested/default ones are taken.
 ensure_all_free_ports
