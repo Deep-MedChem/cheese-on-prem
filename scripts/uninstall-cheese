@@ -15,12 +15,10 @@ if [[ "$remove_config" == "y" || "$remove_config" == "Y" ]]; then
     rm -rf $CONFIG_DIR
 fi
 
-if [[ "$remove_scripts" == "y" || "$remove_scripts" == "Y" ]]; then
-    echo "Removing scripts..."
-    rm -rf $SCRIPTS_DIR
-fi
-
-
+# Remove images BEFORE scripts: this uninstaller and the `cheese` dispatcher
+# live in $SCRIPTS_DIR, so deleting it removes the very script that performs
+# the image cleanup. Doing images first means a failed/retried image removal
+# can still fall back to re-running the uninstaller.
 if [[ "$remove_images" == "y" || "$remove_images" == "Y" ]]; then
     echo "Removing Docker images..."
 
@@ -56,6 +54,13 @@ if [[ "$remove_images" == "y" || "$remove_images" == "Y" ]]; then
         done
         echo "Docker images for $REPO_NAME removed."
     fi
+fi
+
+# Scripts last: this removes the uninstaller itself, so nothing after this
+# block can rely on $SCRIPTS_DIR being present.
+if [[ "$remove_scripts" == "y" || "$remove_scripts" == "Y" ]]; then
+    echo "Removing scripts..."
+    rm -rf $SCRIPTS_DIR
 fi
 
 # Show final message only if all are 'y' or 'Y'
