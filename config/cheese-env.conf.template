@@ -25,7 +25,8 @@ SUPABASE_SERVICE_ROLE_KEY=dummy
 
 # Database SFTP server + password for `cheese configure-dbs` / `cheese download-dbs`.
 # DeepMedChem provides both on request. CHEESE_DB_PASSWORD is the SFTP password —
-# it is separate from CHEESE_PASSWORD (the image-registry password). Both must be
-# set before downloading databases; the commands fail fast with a message if not.
-#DB_SERVER=
-#CHEESE_DB_PASSWORD=
+# it is separate from CHEESE_PASSWORD (the image-registry password). Both are
+# required to download databases; while left as XXX the commands fail fast with
+# a message.
+DB_SERVER=XXX
+CHEESE_DB_PASSWORD=XXX
