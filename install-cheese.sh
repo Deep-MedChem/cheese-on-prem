@@ -18,7 +18,20 @@ mkdir -p "${HOME}/.local/bin"
 mkdir -p "${HOME}/.local/bin/cheese"
 chmod -R 777 "${HOME}/.local/bin/cheese"
 
-mkdir -p "${HOME}/.local/share/cheese-jobs"
+# ── Job-data directory ────────────────────────────────────────────────────────
+# CHEESE persists job state (search jobs, downloads) on disk. The jobs containers
+# and the file-server mount this directory; if it's missing the file-server's
+# `http.server --directory ...` exits and `restart: unless-stopped` turns that
+# into a crash loop. Prompt for a location, defaulting to the standard XDG data
+# path, then create it and persist the choice so every container agrees on it.
+DEFAULT_JOBS_DATA_PATH="${HOME}/.local/share/cheese-jobs"
+read -r -p "Directory for CHEESE job data [${DEFAULT_JOBS_DATA_PATH}]: " JOBS_DATA_PATH_INPUT
+# ENTER (or non-interactive stdin) → roll with the default.
+JOBS_DATA_PATH="${JOBS_DATA_PATH_INPUT:-$DEFAULT_JOBS_DATA_PATH}"
+# Expand a leading ~ since `read` keeps it literal.
+JOBS_DATA_PATH="${JOBS_DATA_PATH/#\~/$HOME}"
+echo "Using job-data directory: ${JOBS_DATA_PATH}"
+mkdir -p "${JOBS_DATA_PATH}"
 
 bash ./install/configure-bashrc.sh
 
@@ -65,6 +78,7 @@ if [ ! "$env_file" = "" ]; then
     echo "IP=$ip_address" >> "${HOME}/.config/cheese/cheese-env-file.conf";
     echo "CONFIG_FILE=${HOME}/.config/cheese/cheese_config_file.yaml" >> "${HOME}/.config/cheese/cheese-env-file.conf";
     echo "CHEESE_LICENSE_FILE=${HOME}/.config/cheese/cheese_license_file.json" >> "${HOME}/.config/cheese/cheese-env-file.conf";
+    echo "JOBS_DATA_PATH=${JOBS_DATA_PATH}" >> "${HOME}/.config/cheese/cheese-env-file.conf";
     echo "TESTING=false" >> "${HOME}/.config/cheese/cheese-env-file.conf";
     echo "VISUALIZATION=false" >> "${HOME}/.config/cheese/cheese-env-file.conf";
     sed -i '/^$/d' "${HOME}/.config/cheese/cheese-env-file.conf"

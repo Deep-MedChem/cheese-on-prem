@@ -30,7 +30,7 @@ services:
     <<: *cheese-db-common
     container_name: cheese-db
     healthcheck:
-      test: ["CMD", "curl", "-fsS", "http://localhost:8001/test"]
+      test: ["CMD", "curl", "-fsS", "http://localhost:${DB_INTERNAL_PORT:-8001}/test"]
       interval: 10s
       timeout: 5s
       retries: 60   # model load can take ~3 min
@@ -68,9 +68,11 @@ services:
   file-server:
     <<: *cheese-db-common
     container_name: cheese-file-server
-    entrypoint: ["bash", "-c", "python3 -m http.server 8000 --directory /data${JOBS_DATA_PATH:-${HOME}/.local/share/cheese-jobs}"]
+    # `mkdir -p` first so a missing JOBS_DATA_PATH self-heals instead of making
+    # http.server exit and crash-loop under restart: unless-stopped.
+    entrypoint: ["bash", "-c", "mkdir -p /data${JOBS_DATA_PATH:-${HOME}/.local/share/cheese-jobs} && python3 -m http.server ${FILE_SERVER_INTERNAL_PORT:-8000} --directory /data${JOBS_DATA_PATH:-${HOME}/.local/share/cheese-jobs}"]
     ports:
-      - "${JOBS_FILE_SERVER_PORT:-8000}:8000"
+      - "${JOBS_FILE_SERVER_PORT:-8000}:${FILE_SERVER_INTERNAL_PORT:-8000}"
 
   # ── cheese-orchestrator: the public CHEESE API ────────────────────────────────
   api:
@@ -79,8 +81,8 @@ services:
     env_file:
       - ${HOME}/.config/cheese/cheese-env-file.conf
     environment:
-      DB_URL: http://cheese-db:8001
-      JOBS_DB_URL: http://cheese-jobs-db:8001
+      DB_URL: http://cheese-db:${DB_INTERNAL_PORT:-8001}
+      JOBS_DB_URL: http://cheese-jobs-db:${DB_INTERNAL_PORT:-8001}
       # SynthonGPT isn't part of the on-prem package; point at a closed local port so /available_databases fails fast instead of hitting the orchestrator's 30s connect timeout.
       SYNTHONGPT_API_URL: http://127.0.0.1:1
       SYNTHONGPT_API_TIMEOUT_SECONDS: 2
@@ -91,7 +93,7 @@ services:
     networks:
       - cheese-network
     ports:
-      - "${API_HOST_PORT:-8001}:8001"
+      - "${API_HOST_PORT:-8001}:${API_INTERNAL_PORT:-8001}"
     depends_on:
       db:
         condition: service_healthy
@@ -105,7 +107,7 @@ services:
         condition: service_started
     restart: unless-stopped
     healthcheck:
-      test: ["CMD-SHELL", "curl -fsS http://localhost:8001/health || exit 1"]
+      test: ["CMD-SHELL", "curl -fsS http://localhost:${API_INTERNAL_PORT:-8001}/health || exit 1"]
       interval: 10s
       timeout: 5s
       retries: 6
@@ -120,9 +122,9 @@ services:
     image: cheese.azurecr.io/on-prem/cheese-search-ui/${CHEESE_CUSTOMER}:latest
     container_name: cheese-ui
     environment:
-      CHEESE_API: http://cheese-api:8001
+      CHEESE_API: http://cheese-api:${API_INTERNAL_PORT:-8001}
       VITE_CHEESE_API: ${VITE_CHEESE_API:-http://${IP:-localhost}:${API_HOST_PORT:-8001}/docs}
-      ELECTROSTATICS_API: http://cheese-inference:8000
+      ELECTROSTATICS_API: http://cheese-inference:${INFERENCE_INTERNAL_PORT:-8000}
       CHEESE_UI_USER_SECRET: ${CHEESE_UI_USER_SECRET:-local-dev}
       SUPABASE_URL: ${SUPABASE_URL:-}
       SUPABASE_ANON_KEY: ${SUPABASE_ANON_KEY:-}
@@ -143,7 +145,7 @@ services:
     networks:
       - cheese-network
     ports:
-      - "${UI_HOST_PORT:-3001}:3001"
+      - "${UI_HOST_PORT:-3001}:${UI_INTERNAL_PORT:-3001}"
     depends_on:
       api:
         condition: service_healthy
@@ -160,10 +162,10 @@ services:
         aliases:
           - cheese-inference
     ports:
-      - "${INFERENCE_HOST_PORT:-8005}:8000"
+      - "${INFERENCE_HOST_PORT:-8005}:${INFERENCE_INTERNAL_PORT:-8000}"
     healthcheck:
       # The inference image ships without wget/curl, so probe via python (which is always present).
-      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8000/health',timeout=3).status==200 else 1)"]
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:${INFERENCE_INTERNAL_PORT:-8000}/health',timeout=3).status==200 else 1)"]
       interval: 10s
       timeout: 5s
       retries: 6
@@ -185,10 +187,10 @@ services:
         aliases:
           - cheese-alignment-app
     ports:
-      - "${ALIGNMENT_HOST_PORT:-8006}:8000"
+      - "${ALIGNMENT_HOST_PORT:-8006}:${ALIGNMENT_INTERNAL_PORT:-8000}"
     healthcheck:
       # Image ships without wget/curl, so probe via python.
-      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8000/health',timeout=3).status==200 else 1)"]
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:${ALIGNMENT_INTERNAL_PORT:-8000}/health',timeout=3).status==200 else 1)"]
       interval: 10s
       timeout: 5s
       retries: 6
