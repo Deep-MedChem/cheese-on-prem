@@ -31,5 +31,10 @@ fi
 # doesn't export it by default).
 export UID
 
+# The cheese-network is declared `external` in compose, so it must pre-exist.
+# Create it on demand (idempotent): adopts a legacy network from the old
+# docker-run flow if present, otherwise creates a fresh one for new installs.
+docker network inspect cheese-network >/dev/null 2>&1 || docker network create cheese-network >/dev/null
+
 # Exported for the wrappers:
 export COMPOSE_CMD="docker compose -p ${COMPOSE_PROJECT_NAME} -f ${COMPOSE_FILE}"

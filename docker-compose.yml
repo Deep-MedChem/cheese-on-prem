@@ -240,7 +240,12 @@ services:
 
 networks:
   cheese-network:
-    # Preserve the legacy network name so anything outside this compose project
-    # that explicitly references "cheese-network" (manual `docker run` flows,
-    # ad-hoc debugging) keeps resolving.
+    # Declared external so compose adopts a pre-existing "cheese-network" as-is
+    # instead of asserting ownership via the com.docker.compose.network label.
+    # Clients upgrading from the old `docker run` flow (and start-old-app) have a
+    # network created outside compose with no/empty labels; without external:true
+    # compose aborts with "incorrect label ... set to ''". _compose-env creates
+    # the network if it's missing, so fresh installs work too. This also keeps
+    # the legacy name resolvable for manual `docker run --network cheese-network`.
     name: cheese-network
+    external: true
