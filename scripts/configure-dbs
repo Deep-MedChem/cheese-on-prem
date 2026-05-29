@@ -1,14 +1,14 @@
 #!/bin/bash
-# Discover the databases available on the SFTP server, record their sizes, and
-# write a selection config that `cheese download-dbs` reads. Re-running refreshes
-# the list and sizes while preserving any yes/no choices you've already made.
+# Discover the databases available on the SFTP server and write a selection
+# config that `cheese download-dbs` reads. Re-running refreshes the list while
+# preserving any yes/no choices you've already made.
 set -e
 source "$(dirname "$(readlink -f "$0")")/_db-common"
 
 show_help() {
   echo "Usage: cheese configure-dbs [options]"
-  echo "Lists databases available on ${DB_SERVER}, records sizes, and writes"
-  echo "the download selection to ${DB_CONFIG}."
+  echo "Lists databases available on ${DB_SERVER} and writes the download"
+  echo "selection to ${DB_CONFIG}."
   echo "Options:"
   echo "  --no-edit    Just (re)write the config; don't open it in an editor"
   echo "  -h, --help   Show this help message"
@@ -50,7 +50,7 @@ if [ -z "$listing" ]; then
 fi
 mapfile -t dbs <<< "$listing"
 
-echo "Found ${#dbs[@]} database(s). Measuring sizes (recursive — may take a moment)..."
+echo "Found ${#dbs[@]} database(s)."
 
 mkdir -p "$(dirname "$DB_CONFIG")"
 tmp="$(mktemp)"
@@ -59,22 +59,17 @@ tmp="$(mktemp)"
   echo "# Refreshed: $(date '+%Y-%m-%d %H:%M:%S %z')  (re-run 'cheese configure-dbs' to update)"
   echo "#"
   echo "# Set each flag to yes/no, then run 'cheese download-dbs' (downloads all"
-  echo "# selected; with no config it downloads everything). Sizes are recursive."
+  echo "# selected; with no config it downloads everything)."
   echo "#"
-  echo "#   <name>=<yes|no>    # <size>"
+  echo "#   <name>=<yes|no>"
   echo
 } > "$tmp"
 
 for db in "${dbs[@]}"; do
-  # Recursive total via `rclone size`; grab the human-readable part of
-  # "Total size: 45.123 GiB (48452342342 Byte)". Fall back to "?" on failure.
-  size=$(rclone_sftp size "$(db_remote "$db")" 2>/dev/null \
-           | sed -n 's/^Total size: *\(.*\) (.*/\1/p')
-  [ -z "$size" ] && size="?"
   flag="${prev[$db]:-yes}"           # new DBs default to yes (download by default)
   [[ "$flag" == "yes" || "$flag" == "no" ]] || flag="yes"
-  printf '%s=%s    # %s\n' "$db" "$flag" "$size" >> "$tmp"
-  echo "  $db  ($size)  -> $flag"
+  printf '%s=%s\n' "$db" "$flag" >> "$tmp"
+  echo "  $db  -> $flag"
 done
 
 mv "$tmp" "$DB_CONFIG"
