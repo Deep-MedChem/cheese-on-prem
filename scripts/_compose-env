@@ -20,6 +20,25 @@ if [ ! -f "$COMPOSE_FILE" ]; then
   exit 1
 fi
 
+# Load the human-readable port map (config/ports.env) so its values feed both
+# docker-compose interpolation and ensure_all_free_ports below. A value already
+# present in the environment wins (so `API_HOST_PORT=9999 cheese start` and the
+# runtime auto-bump both override the file); the file wins over the compose
+# `${VAR:-default}` fallbacks, which still keep compose runnable standalone.
+PORTS_ENV_FILE="${REPO_FOLDER}/config/ports.env"
+if [ -f "$PORTS_ENV_FILE" ]; then
+  while IFS= read -r _line; do
+    _line="${_line%%#*}"                                  # drop inline comments
+    [[ "$_line" =~ ^[[:space:]]*$ ]] && continue          # skip blank/comment-only
+    _key="${_line%%=*}"; _key="${_key//[[:space:]]/}"     # trim key
+    _val="${_line#*=}"
+    _val="${_val#"${_val%%[![:space:]]*}"}"               # trim leading space
+    _val="${_val%"${_val##*[![:space:]]}"}"               # trim trailing space
+    [ -z "${!_key:-}" ] && export "$_key=$_val"           # shell env wins
+  done < "$PORTS_ENV_FILE"
+  unset _line _key _val
+fi
+
 # Map legacy NGINX=true → SSO profile.
 if [ "${NGINX:-false}" = "true" ]; then
   export COMPOSE_PROFILES="sso"
@@ -35,6 +54,22 @@ export UID
 # Create it on demand (idempotent): adopts a legacy network from the old
 # docker-run flow if present, otherwise creates a fresh one for new installs.
 docker network inspect cheese-network >/dev/null 2>&1 || docker network create cheese-network >/dev/null
+
+# ── Job-data directory guard ──────────────────────────────────────────────────
+# The jobs containers and file-server mount JOBS_DATA_PATH; if it's missing the
+# file-server's `http.server --directory ...` exits and crash-loops under
+# restart: unless-stopped. Check on every startup, warn, and recreate so the
+# stack always comes up cleanly. The installer normally writes JOBS_DATA_PATH
+# into cheese-env-file.conf, but fall back to the default if it's unset.
+DEFAULT_JOBS_DATA_PATH="${HOME}/.local/share/cheese-jobs"
+if [ -z "${JOBS_DATA_PATH:-}" ]; then
+  echo "⚠️  JOBS_DATA_PATH is not set — falling back to default ${DEFAULT_JOBS_DATA_PATH}" >&2
+  export JOBS_DATA_PATH="$DEFAULT_JOBS_DATA_PATH"
+fi
+if [ ! -d "$JOBS_DATA_PATH" ]; then
+  echo "⚠️  Job directory does not exist — recreating it at ${JOBS_DATA_PATH}" >&2
+  mkdir -p "$JOBS_DATA_PATH"
+fi
 
 # ── Automatic host-port adaptation ────────────────────────────────────────────
 # The start-* wrappers call ensure_all_free_ports before `compose up` so a busy

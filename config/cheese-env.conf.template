@@ -17,5 +17,8 @@ SUPABASE_URL=http://localhost
 SUPABASE_ANON_KEY=dummy
 SUPABASE_SERVICE_ROLE_KEY=dummy
 
-# Override the on-disk location for job state. Default: ${HOME}/.local/share/cheese-jobs
+# On-disk location for job state (search jobs, downloads). The installer prompts
+# for this and writes the chosen value below; ENTER accepts the default
+# ${HOME}/.local/share/cheese-jobs. Edit here to move it, then `cheese stop` /
+# `cheese start` to apply. Must exist — the file-server mounts it.
 #JOBS_DATA_PATH=
