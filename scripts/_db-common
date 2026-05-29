@@ -51,28 +51,38 @@ db_obscured_pass() {
   printf '%s' "$_db_obscured_pass"
 }
 
-# Pre-flight check: verify the server address and SFTP password are configured
-# BEFORE attempting any connection, so a missing setting fails fast with a clear
-# message instead of a slow, cryptic rclone auth error. Echoes the target when OK.
-# "XXX" is the template placeholder (same convention as CHEESE_PASSWORD), so an
-# unedited value counts as "not configured".
-db_preflight() {
-  local missing=0
-  if [ -z "$DB_SERVER" ] || [ "$DB_SERVER" = "XXX" ]; then
-    echo "DB_SERVER is not configured (still the XXX placeholder)." >&2
-    missing=1
+# Connectivity check: actually connect to the server with the configured
+# credentials (a cheap top-level listing) and fail fast if it doesn't work.
+# Timeouts/retries are bounded so a bad host or password fails in seconds instead
+# of rclone's ~30s+ default backoff. The rclone error is captured and classified
+# so the message points at the likely culprit — a rejected login → password, a
+# host/DNS/timeout error → server address.
+db_ping() {
+  echo "Checking connection to ${DB_SFTP_USER}@${DB_SERVER}..."
+  local out rc
+  out=$(rclone_sftp lsd "$(db_remote)" \
+          --contimeout 10s --timeout 20s --low-level-retries 1 --retries 1 2>&1)
+  rc=$?
+  [ "$rc" -eq 0 ] && { echo "Connected."; return 0; }
+
+  local hint
+  if printf '%s' "$out" | grep -qiE 'unable to authenticate|permission denied|auth.*fail|handshake failed'; then
+    hint="The server refused the login — CHEESE_DB_PASSWORD is likely wrong."
+  elif printf '%s' "$out" | grep -qiE 'no such host|name or service not known|connection refused|no route to host|i/o timeout|timed out|dial tcp|missing address|connection reset'; then
+    hint="Could not reach the host — DB_SERVER is likely wrong or unreachable."
+  else
+    hint="Connection to the database server failed."
   fi
-  if [ -z "${CHEESE_DB_PASSWORD:-}" ] || [ "${CHEESE_DB_PASSWORD:-}" = "XXX" ]; then
-    echo "CHEESE_DB_PASSWORD is not configured (still the XXX placeholder)." >&2
-    missing=1
-  fi
-  if [ "$missing" -ne 0 ]; then
-    echo "Set DB_SERVER and CHEESE_DB_PASSWORD in ~/.config/cheese/cheese-env-file.conf" >&2
-    echo "(both are provided by DeepMedChem; CHEESE_DB_PASSWORD is separate from the" >&2
-    echo "image-registry password CHEESE_PASSWORD). Then re-run this command." >&2
-    return 1
-  fi
-  echo "Database server: ${DB_SFTP_USER}@${DB_SERVER}"
+
+  echo "$hint" >&2
+  echo "Fix it by running:  cheese update-env" >&2
+  echo "(DB_SERVER and CHEESE_DB_PASSWORD are provided by the DeepMedChem team;" >&2
+  echo "CHEESE_DB_PASSWORD is separate from the image-registry password CHEESE_PASSWORD)." >&2
+  # One concise line of the underlying rclone error, for debugging.
+  local detail
+  detail=$(printf '%s\n' "$out" | grep -iE 'CRITICAL|ERROR|Failed|unable|refused|no such host|timeout' | head -1)
+  [ -n "$detail" ] && echo "  (rclone: ${detail})" >&2
+  return 1
 }
 
 # Run rclone in Docker with the SFTP backend pre-configured via env. Pass extra

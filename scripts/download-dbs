@@ -62,9 +62,9 @@ done
 
 [ -z "$dest" ] && { echo "Destination folder is required (use --dest)."; show_help; }
 
-# Fail fast (with a clear message) if the server/password aren't configured,
-# before attempting any connection.
-db_preflight || exit 1
+# Verify we can actually reach the server with the configured credentials, and
+# fail fast with a targeted message if not.
+db_ping || exit 1
 
 # Build the list of databases to download.
 selected=()
