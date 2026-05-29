@@ -26,15 +26,33 @@ if [[ "$remove_images" == "y" || "$remove_images" == "Y" ]]; then
 
     REPO_NAME="cheese.azurecr.io"
 
-    # Find image IDs that match the repo
-    image_ids=$(docker images "$REPO_NAME" --format '{{.ID}}')
+    # Find image IDs whose repository starts with the registry prefix.
+    # NOTE: `docker images "$REPO_NAME"` matches only an *exact* repository
+    # name, so it never matches nested paths like
+    # cheese.azurecr.io/on-prem/.../cheese-customer. List all and filter.
+    image_ids=$(docker images --format '{{.ID}} {{.Repository}}' \
+        | awk -v prefix="$REPO_NAME/" 'index($2, prefix) == 1 { print $1 }' \
+        | sort -u)
 
     if [[ -z "$image_ids" ]]; then
         echo "No Docker images found for $REPO_NAME."
     else
         for id in $image_ids; do
+            # Stop and remove any containers based on this image, otherwise
+            # `docker rmi` refuses to delete an image that is still in use.
+            containers=$(docker ps -aq --filter "ancestor=$id")
+            if [[ -n "$containers" ]]; then
+                echo "Removing containers using image $id: $containers"
+                docker rm -f $containers
+            fi
+
             echo "Removing image ID: $id"
-            docker rmi "$id"
+            # -f forces removal even when the image carries multiple tags or
+            # is otherwise referenced; continue on error so one stuck image
+            # does not abort the rest of the cleanup.
+            if ! docker rmi -f "$id"; then
+                echo "Warning: failed to remove image $id; continuing." >&2
+            fi
         done
         echo "Docker images for $REPO_NAME removed."
     fi
