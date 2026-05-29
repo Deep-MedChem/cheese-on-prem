@@ -92,9 +92,9 @@ export_env_vars() {
 
     # Read each line from the file
     while IFS= read -r line; do
-        export $line
-        # You can process each line as needed here
-        # For example, you could add further processing logic
+        # Skip blank lines and comments
+        [[ -z "$line" || "$line" =~ ^[[:space:]]*# ]] && continue
+        export "$line"
     done < "$file"
 
 }
