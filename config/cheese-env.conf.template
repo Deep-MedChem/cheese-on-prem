@@ -22,3 +22,8 @@ SUPABASE_SERVICE_ROLE_KEY=dummy
 # ${HOME}/.local/share/cheese-jobs. Edit here to move it, then `cheese stop` /
 # `cheese start` to apply. Must exist — the file-server mounts it.
 #JOBS_DATA_PATH=
+
+# Database SFTP server for `cheese configure-dbs` / `cheese download-dbs`.
+# DeepMedChem provides this address on request — fill it in here.
+# (Optional: CHEESE_DB_PASSWORD if the SFTP password differs from CHEESE_PASSWORD.)
+#DB_SERVER=

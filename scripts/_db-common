@@ -1,0 +1,76 @@
+#!/bin/bash
+# Shared helpers for the database scripts (configure-dbs, download-dbs).
+#
+# The indexed databases live on a locked-down, SFTP-only server (chrooted,
+# ForceCommand internal-sftp — no shell, so rsync/ssh-exec are impossible). We
+# talk to it with rclone's sftp backend, which gives resumable, incremental,
+# parallel transfers over plain SFTP. rclone runs from its official Docker image
+# (Docker is already a hard dependency of the stack), so nothing extra is
+# installed on the host.
+#
+# Exported / provided to callers:
+#   DB_SERVER, DB_SFTP_USER, DB_REMOTE_PATH, RCLONE_IMAGE, DB_CONFIG
+#   db_remote [subpath]      → prints the rclone remote spec (:sftp:...)
+#   rclone_sftp <args...>    → runs rclone in Docker against the SFTP server
+#                              (extra `docker run` opts via the RCLONE_DOCKER_OPTS array)
+
+# ── Server ────────────────────────────────────────────────────────────────────
+# No default on purpose: this is a public repo, so the database host is NOT
+# committed here. DeepMedChem provides the address on request; set it as
+# DB_SERVER in ~/.config/cheese/cheese-env-file.conf (exported by cheese-env.sh)
+# or in the environment.
+DB_SERVER="${DB_SERVER:-}"
+DB_SFTP_USER="${CHEESE_CUSTOMER:-cheese-customer}"
+# Directory on the server that holds the database folders. Empty = the SFTP
+# landing directory (where a login lands), which is where the DBs are exposed.
+# Override by exporting DB_REMOTE_PATH if the layout ever changes.
+DB_REMOTE_PATH="${DB_REMOTE_PATH:-}"
+
+# rclone image (Docker Hub). Override RCLONE_IMAGE to pin a version or point at
+# an internal mirror.
+RCLONE_IMAGE="${RCLONE_IMAGE:-rclone/rclone:latest}"
+
+# Where the database selection lives.
+DB_CONFIG="${DB_CONFIG:-${HOME}/.config/cheese/databases.conf}"
+
+# Build an rclone remote spec, optionally for a sub-path under DB_REMOTE_PATH.
+db_remote() {
+  local sub="$1" p="$DB_REMOTE_PATH"
+  [ -n "$sub" ] && p="${p:+$p/}$sub"
+  printf ':sftp:%s' "$p"
+}
+
+# Resolve the SFTP password (CHEESE_DB_PASSWORD overrides CHEESE_PASSWORD) and
+# obscure it for rclone — cached so we only shell out to rclone obscure once.
+_db_obscured_pass=""
+db_obscured_pass() {
+  [ -n "$_db_obscured_pass" ] && { printf '%s' "$_db_obscured_pass"; return 0; }
+  local pw="${CHEESE_DB_PASSWORD:-${CHEESE_PASSWORD:-}}"
+  if [ -z "$pw" ]; then
+    echo "No SFTP password found. Set CHEESE_PASSWORD (cheese update-env) or CHEESE_DB_PASSWORD." >&2
+    return 1
+  fi
+  _db_obscured_pass=$(docker run --rm "$RCLONE_IMAGE" obscure "$pw") || return 1
+  printf '%s' "$_db_obscured_pass"
+}
+
+# Run rclone in Docker with the SFTP backend pre-configured via env. Pass extra
+# `docker run` options (e.g. volume mounts, --user) in the RCLONE_DOCKER_OPTS
+# array before calling. rclone's sftp backend skips host-key verification by
+# default, so non-interactive runs don't stall on an unknown-host prompt.
+RCLONE_DOCKER_OPTS=()
+rclone_sftp() {
+  if [ -z "$DB_SERVER" ]; then
+    echo "DB_SERVER is not set — the database server address isn't configured." >&2
+    echo "Add 'DB_SERVER=<host>' to ~/.config/cheese/cheese-env-file.conf" >&2
+    echo "(DeepMedChem provides this address on request)." >&2
+    return 1
+  fi
+  local pass
+  pass=$(db_obscured_pass) || return 1
+  docker run --rm "${RCLONE_DOCKER_OPTS[@]}" \
+    -e RCLONE_SFTP_HOST="$DB_SERVER" \
+    -e RCLONE_SFTP_USER="$DB_SFTP_USER" \
+    -e RCLONE_SFTP_PASS="$pass" \
+    "$RCLONE_IMAGE" "$@"
+}
