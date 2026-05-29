@@ -36,5 +36,54 @@ export UID
 # docker-run flow if present, otherwise creates a fresh one for new installs.
 docker network inspect cheese-network >/dev/null 2>&1 || docker network create cheese-network >/dev/null
 
+# ── Automatic host-port adaptation ────────────────────────────────────────────
+# The start-* wrappers call ensure_free_port before `compose up` so a busy host
+# port no longer aborts the launch with "port is already allocated" — we pick the
+# next free port instead.
+
+# port_in_use PORT → returns 0 (true) if PORT is already bound on the host.
+# Checks both host listeners (ss) and docker-published ports, since iptables-only
+# docker setups don't surface published ports through ss.
+port_in_use() {
+  local p="$1"
+  ss -ltnH "sport = :$p" 2>/dev/null | grep -q . && return 0
+  docker ps --format '{{.Ports}}' 2>/dev/null \
+    | grep -qE "(0\.0\.0\.0|\[::\]|127\.0\.0\.1):$p->" && return 0
+  return 1
+}
+
+# ensure_free_port VAR DEFAULT OWN_CONTAINER
+# Resolves a usable host port and exports it as VAR:
+#   • If OWN_CONTAINER is already running, reuse the port it's published on, so
+#     re-running a start script never relocates a live service.
+#   • Otherwise take VAR's current value (or DEFAULT); if that port is busy, scan
+#     upward for the first free one and announce the change.
+ensure_free_port() {
+  local var="$1" def="$2" own="$3"
+
+  if [ -n "$own" ]; then
+    local running
+    running=$(docker ps --filter "name=^${own}$" --format '{{.Ports}}' 2>/dev/null \
+      | grep -oE ':[0-9]+->' | grep -oE '[0-9]+' | head -1)
+    if [ -n "$running" ]; then
+      export "$var=$running"
+      return 0
+    fi
+  fi
+
+  local want="${!var:-$def}" p tries=0
+  p="$want"
+  while port_in_use "$p"; do
+    p=$((p + 1)); tries=$((tries + 1))
+    if [ "$tries" -gt 50 ]; then
+      echo "⚠️  No free port found near $want for ${own:-$var}; keeping $want." >&2
+      export "$var=$want"
+      return 0
+    fi
+  done
+  [ "$p" != "$want" ] && echo "⚠️  Port $want is in use — publishing ${own:-$var} on $p instead." >&2
+  export "$var=$p"
+}
+
 # Exported for the wrappers:
 export COMPOSE_CMD="docker compose -p ${COMPOSE_PROJECT_NAME} -f ${COMPOSE_FILE}"
