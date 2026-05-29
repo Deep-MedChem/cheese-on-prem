@@ -24,12 +24,41 @@ read -p "Do you want to pull the latest images? (y/n)" answer
 case "$answer" in
     [Yy]* )
         echo "Pulling the images according to the above package."
+
+        # Canonical pull order — images are always pulled in this sequence
+        # regardless of how CHEESE_PACKAGE happens to list them, so the order is
+        # deterministic. cheese-database is first because it's also the image
+        # that generates the license key (cheese generate-license-key), so it
+        # must be available before anything else.
+        CHEESE_PULL_ORDER="cheese-database cheese-search-ui cheese-orchestrator cheese-electrostatics-inference cheese-inference"
+
+        # Normalise CHEESE_PACKAGE into a whitespace-trimmed, space-delimited
+        # lookup string (",a, b ,c," → " a b c ") for membership tests.
+        requested=" "
         IFS=',' read -ra strings <<< "$CHEESE_PACKAGE"
+        for s in "${strings[@]}"; do
+            s="${s//[[:space:]]/}"
+            [ -n "$s" ] && requested="${requested}${s} "
+        done
 
-        for image_name in "${strings[@]}"; do
-            echo "Pulling $REPO_NAME/$image_name/${CHEESE_CUSTOMER}" #do$image_name"
-            docker pull "$REPO_NAME/$image_name/${CHEESE_CUSTOMER}"
+        pull_image() {
+            echo "Pulling $REPO_NAME/$1/${CHEESE_CUSTOMER}"
+            docker pull "$REPO_NAME/$1/${CHEESE_CUSTOMER}"
+        }
 
+        # 1) Recognised images, in canonical order.
+        for image_name in $CHEESE_PULL_ORDER; do
+            case "$requested" in *" $image_name "*) pull_image "$image_name" ;; esac
+        done
+
+        # 2) Any requested image not in the canonical order — pull it last rather
+        #    than silently dropping it.
+        for image_name in $requested; do
+            case " $CHEESE_PULL_ORDER " in
+                *" $image_name "*) : ;;  # already pulled above
+                *) echo "⚠️  '$image_name' is not in the known pull order — pulling it last."
+                   pull_image "$image_name" ;;
+            esac
         done
         ;;
     [Nn]* )
