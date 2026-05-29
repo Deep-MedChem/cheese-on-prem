@@ -3,8 +3,8 @@
 echo "Uninstalling CHEESE..."
 
 read -p "1. Remove configuration files (y/n)? " remove_config
-read -p "2. Remove scripts (y/n)? " remove_scripts
-read -p "3. Remove images (y/n)? " remove_images
+read -p "2. Remove images (y/n)? " remove_images
+read -p "3. Remove scripts (y/n)? " remove_scripts
 
 # Example paths – change as needed
 CONFIG_DIR="${HOME}/.config/cheese"
