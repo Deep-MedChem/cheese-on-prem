@@ -71,17 +71,30 @@ cp "$PWD/config/oauth2.env.template" "${HOME}/.config/cheese/oauth2.env"
 echo "" > "${HOME}/.config/cheese/cheese_license_file.json"
 # Set from provided env_file
 if [ ! "$env_file" = "" ]; then
-    echo Setting from file $env_file
-    cat $env_file > "${HOME}/.config/cheese/cheese-env-file.conf";
-    echo "" >> "${HOME}/.config/cheese/cheese-env-file.conf";
-    echo "REPO_FOLDER=$PWD" >> "${HOME}/.config/cheese/cheese-env-file.conf";
-    echo "IP=$ip_address" >> "${HOME}/.config/cheese/cheese-env-file.conf";
-    echo "CONFIG_FILE=${HOME}/.config/cheese/cheese_config_file.yaml" >> "${HOME}/.config/cheese/cheese-env-file.conf";
-    echo "CHEESE_LICENSE_FILE=${HOME}/.config/cheese/cheese_license_file.json" >> "${HOME}/.config/cheese/cheese-env-file.conf";
-    echo "JOBS_DATA_PATH=${JOBS_DATA_PATH}" >> "${HOME}/.config/cheese/cheese-env-file.conf";
-    echo "TESTING=false" >> "${HOME}/.config/cheese/cheese-env-file.conf";
-    echo "VISUALIZATION=false" >> "${HOME}/.config/cheese/cheese-env-file.conf";
-    sed -i '/^$/d' "${HOME}/.config/cheese/cheese-env-file.conf"
+    # An existing environment config may hold edits made via `cheese update-env`.
+    # Preserve it by default; only regenerate from the template if the user
+    # explicitly opts in.
+    overwrite_env="n"
+    if [ -f "${HOME}/.config/cheese/cheese-env-file.conf" ]; then
+        echo "Existing environment config found at ${HOME}/.config/cheese/cheese-env-file.conf"
+        read -p "Overwrite it with a fresh config from the template (y/N)? " overwrite_env
+    fi
+
+    if [ -f "${HOME}/.config/cheese/cheese-env-file.conf" ] && [[ ! "$overwrite_env" =~ ^[Yy]$ ]]; then
+        echo "Preserving existing environment config. (Run 'cheese update-env' to edit it.)"
+    else
+        echo Setting from file $env_file
+        cat $env_file > "${HOME}/.config/cheese/cheese-env-file.conf";
+        echo "" >> "${HOME}/.config/cheese/cheese-env-file.conf";
+        echo "REPO_FOLDER=$PWD" >> "${HOME}/.config/cheese/cheese-env-file.conf";
+        echo "IP=$ip_address" >> "${HOME}/.config/cheese/cheese-env-file.conf";
+        echo "CONFIG_FILE=${HOME}/.config/cheese/cheese_config_file.yaml" >> "${HOME}/.config/cheese/cheese-env-file.conf";
+        echo "CHEESE_LICENSE_FILE=${HOME}/.config/cheese/cheese_license_file.json" >> "${HOME}/.config/cheese/cheese-env-file.conf";
+        echo "JOBS_DATA_PATH=${JOBS_DATA_PATH}" >> "${HOME}/.config/cheese/cheese-env-file.conf";
+        echo "TESTING=false" >> "${HOME}/.config/cheese/cheese-env-file.conf";
+        echo "VISUALIZATION=false" >> "${HOME}/.config/cheese/cheese-env-file.conf";
+        sed -i '/^$/d' "${HOME}/.config/cheese/cheese-env-file.conf"
+    fi
 
     echo "OUTPUT_DIRECTORIES:" >> "${HOME}/.config/cheese/cheese_config_file.yaml";
     echo "  TEST: '$PWD/tests/test_db'" >> "${HOME}/.config/cheese/cheese_config_file.yaml";
@@ -117,4 +130,7 @@ export_env_vars() {
 export_env_vars "${HOME}/.config/cheese/cheese-env-file.conf"
 
 cd "${REPO_FOLDER}/scripts"
-bash update-scripts
+# INSTALL_MODE makes update-scripts preserve already-installed scripts unless
+# the user opts in to overwrite. Standalone `cheese update-scripts` leaves this
+# unset and always refreshes.
+INSTALL_MODE=1 bash update-scripts
