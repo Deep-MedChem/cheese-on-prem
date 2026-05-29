@@ -33,8 +33,20 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
+# Compose will also start the file-server dependency when bringing up api, so
+# reserve its host port before selecting the API port.
+ensure_free_port JOBS_FILE_SERVER_PORT 8000 cheese-file-server
+
 # Pick a free host port automatically if the requested/default one is taken.
 ensure_free_port API_HOST_PORT 8001 cheese-api
+while [ "${API_HOST_PORT:-8001}" = "${JOBS_FILE_SERVER_PORT:-8000}" ]; do
+  API_HOST_PORT=$((API_HOST_PORT + 1))
+  while port_in_use "$API_HOST_PORT"; do
+    API_HOST_PORT=$((API_HOST_PORT + 1))
+  done
+  export API_HOST_PORT
+  echo "⚠️  API port conflicted with jobs file-server port — publishing cheese-api on ${API_HOST_PORT} instead." >&2
+done
 
 # Compose handles the database deps automatically.
 mkdir -p "${JOBS_DATA_PATH:-${HOME}/.local/share/cheese-jobs}"
