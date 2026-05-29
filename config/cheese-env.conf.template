@@ -11,10 +11,11 @@ DB_SERVER=XXX
 CHEESE_DB_PASSWORD=XXX
 
 # On-disk location for job state (search jobs, downloads). The installer prompts
-# for this and writes the chosen value below; ENTER accepts the default
-# ${HOME}/.local/share/cheese-jobs. Edit here to move it, then `cheese stop` /
-# `cheese start` to apply. Must exist — the file-server mounts it.
-JOBS_DATA_PATH=${HOME}/.local/share/cheese-jobs
+# for this and writes the resolved (absolute) value into cheese-env-file.conf;
+# ENTER accepts the default $HOME/.local/share/cheese-jobs. It is NOT set here as
+# a literal because ${HOME} would not be expanded and compose would then build a
+# broken /data${HOME}/... mount path. To move it, re-run the installer or edit
+# the value in cheese-env-file.conf, then `cheese stop` / `cheese start`.
 
 
 # Images pulled by `cheese update-images`. Drop entries you don't need.
