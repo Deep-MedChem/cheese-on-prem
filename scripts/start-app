@@ -33,6 +33,11 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
+# Pick free host ports automatically if the requested/default ones are taken.
+# API too: `up -d ui` starts the api dep, and VITE_CHEESE_API tracks API_HOST_PORT.
+ensure_free_port API_HOST_PORT 8001 cheese-api
+ensure_free_port UI_HOST_PORT 3001 cheese-ui
+
 echo "Starting CHEESE UI (compose will pull in the API + DB deps if needed)..."
 $COMPOSE_CMD up -d ui
 

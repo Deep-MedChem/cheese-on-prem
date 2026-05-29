@@ -30,6 +30,9 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
+# Pick a free host port automatically if the requested/default one is taken.
+ensure_free_port ALIGNMENT_HOST_PORT 8006 cheese-alignment
+
 echo "Starting CHEESE alignment service..."
 $COMPOSE_CMD up -d alignment
 
