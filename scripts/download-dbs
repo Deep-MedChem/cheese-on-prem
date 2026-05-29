@@ -25,6 +25,26 @@ convert_to_absolute_path() {
   case "$1" in /*) echo "$1" ;; *) echo "$(pwd)/$1" ;; esac
 }
 
+# Engine config that maps each database to its on-disk folder (OUTPUT_DIRECTORIES).
+# CONFIG_FILE is exported by cheese-env.sh; fall back to the standard location.
+ENGINE_CONFIG="${CONFIG_FILE:-${HOME}/.config/cheese/cheese_config_file.yaml}"
+
+# Add/update one `  <key>: '<path>'` entry under OUTPUT_DIRECTORIES so the engine
+# finds the database without the operator hand-editing the YAML. The install
+# writes OUTPUT_DIRECTORIES as the last section, so appending lands under it;
+# existing keys are updated in place (indentation preserved).
+register_output_dir() {
+  local key="$1" path="$2" cfg="$3" key_re
+  [ -f "$cfg" ] || { echo "  (engine config $cfg not found — skipping OUTPUT_DIRECTORIES update)"; return 0; }
+  grep -qE '^OUTPUT_DIRECTORIES:' "$cfg" || printf 'OUTPUT_DIRECTORIES:\n' >> "$cfg"
+  key_re=$(printf '%s' "$key" | sed 's/[][\.*^$+?(){}|/]/\\&/g')
+  if grep -qE "^[[:space:]]+${key_re}:" "$cfg"; then
+    sed -E "s|^([[:space:]]+)${key_re}:.*|\1${key}: '${path}'|" "$cfg" > "$cfg.tmp" && mv "$cfg.tmp" "$cfg"
+  else
+    printf "  %s: '%s'\n" "$key" "$path" >> "$cfg"
+  fi
+}
+
 dest=""
 transfers=4
 while [[ $# -gt 0 ]]; do
@@ -78,7 +98,11 @@ for db in "${selected[@]}"; do
   # interrupted run resumes instead of starting over.
   rclone_sftp copy "$(db_remote "$db")" "/dest/$db" \
     --transfers "$transfers" --progress --stats-one-line
+  # Wire the freshly-downloaded folder into the engine config automatically.
+  register_output_dir "$db" "$dest/$db" "$ENGINE_CONFIG"
 done
 
 echo
 echo "All selected databases are in $dest"
+echo "Registered them under OUTPUT_DIRECTORIES in $ENGINE_CONFIG"
+echo "Restart the stack to pick them up:  cheese stop && cheese start"

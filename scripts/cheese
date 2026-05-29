@@ -6,7 +6,7 @@ show_help() {
   echo "Welcome to CHEESE !"
   echo "Usage: cheese [options]"
   echo "Commands:"
-  echo "  configure                    Update CHEESE configuration file"
+  echo "  configure-engine             Edit the CHEESE engine config (cheese_config_file.yaml)"
   echo "  test                         Test CHEESE commands"
   echo "  generate-license-key         Generate CHEESE license key"
   echo "  start-server                 Run CHEESE server (API)"
@@ -28,7 +28,6 @@ show_help() {
   echo "  check-license               Check CHEESE license"
   echo "  configure-dbs                Choose which indexed databases to download"
   echo "  download-dbs                 Download CHEESE indexed databases"
-  echo "  extract-dbs                 Extracted downloaded CHEESE indexed databases"
   echo "  -h, --help                   Show this help message"
   exit 1
 }
@@ -74,9 +73,9 @@ while [[ $# -gt 0 ]]; do
       shift 1
       check-license $@
       ;;
-    configure)
+    configure-engine)
       shift 1
-      cheese-configure $@
+      configure-engine $@
       exit 0
       ;;
     configure-nginx)
@@ -218,11 +217,6 @@ while [[ $# -gt 0 ]]; do
     download-dbs)
       shift 1
       download-dbs $@
-      exit 0
-      ;;
-    extract-dbs)
-      shift 1
-      extract-dbs $@
       exit 0
       ;;
     uninstall)
