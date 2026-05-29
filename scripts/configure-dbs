@@ -24,6 +24,10 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
+# Fail fast (with a clear message) if the server/password aren't configured,
+# before attempting any connection.
+db_preflight || exit 1
+
 # Preserve previously-chosen flags (name -> yes/no) so a refresh doesn't reset
 # selections the operator already made.
 declare -A prev
@@ -37,16 +41,14 @@ if [ -f "$DB_CONFIG" ]; then
   done < "$DB_CONFIG"
 fi
 
-echo "Listing databases on ${DB_SERVER} (as ${DB_SFTP_USER})..."
-# One directory entry per line (trailing slash stripped). --dirs-only so stray
-# files in the landing dir aren't mistaken for databases.
-mapfile -t dbs < <(rclone_sftp lsf --dirs-only "$(db_remote)" | sed 's:/*$::' | sort)
-
-if [ "${#dbs[@]}" -eq 0 ]; then
+echo "Listing databases on ${DB_SERVER}..."
+listing=$(list_db_dirs) || exit 1
+if [ -z "$listing" ]; then
   echo "No databases found at $(db_remote) on ${DB_SERVER}." >&2
-  echo "Check connectivity/credentials, or set DB_REMOTE_PATH if the layout differs." >&2
+  echo "(Set DB_REMOTE_PATH if the layout differs.)" >&2
   exit 1
 fi
+mapfile -t dbs <<< "$listing"
 
 echo "Found ${#dbs[@]} database(s). Measuring sizes (recursive — may take a moment)..."
 

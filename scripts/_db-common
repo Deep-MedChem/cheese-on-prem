@@ -40,18 +40,37 @@ db_remote() {
   printf ':sftp:%s' "$p"
 }
 
-# Resolve the SFTP password (CHEESE_DB_PASSWORD overrides CHEESE_PASSWORD) and
-# obscure it for rclone — cached so we only shell out to rclone obscure once.
+# The SFTP password is its own setting (CHEESE_DB_PASSWORD) — deliberately NOT a
+# fallback to CHEESE_PASSWORD, which is the image-registry password and would
+# just produce a confusing "ssh: unable to authenticate" failure. Obscured for
+# rclone and cached so we only shell out to rclone obscure once.
 _db_obscured_pass=""
 db_obscured_pass() {
   [ -n "$_db_obscured_pass" ] && { printf '%s' "$_db_obscured_pass"; return 0; }
-  local pw="${CHEESE_DB_PASSWORD:-${CHEESE_PASSWORD:-}}"
-  if [ -z "$pw" ]; then
-    echo "No SFTP password found. Set CHEESE_PASSWORD (cheese update-env) or CHEESE_DB_PASSWORD." >&2
+  _db_obscured_pass=$(docker run --rm "$RCLONE_IMAGE" obscure "$CHEESE_DB_PASSWORD") || return 1
+  printf '%s' "$_db_obscured_pass"
+}
+
+# Pre-flight check: verify the server address and SFTP password are configured
+# BEFORE attempting any connection, so a missing setting fails fast with a clear
+# message instead of a slow, cryptic rclone auth error. Echoes the target when OK.
+db_preflight() {
+  local missing=0
+  if [ -z "$DB_SERVER" ]; then
+    echo "DB_SERVER is not set — the database server address isn't configured." >&2
+    missing=1
+  fi
+  if [ -z "${CHEESE_DB_PASSWORD:-}" ]; then
+    echo "CHEESE_DB_PASSWORD is not set — no SFTP password for the database server." >&2
+    missing=1
+  fi
+  if [ "$missing" -ne 0 ]; then
+    echo "Set DB_SERVER and CHEESE_DB_PASSWORD in ~/.config/cheese/cheese-env-file.conf" >&2
+    echo "(both are provided by DeepMedChem; CHEESE_DB_PASSWORD is separate from the" >&2
+    echo "image-registry password CHEESE_PASSWORD). Then re-run this command." >&2
     return 1
   fi
-  _db_obscured_pass=$(docker run --rm "$RCLONE_IMAGE" obscure "$pw") || return 1
-  printf '%s' "$_db_obscured_pass"
+  echo "Database server: ${DB_SFTP_USER}@${DB_SERVER}"
 }
 
 # Run rclone in Docker with the SFTP backend pre-configured via env. Pass extra
@@ -60,17 +79,27 @@ db_obscured_pass() {
 # default, so non-interactive runs don't stall on an unknown-host prompt.
 RCLONE_DOCKER_OPTS=()
 rclone_sftp() {
-  if [ -z "$DB_SERVER" ]; then
-    echo "DB_SERVER is not set — the database server address isn't configured." >&2
-    echo "Add 'DB_SERVER=<host>' to ~/.config/cheese/cheese-env-file.conf" >&2
-    echo "(DeepMedChem provides this address on request)." >&2
-    return 1
-  fi
   local pass
   pass=$(db_obscured_pass) || return 1
+  # --log-level ERROR silences rclone's chatty NOTICE/INFO lines (config-not-
+  # found, host-key notice, etc.) while still surfacing real ERROR/CRITICAL
+  # failures. Override with RCLONE_LOG_LEVEL=NOTICE to debug.
   docker run --rm "${RCLONE_DOCKER_OPTS[@]}" \
     -e RCLONE_SFTP_HOST="$DB_SERVER" \
     -e RCLONE_SFTP_USER="$DB_SFTP_USER" \
     -e RCLONE_SFTP_PASS="$pass" \
-    "$RCLONE_IMAGE" "$@"
+    "$RCLONE_IMAGE" --log-level "${RCLONE_LOG_LEVEL:-ERROR}" "$@"
+}
+
+# List database directory names (one per line) from the server, or fail with a
+# clear message. Distinguishes a connection/auth failure (rclone non-zero) from
+# a successful-but-empty listing — callers handle the empty case themselves.
+list_db_dirs() {
+  local listing
+  if ! listing=$(rclone_sftp lsf --dirs-only "$(db_remote)"); then
+    echo "Could not list databases on ${DB_SERVER} — check connectivity and that" >&2
+    echo "CHEESE_DB_PASSWORD is correct." >&2
+    return 1
+  fi
+  printf '%s\n' "$listing" | sed 's:/*$::; /^[[:space:]]*$/d' | sort
 }

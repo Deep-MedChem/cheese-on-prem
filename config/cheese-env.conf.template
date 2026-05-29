@@ -23,7 +23,9 @@ SUPABASE_SERVICE_ROLE_KEY=dummy
 # `cheese start` to apply. Must exist — the file-server mounts it.
 #JOBS_DATA_PATH=
 
-# Database SFTP server for `cheese configure-dbs` / `cheese download-dbs`.
-# DeepMedChem provides this address on request — fill it in here.
-# (Optional: CHEESE_DB_PASSWORD if the SFTP password differs from CHEESE_PASSWORD.)
+# Database SFTP server + password for `cheese configure-dbs` / `cheese download-dbs`.
+# DeepMedChem provides both on request. CHEESE_DB_PASSWORD is the SFTP password —
+# it is separate from CHEESE_PASSWORD (the image-registry password). Both must be
+# set before downloading databases; the commands fail fast with a message if not.
 #DB_SERVER=
+#CHEESE_DB_PASSWORD=

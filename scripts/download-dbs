@@ -62,6 +62,10 @@ done
 
 [ -z "$dest" ] && { echo "Destination folder is required (use --dest)."; show_help; }
 
+# Fail fast (with a clear message) if the server/password aren't configured,
+# before attempting any connection.
+db_preflight || exit 1
+
 # Build the list of databases to download.
 selected=()
 if [ -f "$DB_CONFIG" ]; then
@@ -81,8 +85,9 @@ if [ -f "$DB_CONFIG" ]; then
 else
   echo "No selection config found — downloading ALL available databases."
   echo "(Run 'cheese configure-dbs' first if you want to pick a subset.)"
-  mapfile -t selected < <(rclone_sftp lsf --dirs-only "$(db_remote)" | sed 's:/*$::' | sort)
-  [ "${#selected[@]}" -eq 0 ] && { echo "No databases found on ${DB_SERVER}." >&2; exit 1; }
+  listing=$(list_db_dirs) || exit 1
+  [ -z "$listing" ] && { echo "No databases found on ${DB_SERVER}." >&2; exit 1; }
+  mapfile -t selected <<< "$listing"
 fi
 
 mkdir -p "$dest"
