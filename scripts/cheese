@@ -26,6 +26,7 @@ show_help() {
   echo "  update-images                Update CHEESE Docker Images"
   echo "  update-license               Update CHEESE license file"
   echo "  check-license               Check CHEESE license"
+  echo "  configure-dbs                Choose which indexed databases to download"
   echo "  download-dbs                 Download CHEESE indexed databases"
   echo "  extract-dbs                 Extracted downloaded CHEESE indexed databases"
   echo "  -h, --help                   Show this help message"
@@ -207,6 +208,11 @@ while [[ $# -gt 0 ]]; do
       set -e
       check-license
       explorer $@
+      exit 0
+      ;;
+    configure-dbs)
+      shift 1
+      configure-dbs $@
       exit 0
       ;;
     download-dbs)

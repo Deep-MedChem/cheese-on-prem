@@ -78,3 +78,10 @@ echo "Pulling oauth2 image..."
 docker pull quay.io/oauth2-proxy/oauth2-proxy:latest
 
 fi
+
+# Pull the rclone image used by configure-dbs / download-dbs (public Docker Hub,
+# no ACR login needed). Non-fatal: a failure here shouldn't abort the run, since
+# database download is a separate, optional step.
+RCLONE_IMAGE="${RCLONE_IMAGE:-rclone/rclone:latest}"
+echo "Pulling rclone image ($RCLONE_IMAGE) for database transfers..."
+docker pull "$RCLONE_IMAGE" || echo "⚠️  Could not pull $RCLONE_IMAGE — 'cheese download-dbs' will retry on first use."
