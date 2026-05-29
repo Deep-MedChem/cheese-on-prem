@@ -40,8 +40,8 @@ done
 
 mkdir -p /tmp/cheese-jobs
 
-# Pick a free host port automatically if the requested/default one is taken.
-ensure_free_port JOBS_FILE_SERVER_PORT 8000 cheese-file-server
+# Pick free host ports automatically if the requested/default ones are taken.
+ensure_all_free_ports
 
 echo "Starting cheese-database stack..."
 $COMPOSE_CMD up -d db jobs-db jobs-exec download-exec file-server
