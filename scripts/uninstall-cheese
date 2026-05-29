@@ -3,8 +3,8 @@
 echo "Uninstalling CHEESE..."
 
 read -p "1. Remove configuration files (y/n)? " remove_config
-read -p "2. Remove scripts (y/n)? " remove_scripts
-read -p "3. Remove images (y/n)? " remove_images
+read -p "2. Remove images (y/n)? " remove_images
+read -p "3. Remove scripts (y/n)? " remove_scripts
 
 # Example paths – change as needed
 CONFIG_DIR="${HOME}/.config/cheese"
@@ -15,29 +15,52 @@ if [[ "$remove_config" == "y" || "$remove_config" == "Y" ]]; then
     rm -rf $CONFIG_DIR
 fi
 
-if [[ "$remove_scripts" == "y" || "$remove_scripts" == "Y" ]]; then
-    echo "Removing scripts..."
-    rm -rf $SCRIPTS_DIR
-fi
-
-
+# Remove images BEFORE scripts: this uninstaller and the `cheese` dispatcher
+# live in $SCRIPTS_DIR, so deleting it removes the very script that performs
+# the image cleanup. Doing images first means a failed/retried image removal
+# can still fall back to re-running the uninstaller.
 if [[ "$remove_images" == "y" || "$remove_images" == "Y" ]]; then
     echo "Removing Docker images..."
 
     REPO_NAME="cheese.azurecr.io"
 
-    # Find image IDs that match the repo
-    image_ids=$(docker images "$REPO_NAME" --format '{{.ID}}')
+    # Find image IDs whose repository starts with the registry prefix.
+    # NOTE: `docker images "$REPO_NAME"` matches only an *exact* repository
+    # name, so it never matches nested paths like
+    # cheese.azurecr.io/on-prem/.../cheese-customer. List all and filter.
+    image_ids=$(docker images --format '{{.ID}} {{.Repository}}' \
+        | awk -v prefix="$REPO_NAME/" 'index($2, prefix) == 1 { print $1 }' \
+        | sort -u)
 
     if [[ -z "$image_ids" ]]; then
         echo "No Docker images found for $REPO_NAME."
     else
         for id in $image_ids; do
+            # Stop and remove any containers based on this image, otherwise
+            # `docker rmi` refuses to delete an image that is still in use.
+            containers=$(docker ps -aq --filter "ancestor=$id")
+            if [[ -n "$containers" ]]; then
+                echo "Removing containers using image $id: $containers"
+                docker rm -f $containers
+            fi
+
             echo "Removing image ID: $id"
-            docker rmi "$id"
+            # -f forces removal even when the image carries multiple tags or
+            # is otherwise referenced; continue on error so one stuck image
+            # does not abort the rest of the cleanup.
+            if ! docker rmi -f "$id"; then
+                echo "Warning: failed to remove image $id; continuing." >&2
+            fi
         done
         echo "Docker images for $REPO_NAME removed."
     fi
+fi
+
+# Scripts last: this removes the uninstaller itself, so nothing after this
+# block can rely on $SCRIPTS_DIR being present.
+if [[ "$remove_scripts" == "y" || "$remove_scripts" == "Y" ]]; then
+    echo "Removing scripts..."
+    rm -rf $SCRIPTS_DIR
 fi
 
 # Show final message only if all are 'y' or 'Y'
