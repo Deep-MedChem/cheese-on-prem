@@ -40,6 +40,12 @@ To download real databases, run
 
 Will fetch the list of available databases from the CHEESE SFTP server. 
 
+`cheese download-dbs --dest <folder>` then fetches the selected databases and
+auto-registers them in the engine config. For how the engine recognizes a
+database (the required folder structure and the `OUTPUT_DIRECTORIES` /
+`INDEX_TYPES` / `DELIMITERS` config entries), and how to fix a DB that won't
+load, see [docs/database-configuration.md](docs/database-configuration.md).
+
 
 
 ## Running CHEESE
