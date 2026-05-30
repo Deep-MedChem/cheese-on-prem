@@ -96,7 +96,17 @@ rclone_sftp() {
   # --log-level ERROR silences rclone's chatty NOTICE/INFO lines (config-not-
   # found, host-key notice, etc.) while still surfacing real ERROR/CRITICAL
   # failures. Override with RCLONE_LOG_LEVEL=NOTICE to debug.
+  #
+  # RCLONE_CONFIG pins the config file to a writable, world-writable dir. The
+  # download copy runs as the invoking UID (-u, so files aren't root-owned), and
+  # that UID has no /etc/passwd entry in the container, so $HOME resolves to "/".
+  # rclone would then default its config to /.rclone.conf and write its atomic
+  # save temp file alongside it in "/" — which a non-root UID can't, producing a
+  # "Failed to save config after 10 tries: ... permission denied" loop that stalls
+  # the transfer at 0 B. Pointing it at /tmp (writable by any UID) avoids that;
+  # the config is throwaway since every run is --rm with env-supplied credentials.
   docker run --rm "${RCLONE_DOCKER_OPTS[@]}" \
+    -e RCLONE_CONFIG=/tmp/rclone.conf \
     -e RCLONE_SFTP_HOST="$DB_SERVER" \
     -e RCLONE_SFTP_USER="$DB_SFTP_USER" \
     -e RCLONE_SFTP_PASS="$pass" \

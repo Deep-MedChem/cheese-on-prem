@@ -96,13 +96,33 @@ echo "Downloading ${#selected[@]} database(s) to $dest from ${DB_SERVER}..."
 # Run rclone as the invoking user so files aren't root-owned, and mount the
 # destination into the container.
 RCLONE_DOCKER_OPTS=(-u "$(id -u):$(id -g)" -v "$dest:/dest")
+
+# Progress display. rclone only repaints its progress line *in place* when its
+# stdout is a terminal, so allocate a docker TTY (-t) when we have one and let
+# --progress show a single, live-updating status line. With no TTY (output piped
+# or redirected to a log) --progress instead dumps one un-erased line per refresh
+# — the console spam — so fall back to a periodic one-line stats summary, bumped
+# to NOTICE so it isn't swallowed by rclone_sftp's default ERROR log level.
+progress_opts=(--progress --stats-one-line)
+copy_log_level=""
+if [ -t 1 ]; then
+  RCLONE_DOCKER_OPTS+=(-t)
+else
+  progress_opts=(--stats 30s --stats-one-line)
+  copy_log_level="NOTICE"
+fi
+
 for db in "${selected[@]}"; do
   echo
   echo "=== $db ==="
-  # copy is incremental: identical files already present are skipped, so an
-  # interrupted run resumes instead of starting over.
-  rclone_sftp copy "$(db_remote "$db")" "/dest/$db" \
-    --transfers "$transfers" --progress --stats-one-line
+  # copy is incremental: files already present with a matching size/modtime are
+  # skipped, so an interrupted run resumes instead of starting over — only the
+  # not-yet-transferred files are fetched.
+  if [ -d "$dest/$db" ] && [ -n "$(ls -A "$dest/$db" 2>/dev/null)" ]; then
+    echo "Existing data detected — resuming download (already-fetched files are skipped)."
+  fi
+  RCLONE_LOG_LEVEL="$copy_log_level" rclone_sftp copy "$(db_remote "$db")" "/dest/$db" \
+    --transfers "$transfers" "${progress_opts[@]}"
   # Wire the freshly-downloaded folder into the engine config automatically.
   register_output_dir "$db" "$dest/$db" "$ENGINE_CONFIG"
 done
