@@ -13,9 +13,11 @@ export_env_vars() {
 
     # Read each line from the file
     while IFS= read -r line; do
-        export $line
-        # You can process each line as needed here
-        # For example, you could add further processing logic
+        # Skip blank lines and comments — otherwise a blank line runs `export`
+        # with no args (dumping the whole environment) and unquoted values get
+        # word-split/glob-expanded.
+        [[ -z "$line" || "$line" =~ ^[[:space:]]*# ]] && continue
+        export "$line"
     done < "$file"
 
 }

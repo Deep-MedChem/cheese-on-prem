@@ -25,6 +25,122 @@ convert_to_absolute_path() {
   case "$1" in /*) echo "$1" ;; *) echo "$(pwd)/$1" ;; esac
 }
 
+# Engine config that maps each database to its on-disk folder (OUTPUT_DIRECTORIES).
+# CONFIG_FILE is exported by cheese-env.sh; fall back to the standard location.
+ENGINE_CONFIG="${CONFIG_FILE:-${HOME}/.config/cheese/cheese_config_file.yaml}"
+
+# The engine (cheese_database/indices/database.py) needs THREE parallel,
+# same-keyed maps for every database or it won't even import: OUTPUT_DIRECTORIES
+# (path), INDEX_TYPES (clustered|in_memory) and DELIMITERS (the column separator
+# used to split a result line into SMILES + ID). A DB present in
+# OUTPUT_DIRECTORIES but missing from INDEX_TYPES/DELIMITERS raises KeyError at
+# startup and the DB container crash-loops. So we auto-write all three, inferring
+# INDEX_TYPES and DELIMITERS from the freshly-downloaded folder.
+
+# Is `key` already an entry under top-level `section`? (section-scoped, so the
+# same db_name appearing in several sections isn't confused for a match.)
+_yaml_key_in_section() {
+  local section="$1" key="$2" cfg="$3"
+  _CS="$section" _CK="$key" awk '
+    function toplevel(l){ return (l ~ /^[A-Za-z_][A-Za-z0-9_-]*:/) }
+    BEGIN{ section=ENVIRON["_CS"]; key=ENVIRON["_CK"] }
+    { if (toplevel($0)) { h=$0; sub(/:.*/,"",h); cur=h; next }
+      if (cur==section) { k=$0; sub(/^[[:space:]]+/,"",k); sub(/:.*/,"",k); if (k==key) found=1 } }
+    END{ exit (found?0:1) }
+  ' "$cfg"
+}
+
+# Set `  <key>: <value>` under top-level `section`. `value` must arrive already
+# quoted (e.g. "'\''/data/x'\''", "\"clustered\"", "\"\\t\""). Updates in place if
+# the key exists under that section (indentation preserved), otherwise inserts it
+# right after the section header; if the section itself is absent, appends both.
+# Values pass through awk via ENVIRON so backslash escapes (the "\t" delimiter)
+# aren't mangled by awk -v processing.
+set_config_entry() {
+  local key="$1" value="$2" section="$3" cfg="$4"
+  if ! grep -qE "^${section}:" "$cfg"; then
+    printf '%s:\n  %s: %s\n' "$section" "$key" "$value" >> "$cfg"; return 0
+  fi
+  if _yaml_key_in_section "$section" "$key" "$cfg"; then
+    _CS="$section" _CK="$key" _CV="$value" awk '
+      function toplevel(l){ return (l ~ /^[A-Za-z_][A-Za-z0-9_-]*:/) }
+      BEGIN{ section=ENVIRON["_CS"]; key=ENVIRON["_CK"]; value=ENVIRON["_CV"] }
+      { if (toplevel($0)) { h=$0; sub(/:.*/,"",h); cur=h; print; next }
+        if (cur==section && !done) {
+          k=$0; sub(/^[[:space:]]+/,"",k); sub(/:.*/,"",k)
+          if (k==key) { match($0,/^[[:space:]]*/); ind=substr($0,1,RLENGTH)
+                        print ind key ": " value; done=1; next } }
+        print }
+    ' "$cfg" > "$cfg.tmp" && mv "$cfg.tmp" "$cfg"
+  else
+    _CS="$section" _CK="$key" _CV="$value" awk '
+      function toplevel(l){ return (l ~ /^[A-Za-z_][A-Za-z0-9_-]*:/) }
+      BEGIN{ section=ENVIRON["_CS"]; key=ENVIRON["_CK"]; value=ENVIRON["_CV"] }
+      { print
+        if (toplevel($0)) { h=$0; sub(/:.*/,"",h)
+          if (h==section && !done) { print "  " key ": " value; done=1 } } }
+    ' "$cfg" > "$cfg.tmp" && mv "$cfg.tmp" "$cfg"
+  fi
+}
+
+# Infer the index type from the downloaded folder's structure (mirrors the
+# has_clustered_smiles_structure / has_in_memory_structure checks in the engine).
+detect_index_type() {
+  local dir="$1"
+  if [ -d "$dir/smiles_clusters" ] && [ -d "$dir/clusters" ]; then echo "clustered"
+  elif [ -d "$dir/embeddings" ] && [ -d "$dir/fingerprints" ]; then echo "in_memory"
+  else echo ""; fi
+}
+
+# Guess the column delimiter (tab vs comma) by peeking at one real data line:
+# a cluster file for clustered DBs, database.txt for in_memory. Prints "tab",
+# "comma", or "" when it can't tell.
+detect_delimiter() {
+  local dir="$1" itype="$2" sample="" f
+  if [ "$itype" = "clustered" ]; then
+    f=$(find "$dir/smiles_clusters" -name '*.txt.gz' 2>/dev/null | head -1)
+    [ -n "$f" ] && sample=$(zcat "$f" 2>/dev/null | head -1)
+  elif [ "$itype" = "in_memory" ] && [ -f "$dir/database.txt" ]; then
+    sample=$(head -1 "$dir/database.txt" 2>/dev/null)
+  fi
+  case "$sample" in
+    "")       echo "" ;;
+    *$'\t'*)  echo "tab" ;;
+    *,*)      echo "comma" ;;
+    *)        echo "" ;;
+  esac
+}
+
+# Wire a freshly-downloaded database into the engine config: all three maps,
+# with INDEX_TYPES/DELIMITERS inferred from the folder. Loud, actionable
+# warnings when inference fails, since a wrong/missing value breaks startup
+# (INDEX_TYPES) or corrupts returned SMILES (DELIMITERS).
+register_db() {
+  local key="$1" path="$2" cfg="$3" itype delim
+  [ -f "$cfg" ] || { echo "  (engine config $cfg not found — skipping config registration)"; return 0; }
+  itype=$(detect_index_type "$path")
+  delim=$(detect_delimiter "$path" "$itype")
+
+  set_config_entry "$key" "'$path'" OUTPUT_DIRECTORIES "$cfg"
+
+  if [ -n "$itype" ]; then
+    set_config_entry "$key" "\"$itype\"" INDEX_TYPES "$cfg"
+  else
+    echo "  ! Could not infer INDEX_TYPES for '$key' — set it manually (clustered|in_memory) in"
+    echo "    $cfg, or the engine will fail to start."
+  fi
+
+  case "$delim" in
+    tab)   set_config_entry "$key" '"\t"' DELIMITERS "$cfg" ;;
+    comma) set_config_entry "$key" '","'  DELIMITERS "$cfg" ;;
+    *)     set_config_entry "$key" '","'  DELIMITERS "$cfg"
+           echo "  ! Could not detect the column delimiter for '$key' — defaulted to ',' in"
+           echo "    $cfg. Verify it (tab vs comma), else returned SMILES/IDs may be wrong." ;;
+  esac
+
+  echo "  Registered '$key': OUTPUT_DIRECTORIES, INDEX_TYPES=${itype:-?}, DELIMITERS=${delim:-comma(default)}"
+}
+
 dest=""
 transfers=4
 while [[ $# -gt 0 ]]; do
@@ -41,6 +157,10 @@ while [[ $# -gt 0 ]]; do
 done
 
 [ -z "$dest" ] && { echo "Destination folder is required (use --dest)."; show_help; }
+
+# Verify we can actually reach the server with the configured credentials, and
+# fail fast with a targeted message if not.
+db_ping || exit 1
 
 # Build the list of databases to download.
 selected=()
@@ -61,8 +181,9 @@ if [ -f "$DB_CONFIG" ]; then
 else
   echo "No selection config found — downloading ALL available databases."
   echo "(Run 'cheese configure-dbs' first if you want to pick a subset.)"
-  mapfile -t selected < <(rclone_sftp lsf --dirs-only "$(db_remote)" | sed 's:/*$::' | sort)
-  [ "${#selected[@]}" -eq 0 ] && { echo "No databases found on ${DB_SERVER}." >&2; exit 1; }
+  listing=$(list_db_dirs) || exit 1
+  [ -z "$listing" ] && { echo "No databases found on ${DB_SERVER}." >&2; exit 1; }
+  mapfile -t selected <<< "$listing"
 fi
 
 mkdir -p "$dest"
@@ -71,14 +192,41 @@ echo "Downloading ${#selected[@]} database(s) to $dest from ${DB_SERVER}..."
 # Run rclone as the invoking user so files aren't root-owned, and mount the
 # destination into the container.
 RCLONE_DOCKER_OPTS=(-u "$(id -u):$(id -g)" -v "$dest:/dest")
+
+# Progress display. rclone only repaints its progress line *in place* when its
+# stdout is a terminal, so allocate a docker TTY (-t) when we have one and let
+# --progress show a single, live-updating status line. With no TTY (output piped
+# or redirected to a log) --progress instead dumps one un-erased line per refresh
+# — the console spam — so fall back to a periodic one-line stats summary, bumped
+# to NOTICE so it isn't swallowed by rclone_sftp's default ERROR log level.
+progress_opts=(--progress --stats-one-line)
+copy_log_level=""
+if [ -t 1 ]; then
+  RCLONE_DOCKER_OPTS+=(-t)
+else
+  progress_opts=(--stats 30s --stats-one-line)
+  copy_log_level="NOTICE"
+fi
+
 for db in "${selected[@]}"; do
   echo
   echo "=== $db ==="
-  # copy is incremental: identical files already present are skipped, so an
-  # interrupted run resumes instead of starting over.
-  rclone_sftp copy "$(db_remote "$db")" "/dest/$db" \
-    --transfers "$transfers" --progress --stats-one-line
+  # copy is incremental: files already present with a matching size/modtime are
+  # skipped, so an interrupted run resumes instead of starting over — only the
+  # not-yet-transferred files are fetched.
+  if [ -d "$dest/$db" ] && [ -n "$(ls -A "$dest/$db" 2>/dev/null)" ]; then
+    echo "Existing data detected — resuming download (already-fetched files are skipped)."
+  fi
+  RCLONE_LOG_LEVEL="$copy_log_level" rclone_sftp copy "$(db_remote "$db")" "/dest/$db" \
+    --transfers "$transfers" "${progress_opts[@]}"
+  # Wire the freshly-downloaded folder into the engine config automatically
+  # (OUTPUT_DIRECTORIES + INDEX_TYPES + DELIMITERS, all keyed by the DB name).
+  register_db "$db" "$dest/$db" "$ENGINE_CONFIG"
 done
 
 echo
 echo "All selected databases are in $dest"
+echo "Registered them in $ENGINE_CONFIG (OUTPUT_DIRECTORIES + INDEX_TYPES + DELIMITERS)"
+echo "Review any '!' warnings above before restarting — a wrong INDEX_TYPES/DELIMITERS"
+echo "value breaks engine startup or corrupts results."
+echo "Restart the stack to pick them up:  cheese stop && cheese start"
