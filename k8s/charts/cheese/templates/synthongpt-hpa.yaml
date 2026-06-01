@@ -1,0 +1,32 @@
+{{- if and .Values.synthongpt.enabled .Values.synthongpt.autoscaling.enabled -}}
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: cheese-synthongpt
+  labels:
+    {{- include "cheese.componentLabels" (list . "synthongpt") | nindent 4 }}
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: cheese-synthongpt
+  minReplicas: {{ .Values.synthongpt.autoscaling.minReplicas }}
+  maxReplicas: {{ .Values.synthongpt.autoscaling.maxReplicas }}
+  metrics:
+    {{- if .Values.synthongpt.autoscaling.targetCPUUtilizationPercentage }}
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: {{ .Values.synthongpt.autoscaling.targetCPUUtilizationPercentage }}
+    {{- end }}
+    {{- if .Values.synthongpt.autoscaling.targetMemoryUtilizationPercentage }}
+    - type: Resource
+      resource:
+        name: memory
+        target:
+          type: Utilization
+          averageUtilization: {{ .Values.synthongpt.autoscaling.targetMemoryUtilizationPercentage }}
+    {{- end }}
+{{- end }}

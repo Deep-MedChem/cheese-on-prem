@@ -1,0 +1,14 @@
+apiVersion: v2
+name: cheese
+description: |
+  Single Helm chart for the CHEESE on-prem prototype stack:
+  cheese-database (search engine, four roles off one image),
+  cheese-synthongpt (synthon model server, optional),
+  cheese-orchestrator (API the UI calls),
+  cheese-search-ui (public-facing frontend).
+
+  One `helm install` brings up the full stack. Components are toggled with
+  per-component `.enabled` keys in values.
+type: application
+version: 0.2.0
+appVersion: "0.0.1"

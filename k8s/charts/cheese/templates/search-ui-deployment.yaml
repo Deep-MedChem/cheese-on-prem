@@ -1,0 +1,70 @@
+{{- if .Values.searchUi.enabled -}}
+{{- $root := . -}}
+{{- $ui := .Values.searchUi -}}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: cheese-search-ui
+  labels:
+    {{- include "cheese.componentLabels" (list $root "search-ui") | nindent 4 }}
+spec:
+  {{- if not $ui.autoscaling.enabled }}
+  replicas: {{ $ui.replicaCount }}
+  {{- end }}
+  selector:
+    matchLabels:
+      {{- include "cheese.componentSelectorLabels" (list $root "search-ui") | nindent 6 }}
+  template:
+    metadata:
+      {{- with $ui.podAnnotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      labels:
+        {{- include "cheese.componentSelectorLabels" (list $root "search-ui") | nindent 8 }}
+    spec:
+      {{- include "cheese.imagePullSecrets" $ui.image | nindent 6 }}
+      securityContext:
+        {{- toYaml $ui.podSecurityContext | nindent 8 }}
+      containers:
+        - name: search-ui
+          securityContext:
+            {{- toYaml $ui.securityContext | nindent 12 }}
+          image: {{ include "cheese.image" $ui.image | quote }}
+          imagePullPolicy: {{ include "cheese.imagePullPolicy" $ui.image }}
+          ports:
+            - name: http
+              containerPort: {{ $ui.containerPort }}
+              protocol: TCP
+          envFrom:
+            - configMapRef:
+                name: cheese-search-ui-config
+            - secretRef:
+                name: cheese-search-ui-secret
+          readinessProbe:
+            tcpSocket:
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          livenessProbe:
+            tcpSocket:
+              port: http
+            initialDelaySeconds: 30
+            periodSeconds: 20
+          resources:
+            {{- toYaml $ui.resources | nindent 12 }}
+      {{- with $ui.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with $ui.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      affinity:
+      {{- if $ui.affinity }}
+        {{- $ui.affinity | toYaml | nindent 8 }}
+      {{- else }}
+        {{- include "cheese.affinityPreset" (list $root "search-ui" $ui) | nindent 8 }}
+      {{- end }}
+{{- end }}

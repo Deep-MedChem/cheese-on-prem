@@ -1,0 +1,40 @@
+{{- if .Values.database.enabled -}}
+{{- /*
+Renders the cheese_database config.yaml from .Values.database.config + .databases.
+Consumed by cheese_database/cheese_core.py at /data/{CONFIG_FILE}.
+*/ -}}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: cheese-database-config
+  labels:
+    {{- include "cheese.componentLabels" (list . "database") | nindent 4 }}
+data:
+  {{ .Values.database.config.fileName }}: |
+    DIM: {{ .Values.database.config.DIM | quote }}
+    DEVICE: {{ .Values.database.config.DEVICE | quote }}
+    MODELS_DIRECTORY: {{ .Values.database.config.MODELS_DIRECTORY | quote }}
+    PROPERTY_MODELS_PATH: {{ .Values.database.config.PROPERTY_MODELS_PATH | quote }}
+    TRANSFORMERS:
+      {{- range $k, $v := .Values.database.config.TRANSFORMERS }}
+      {{ $k }}: {{ $v | quote }}
+      {{- end }}
+    OUTPUT_DIRECTORIES:
+      {{- range $name, $db := .Values.database.databases }}
+      {{- if $db.enabled }}
+      {{ $name }}: {{ $db.output_directory | quote }}
+      {{- end }}
+      {{- end }}
+    INDEX_TYPES:
+      {{- range $name, $db := .Values.database.databases }}
+      {{- if $db.enabled }}
+      {{ $name }}: {{ $db.index_type | quote }}
+      {{- end }}
+      {{- end }}
+    DELIMITERS:
+      {{- range $name, $db := .Values.database.databases }}
+      {{- if $db.enabled }}
+      {{ $name }}: {{ $db.delimiter | quote }}
+      {{- end }}
+      {{- end }}
+{{- end }}

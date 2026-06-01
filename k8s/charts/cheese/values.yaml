@@ -1,0 +1,417 @@
+# cheese — single Helm chart for the on-prem prototype.
+#
+# Top-level keys (database / synthongpt / orchestrator / searchUi) gate the four
+# components. Resource names are hardcoded (`cheese-database-app`,
+# `cheese-orchestrator`, `cheese-synthongpt`, `cheese-search-ui`, …) so the
+# orchestrator's in-cluster service URLs work out of the box.
+#
+# Layered install:
+#   helm install cheese cheese-k8s/charts/cheese \
+#     --namespace cheese \
+#     -f cheese-k8s/charts/cheese/values-onprem.yaml \
+#     -f cheese-k8s/charts/cheese/values-secrets.yaml
+
+# --- Shared data plane -----------------------------------------------------
+# Single RWO PVC mounted at /data by database, orchestrator, and synthongpt.
+# Search UI is stateless and doesn't mount it.
+data:
+  pvcName: cheese-data-pvc
+  mountPath: /data
+
+# ===========================================================================
+# cheese-database
+# ===========================================================================
+database:
+  enabled: true
+
+  image:
+    source: acr                            # local | acr
+    local:
+      repository: cheese-database-local
+      tag: dev
+      pullPolicy: IfNotPresent
+    acr:
+      repository: cheese.azurecr.io/on-prem/cheese-database/cheese-customer
+      tag: latest
+      pullPolicy: IfNotPresent
+      pullSecret: cheese-acr-pull
+
+  # Base config rendered into ConfigMap `cheese-database-config` as config.yaml.
+  # Consumed by cheese_database.cheese_core.set_config().
+  config:
+    DIM: "512"
+    DEVICE: "cpu"                          # "cpu" | "cuda"
+    MODELS_DIRECTORY: "/data/models"
+    PROPERTY_MODELS_PATH: "/data/property_models"
+    TRANSFORMERS: {}                       # search_type -> embedding-model-name; site override required
+    # Filename the configmap is mounted as under /data. CONFIG_FILE env points here.
+    fileName: config.yaml
+
+  # Each entry produces parallel keys in OUTPUT_DIRECTORIES, INDEX_TYPES,
+  # DELIMITERS in the rendered config.yaml. Drop a new dataset onto the PVC
+  # at /data/<output_directory>/, add an entry here, helm upgrade.
+  databases:
+    test:
+      enabled: true
+      output_directory: "test_database"    # relative to /data
+      index_type: "Flat"
+      delimiter: ","
+
+  secret:
+    production: ""                         # OUR_SECRET-style value enabling licensing-prod path
+    cheeseLicense: ""                      # optional inline license; if set, used instead of file
+    cheeseLicenseFile: "cheese_license_file.json"  # filename on the PVC (relative to /data)
+    discordWebhookUrl: ""
+
+  # Common env applied to every role.
+  env:
+    jobs_data_path: "jobs"                 # relative to /data
+    testing: "false"
+    verbose: "0"
+    ui_url: "http://cheese-ui.localtest.me"
+    db_url: "http://cheese-database-app.cheese.svc.cluster.local:8001"
+
+  # One Deployment per role. Roles with `port` also get a Service of the same name.
+  roles:
+    app:
+      enabled: true
+      replicaCount: 1
+      command: "cheese_database.app"
+      port: 8001
+      service:
+        enabled: true
+      env:
+        EMB_COMPUTATION: "true"
+        SEARCH: "true"
+        VISUALIZATION: "true"
+      resources:
+        requests: { cpu: "1",   memory: 4Gi  }
+        limits:   { cpu: "4",   memory: 16Gi }
+
+    jobs-db:
+      enabled: true
+      replicaCount: 1
+      command: "cheese_database.jobs_app"
+      port: 8001
+      service:
+        enabled: true
+      env:
+        EMB_COMPUTATION: "false"
+        SEARCH: "false"
+        VISUALIZATION: "false"
+      resources:
+        requests: { cpu: "500m", memory: 1Gi }
+        limits:   { cpu: "2",    memory: 4Gi }
+
+    jobs-exec:
+      enabled: true
+      replicaCount: 1
+      command: "cheese_database.jobs_executor"
+      port: null                           # worker; no Service
+      service:
+        enabled: false
+      env:
+        EMB_COMPUTATION: "true"
+        SEARCH: "true"
+        VISUALIZATION: "true"
+      resources:
+        requests: { cpu: "1",   memory: 4Gi  }
+        limits:   { cpu: "4",   memory: 16Gi }
+
+    download-exec:
+      enabled: true
+      replicaCount: 1
+      command: "cheese_database.download_executor"
+      port: null                           # worker; no Service
+      service:
+        enabled: false
+      env:
+        EMB_COMPUTATION: "false"
+        SEARCH: "false"
+        VISUALIZATION: "false"
+      resources:
+        requests: { cpu: "500m", memory: 1Gi }
+        limits:   { cpu: "2",    memory: 4Gi }
+
+  podAnnotations: {}
+  podSecurityContext: {}
+  securityContext:
+    capabilities:
+      drop: [ALL]
+    runAsNonRoot: true
+    runAsUser: 2112
+
+  podDisruptionBudget:
+    enabled: false
+    spec:
+      maxUnavailable: 1
+
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+  podAntiAffinityPreset:
+    type: soft
+    topologyKey: kubernetes.io/hostname
+
+  # Service defaults (per-role services use these unless the role overrides).
+  service:
+    type: ClusterIP
+    port: 8001                             # fronted port; targetPort comes from role.port
+
+  autoscaling:
+    enabled: false
+    minReplicas: 1
+    maxReplicas: 4
+    targetCPUUtilizationPercentage: 80
+
+# ===========================================================================
+# cheese-synthongpt
+# ===========================================================================
+synthongpt:
+  enabled: true
+
+  image:
+    source: acr                            # local | acr
+    local:
+      repository: cheese-synthongpt-local
+      tag: dev
+      pullPolicy: IfNotPresent
+    acr:
+      repository: cheese.azurecr.io/on-prem/cheese-synthongpt/cheese-customer
+      tag: latest
+      pullPolicy: IfNotPresent
+      pullSecret: cheese-acr-pull
+
+  replicaCount: 1
+  containerPort: 8000
+
+  # SYNTHONGPT_DATA_ROOT = <shared data.mountPath>/<dataRootSubdir>.
+  dataRootSubdir: synthongpt_data
+
+  service:
+    type: ClusterIP
+    port: 8000
+
+  runtime:
+    device: "cpu"                          # "cpu" | "cuda"
+    seed: 0
+    extraArgs: []
+
+  resources:
+    requests: { cpu: "1", memory: 4Gi  }
+    limits:   { cpu: "4", memory: 16Gi }
+
+  podAnnotations: {}
+  podSecurityContext: {}
+  securityContext:
+    capabilities:
+      drop: [ALL]
+    runAsNonRoot: true
+    runAsUser: 2112
+
+  podDisruptionBudget:
+    enabled: false
+    spec:
+      maxUnavailable: 1
+
+  autoscaling:
+    enabled: false
+    minReplicas: 1
+    maxReplicas: 4
+    targetCPUUtilizationPercentage: 80
+
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+  podAntiAffinityPreset:
+    type: soft
+    topologyKey: kubernetes.io/hostname
+
+# ===========================================================================
+# cheese-orchestrator
+# ===========================================================================
+orchestrator:
+  enabled: true
+
+  image:
+    source: acr                            # local | acr
+    local:
+      repository: cheese-orchestrator-local
+      tag: dev
+      pullPolicy: IfNotPresent
+    acr:
+      repository: cheese.azurecr.io/on-prem/cheese-orchestrator/cheese-customer
+      tag: latest
+      pullPolicy: IfNotPresent
+      pullSecret: cheese-acr-pull
+
+  replicaCount: 1
+  containerPort: 8001
+
+  service:
+    type: ClusterIP
+    port: 80
+
+  ingress:
+    private:
+      enabled: false
+      className: nginx-private
+      annotations: {}
+      hosts: []
+      tls: []
+    public:
+      enabled: false
+      className: nginx
+      annotations:
+        nginx.ingress.kubernetes.io/proxy-read-timeout: "300"
+      hosts: []
+      tls: []
+
+  supabase:
+    enable: "true"
+    url: ""
+    serviceRoleKey: ""                     # set via secrets values file
+    jwtIssuer: ""                          # optional override
+
+  secret:
+    discordWebhookUrl: ""
+    cheeseLicenseFile: "cheese_license_file.json"  # filename on the shared PVC; must match database.secret.cheeseLicenseFile
+
+  env:
+    domain_url: "http://cheese-api.localtest.me"
+    ui_url: "http://cheese-ui.localtest.me"
+    cheese_env: "onprem"
+    production: "OUR_SECRET"               # must match database.secret.production
+    enable_auth: "true"
+    enable_notifications: "false"
+
+    db_url: "http://cheese-database-app.cheese.svc.cluster.local:8001"
+    jobs_db_url: "http://cheese-database-jobs-db.cheese.svc.cluster.local:8001"
+
+    synthongpt_url: "http://cheese-synthongpt.cheese.svc.cluster.local:8000"
+    synthongpt_api_timeout_seconds: "180"
+    synthongpt_max_products: "10000"
+
+  resources:
+    requests: { cpu: 500m, memory: 1Gi }
+    limits:   { cpu: "2",  memory: 2Gi }
+
+  autoscaling:
+    enabled: false
+    minReplicas: 1
+    maxReplicas: 10
+    targetCPUUtilizationPercentage: 80
+
+  podDisruptionBudget:
+    enabled: false
+    spec:
+      maxUnavailable: 1
+
+  podAnnotations: {}
+  podSecurityContext: {}
+  securityContext:
+    capabilities:
+      drop: [ALL]
+    runAsNonRoot: true
+    runAsUser: 2112
+
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+  podAntiAffinityPreset:
+    type: soft
+    topologyKey: kubernetes.io/hostname
+
+  topologySpreadConstraints:
+    enabled: false
+    maxSkew: 1
+    topologyKey: topology.kubernetes.io/zone
+    whenUnsatisfiable: ScheduleAnyway
+
+# ===========================================================================
+# cheese-search-ui
+# ===========================================================================
+searchUi:
+  enabled: true
+
+  image:
+    source: acr                            # local | acr
+    local:
+      repository: cheese-search-ui-local
+      tag: dev
+      pullPolicy: IfNotPresent
+    acr:
+      repository: cheese.azurecr.io/on-prem/cheese-search-ui/cheese-customer
+      tag: latest
+      pullPolicy: IfNotPresent
+      pullSecret: cheese-acr-pull
+
+  replicaCount: 1
+  containerPort: 3001
+
+  service:
+    type: ClusterIP
+    port: 3001
+
+  ingress:
+    enabled: true
+    className: nginx
+    annotations: {}
+    hosts:
+      - host: cheese-ui.localtest.me
+        paths:
+          - path: /
+            pathType: Prefix
+    tls: []
+
+  # Rendered into ConfigMap `cheese-search-ui-config`, consumed via envFrom.
+  # Feature gates (ENABLE_AUTH, etc.) are baked into the Vite bundle at build
+  # time — see cheese-k8s/env/build.env.example — so they live outside the chart.
+  config:
+    LOCAL: "True"
+    NODE_ENV: "production"
+    HOST: "0.0.0.0"
+    PORT: "3001"
+    FRONTEND_URL: "http://cheese-ui.localtest.me"
+    CHEESE_API: "http://cheese-orchestrator.cheese.svc.cluster.local"
+    SUPABASE_URL: ""
+    VITE_SUPABASE_URL: ""
+    VITE_CDN_ENABLED: "false"
+    VITE_CDN_BASE_URL: ""
+
+  secret:
+    cheeseUiUserSecret: ""                 # CHEESE_UI_USER_SECRET
+    supabaseAnonKey: ""                    # SUPABASE_ANON_KEY
+    supabaseServiceRoleKey: ""             # SUPABASE_SERVICE_ROLE_KEY
+    viteSupabaseAnonKey: ""                # VITE_SUPABASE_ANON_KEY
+    discordWebhookUrl: ""                  # DISCORD_WEBHOOK_URL (optional)
+
+  resources:
+    requests: { cpu: 250m, memory: 512Mi }
+    limits:   { cpu: "2",  memory: 2Gi   }
+
+  autoscaling:
+    enabled: false
+    minReplicas: 1
+    maxReplicas: 4
+    targetCPUUtilizationPercentage: 80
+
+  podDisruptionBudget:
+    enabled: false
+    spec:
+      maxUnavailable: 1
+
+  podAnnotations: {}
+  podSecurityContext: {}
+  securityContext:
+    capabilities:
+      drop: [ALL]
+    runAsNonRoot: true
+    runAsUser: 2112
+
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+  podAntiAffinityPreset:
+    type: soft
+    topologyKey: kubernetes.io/hostname

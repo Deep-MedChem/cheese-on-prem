@@ -1,0 +1,146 @@
+{{- if .Values.orchestrator.enabled -}}
+{{- $root := . -}}
+{{- $oc := .Values.orchestrator -}}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: cheese-orchestrator
+  labels:
+    {{- include "cheese.componentLabels" (list $root "orchestrator") | nindent 4 }}
+spec:
+  {{- if not $oc.autoscaling.enabled }}
+  replicas: {{ $oc.replicaCount }}
+  {{- end }}
+  selector:
+    matchLabels:
+      {{- include "cheese.componentSelectorLabels" (list $root "orchestrator") | nindent 6 }}
+  template:
+    metadata:
+      {{- with $oc.podAnnotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      labels:
+        {{- include "cheese.componentSelectorLabels" (list $root "orchestrator") | nindent 8 }}
+    spec:
+      {{- include "cheese.imagePullSecrets" $oc.image | nindent 6 }}
+      securityContext:
+        {{- toYaml $oc.podSecurityContext | nindent 8 }}
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: {{ $root.Values.data.pvcName }}
+        {{- if .Values.database.enabled }}
+        - name: config
+          configMap:
+            name: cheese-database-config
+        {{- end }}
+      containers:
+        - name: orchestrator
+          securityContext:
+            {{- toYaml $oc.securityContext | nindent 12 }}
+          image: {{ include "cheese.image" $oc.image | quote }}
+          imagePullPolicy: {{ include "cheese.imagePullPolicy" $oc.image }}
+          ports:
+            - name: http
+              containerPort: {{ $oc.containerPort }}
+              protocol: TCP
+          volumeMounts:
+            - name: data
+              mountPath: {{ $root.Values.data.mountPath | quote }}
+            {{- if .Values.database.enabled }}
+            - name: config
+              mountPath: {{ printf "%s/%s" (trimSuffix "/" $root.Values.data.mountPath) .Values.database.config.fileName | quote }}
+              subPath: {{ .Values.database.config.fileName | quote }}
+              readOnly: true
+            {{- end }}
+          env:
+            - name: CHEESE_LICENSE_FILE
+              value: {{ $oc.secret.cheeseLicenseFile | quote }}
+            {{- if .Values.database.enabled }}
+            - name: CONFIG_FILE
+              value: {{ .Values.database.config.fileName | quote }}
+            {{- end }}
+            - name: DOMAIN_URL
+              value: {{ $oc.env.domain_url | quote }}
+            - name: UI_URL
+              value: {{ $oc.env.ui_url | quote }}
+            - name: CHEESE_ENV
+              value: {{ $oc.env.cheese_env | quote }}
+            - name: PRODUCTION
+              value: {{ $oc.env.production | quote }}
+            - name: ENABLE_AUTH
+              value: {{ $oc.env.enable_auth | quote }}
+            - name: ENABLE_NOTIFICATIONS
+              value: {{ $oc.env.enable_notifications | quote }}
+            - name: DB_URL
+              value: {{ $oc.env.db_url | quote }}
+            - name: JOBS_DB_URL
+              value: {{ $oc.env.jobs_db_url | quote }}
+            - name: SYNTHONGPT_API_URL
+              value: {{ $oc.env.synthongpt_url | quote }}
+            - name: SYNTHONGPT_API_TIMEOUT_SECONDS
+              value: {{ $oc.env.synthongpt_api_timeout_seconds | quote }}
+            - name: SYNTHONGPT_MAX_PRODUCTS
+              value: {{ $oc.env.synthongpt_max_products | quote }}
+            # Supabase (sole auth + data backend)
+            - name: ENABLE_SUPABASE
+              value: {{ $oc.supabase.enable | quote }}
+            - name: SUPABASE_URL
+              value: {{ $oc.supabase.url | quote }}
+            {{- if $oc.supabase.jwtIssuer }}
+            - name: SUPABASE_JWT_ISSUER
+              value: {{ $oc.supabase.jwtIssuer | quote }}
+            {{- end }}
+            - name: SUPABASE_SERVICE_ROLE_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: cheese-orchestrator
+                  key: supabaseServiceRoleKey
+            - name: DISCORD_WEBHOOK_URL
+              valueFrom:
+                secretKeyRef:
+                  name: cheese-orchestrator
+                  key: discordWebhookUrl
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 15
+            periodSeconds: 20
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          lifecycle:
+            preStop:
+              exec:
+                command: ["/bin/sh", "-c", "sleep 10"]
+          resources:
+            {{- toYaml $oc.resources | nindent 12 }}
+      {{- with $oc.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with $oc.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      affinity:
+      {{- if $oc.affinity }}
+        {{- $oc.affinity | toYaml | nindent 8 }}
+      {{- else }}
+        {{- include "cheese.affinityPreset" (list $root "orchestrator" $oc) | nindent 8 }}
+      {{- end }}
+      {{- if $oc.topologySpreadConstraints.enabled }}
+      topologySpreadConstraints:
+        - maxSkew: {{ $oc.topologySpreadConstraints.maxSkew }}
+          topologyKey: {{ $oc.topologySpreadConstraints.topologyKey | quote }}
+          whenUnsatisfiable: {{ $oc.topologySpreadConstraints.whenUnsatisfiable | quote }}
+          labelSelector:
+            matchLabels:
+              {{- include "cheese.componentSelectorLabels" (list $root "orchestrator") | nindent 14 }}
+      {{- end }}
+{{- end }}
