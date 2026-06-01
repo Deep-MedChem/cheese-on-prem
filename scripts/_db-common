@@ -40,18 +40,49 @@ db_remote() {
   printf ':sftp:%s' "$p"
 }
 
-# Resolve the SFTP password (CHEESE_DB_PASSWORD overrides CHEESE_PASSWORD) and
-# obscure it for rclone — cached so we only shell out to rclone obscure once.
+# The SFTP password is its own setting (CHEESE_DB_PASSWORD) — deliberately NOT a
+# fallback to CHEESE_PASSWORD, which is the image-registry password and would
+# just produce a confusing "ssh: unable to authenticate" failure. Obscured for
+# rclone and cached so we only shell out to rclone obscure once.
 _db_obscured_pass=""
 db_obscured_pass() {
   [ -n "$_db_obscured_pass" ] && { printf '%s' "$_db_obscured_pass"; return 0; }
-  local pw="${CHEESE_DB_PASSWORD:-${CHEESE_PASSWORD:-}}"
-  if [ -z "$pw" ]; then
-    echo "No SFTP password found. Set CHEESE_PASSWORD (cheese update-env) or CHEESE_DB_PASSWORD." >&2
-    return 1
-  fi
-  _db_obscured_pass=$(docker run --rm "$RCLONE_IMAGE" obscure "$pw") || return 1
+  _db_obscured_pass=$(docker run --rm "$RCLONE_IMAGE" obscure "$CHEESE_DB_PASSWORD") || return 1
   printf '%s' "$_db_obscured_pass"
+}
+
+# Connectivity check: actually connect to the server with the configured
+# credentials (a cheap top-level listing) and fail fast if it doesn't work.
+# Timeouts/retries are bounded so a bad host or password fails in seconds instead
+# of rclone's ~30s+ default backoff. The rclone error is captured and classified
+# so the message points at the likely culprit — a rejected login → password, a
+# host/DNS/timeout error → server address.
+db_ping() {
+  echo "Checking connection to ${DB_SFTP_USER}@${DB_SERVER}..."
+  local out rc
+  out=$(rclone_sftp lsd "$(db_remote)" \
+          --contimeout 10s --timeout 20s --low-level-retries 1 --retries 1 2>&1)
+  rc=$?
+  [ "$rc" -eq 0 ] && { echo "Connected."; return 0; }
+
+  local hint
+  if printf '%s' "$out" | grep -qiE 'unable to authenticate|permission denied|auth.*fail|handshake failed'; then
+    hint="The server refused the login — CHEESE_DB_PASSWORD is likely wrong."
+  elif printf '%s' "$out" | grep -qiE 'no such host|name or service not known|connection refused|no route to host|i/o timeout|timed out|dial tcp|missing address|connection reset'; then
+    hint="Could not reach the host — DB_SERVER is likely wrong or unreachable."
+  else
+    hint="Connection to the database server failed."
+  fi
+
+  echo "$hint" >&2
+  echo "Fix it by running:  cheese update-env" >&2
+  echo "(DB_SERVER and CHEESE_DB_PASSWORD are provided by the DeepMedChem team;" >&2
+  echo "CHEESE_DB_PASSWORD is separate from the image-registry password CHEESE_PASSWORD)." >&2
+  # One concise line of the underlying rclone error, for debugging.
+  local detail
+  detail=$(printf '%s\n' "$out" | grep -iE 'CRITICAL|ERROR|Failed|unable|refused|no such host|timeout' | head -1)
+  [ -n "$detail" ] && echo "  (rclone: ${detail})" >&2
+  return 1
 }
 
 # Run rclone in Docker with the SFTP backend pre-configured via env. Pass extra
@@ -60,17 +91,37 @@ db_obscured_pass() {
 # default, so non-interactive runs don't stall on an unknown-host prompt.
 RCLONE_DOCKER_OPTS=()
 rclone_sftp() {
-  if [ -z "$DB_SERVER" ]; then
-    echo "DB_SERVER is not set — the database server address isn't configured." >&2
-    echo "Add 'DB_SERVER=<host>' to ~/.config/cheese/cheese-env-file.conf" >&2
-    echo "(DeepMedChem provides this address on request)." >&2
-    return 1
-  fi
   local pass
   pass=$(db_obscured_pass) || return 1
+  # --log-level ERROR silences rclone's chatty NOTICE/INFO lines (config-not-
+  # found, host-key notice, etc.) while still surfacing real ERROR/CRITICAL
+  # failures. Override with RCLONE_LOG_LEVEL=NOTICE to debug.
+  #
+  # RCLONE_CONFIG pins the config file to a writable, world-writable dir. The
+  # download copy runs as the invoking UID (-u, so files aren't root-owned), and
+  # that UID has no /etc/passwd entry in the container, so $HOME resolves to "/".
+  # rclone would then default its config to /.rclone.conf and write its atomic
+  # save temp file alongside it in "/" — which a non-root UID can't, producing a
+  # "Failed to save config after 10 tries: ... permission denied" loop that stalls
+  # the transfer at 0 B. Pointing it at /tmp (writable by any UID) avoids that;
+  # the config is throwaway since every run is --rm with env-supplied credentials.
   docker run --rm "${RCLONE_DOCKER_OPTS[@]}" \
+    -e RCLONE_CONFIG=/tmp/rclone.conf \
     -e RCLONE_SFTP_HOST="$DB_SERVER" \
     -e RCLONE_SFTP_USER="$DB_SFTP_USER" \
     -e RCLONE_SFTP_PASS="$pass" \
-    "$RCLONE_IMAGE" "$@"
+    "$RCLONE_IMAGE" --log-level "${RCLONE_LOG_LEVEL:-ERROR}" "$@"
+}
+
+# List database directory names (one per line) from the server, or fail with a
+# clear message. Distinguishes a connection/auth failure (rclone non-zero) from
+# a successful-but-empty listing — callers handle the empty case themselves.
+list_db_dirs() {
+  local listing
+  if ! listing=$(rclone_sftp lsf --dirs-only "$(db_remote)"); then
+    echo "Could not list databases on ${DB_SERVER} — check connectivity and that" >&2
+    echo "CHEESE_DB_PASSWORD is correct." >&2
+    return 1
+  fi
+  printf '%s\n' "$listing" | sed 's:/*$::; /^[[:space:]]*$/d' | sort
 }
