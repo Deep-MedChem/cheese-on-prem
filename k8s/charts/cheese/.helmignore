@@ -1,0 +1,13 @@
+# Patterns to ignore when building packages.
+# See https://helm.sh/docs/chart_template_guide/builtin_objects/
+.DS_Store
+.git/
+.gitignore
+.idea/
+.vscode/
+*.swp
+*.tmp
+*.bak
+*.orig
+values-onprem.yaml
+values-secrets.yaml

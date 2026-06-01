@@ -1,0 +1,136 @@
+{{- if .Values.database.enabled -}}
+{{- /*
+One Deployment per enabled role. Resource name: cheese-database-<roleName>.
+*/ -}}
+{{- $root := . -}}
+{{- $db := .Values.database -}}
+{{- $cfgMountFile := printf "%s/%s" (trimSuffix "/" $root.Values.data.mountPath) $db.config.fileName -}}
+{{- range $roleName, $role := $db.roles -}}
+{{- if $role.enabled }}
+{{- $component := printf "database-%s" $roleName -}}
+{{- $resourceName := printf "cheese-database-%s" $roleName }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $resourceName }}
+  labels:
+    {{- include "cheese.componentLabels" (list $root $component) | nindent 4 }}
+spec:
+  {{- if not $db.autoscaling.enabled }}
+  replicas: {{ default 1 $role.replicaCount }}
+  {{- end }}
+  selector:
+    matchLabels:
+      {{- include "cheese.componentSelectorLabels" (list $root $component) | nindent 6 }}
+  template:
+    metadata:
+      {{- with $db.podAnnotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      labels:
+        {{- include "cheese.componentSelectorLabels" (list $root $component) | nindent 8 }}
+    spec:
+      {{- include "cheese.imagePullSecrets" $db.image | nindent 6 }}
+      securityContext:
+        {{- toYaml $db.podSecurityContext | nindent 8 }}
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: {{ $root.Values.data.pvcName }}
+        - name: config
+          configMap:
+            name: cheese-database-config
+      containers:
+        - name: {{ $roleName }}
+          securityContext:
+            {{- toYaml $db.securityContext | nindent 12 }}
+          image: {{ include "cheese.image" $db.image | quote }}
+          imagePullPolicy: {{ include "cheese.imagePullPolicy" $db.image }}
+          command: ["python", "-um", {{ $role.command | quote }}]
+          {{- if $role.port }}
+          ports:
+            - name: http
+              containerPort: {{ $role.port }}
+              protocol: TCP
+          {{- end }}
+          env:
+            - name: CONFIG_FILE
+              value: {{ $db.config.fileName | quote }}
+            - name: JOBS_DATA_PATH
+              value: {{ $db.env.jobs_data_path | quote }}
+            - name: TESTING
+              value: {{ $db.env.testing | quote }}
+            - name: VERBOSE
+              value: {{ $db.env.verbose | quote }}
+            - name: UI_URL
+              value: {{ $db.env.ui_url | quote }}
+            - name: DB_URL
+              value: {{ $db.env.db_url | quote }}
+            - name: CHEESE_LICENSE_FILE
+              value: {{ $db.secret.cheeseLicenseFile | quote }}
+            - name: PRODUCTION
+              valueFrom:
+                secretKeyRef:
+                  name: cheese-database
+                  key: production
+                  optional: true
+            - name: CHEESE_LICENSE
+              valueFrom:
+                secretKeyRef:
+                  name: cheese-database
+                  key: cheeseLicense
+                  optional: true
+            - name: DISCORD_WEBHOOK_URL
+              valueFrom:
+                secretKeyRef:
+                  name: cheese-database
+                  key: discordWebhookUrl
+                  optional: true
+            {{- range $k, $v := $role.env }}
+            - name: {{ $k }}
+              value: {{ $v | quote }}
+            {{- end }}
+          {{- if $role.port }}
+          livenessProbe:
+            tcpSocket:
+              port: http
+            initialDelaySeconds: 30
+            periodSeconds: 20
+          readinessProbe:
+            tcpSocket:
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          {{- end }}
+          lifecycle:
+            preStop:
+              exec:
+                command: ["/bin/sh", "-c", "sleep 10"]
+          resources:
+            {{- toYaml $role.resources | nindent 12 }}
+          volumeMounts:
+            - name: data
+              mountPath: {{ $root.Values.data.mountPath | quote }}
+            - name: config
+              mountPath: {{ $cfgMountFile | quote }}
+              subPath: {{ $db.config.fileName | quote }}
+              readOnly: true
+      {{- with $db.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with $db.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      affinity:
+      {{- if $db.affinity }}
+        {{- $db.affinity | toYaml | nindent 8 }}
+      {{- else }}
+        {{- include "cheese.affinityPreset" (list $root $component $db) | nindent 8 }}
+      {{- end }}
+{{- end }}
+{{- end }}
+{{- end }}

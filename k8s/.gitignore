@@ -1,0 +1,38 @@
+# Local env and secrets — examples (.example) are tracked; real ones aren't.
+env/*.build.env
+*.env
+*.local
+charts/*/values-secrets.yaml
+charts/*/values-onprem.yaml
+!*.example
+
+# License files — keyed to the host hardware, never commit.
+cheese_license_file.json
+*license*.json
+*license*.yaml
+
+# Build outputs
+dist/
+build/
+coverage/
+
+# Logs
+*.log
+logs/
+
+# OS/editor noise
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+
+# Kubernetes / local cluster artifacts
+kubeconfig*
+*.kubeconfig
+
+# Optional local scratch files
+tmp/
+*.tmp
+
+# Test configs used for development
+*-TEST.yaml

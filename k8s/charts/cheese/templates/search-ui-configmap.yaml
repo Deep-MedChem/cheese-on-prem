@@ -1,0 +1,12 @@
+{{- if .Values.searchUi.enabled -}}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: cheese-search-ui-config
+  labels:
+    {{- include "cheese.componentLabels" (list . "search-ui") | nindent 4 }}
+data:
+  {{- range $k, $v := .Values.searchUi.config }}
+  {{ $k }}: {{ $v | quote }}
+  {{- end }}
+{{- end }}

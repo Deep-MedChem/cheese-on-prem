@@ -1,0 +1,48 @@
+{{- if .Values.orchestrator.enabled -}}
+{{- $root := . -}}
+{{- $svcPort := .Values.orchestrator.service.port -}}
+{{- range $scope, $ingress := .Values.orchestrator.ingress -}}
+{{- if $ingress.enabled }}
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ printf "cheese-orchestrator-%s" $scope }}
+  labels:
+    {{- include "cheese.componentLabels" (list $root "orchestrator") | nindent 4 }}
+  {{- with $ingress.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  {{- if $ingress.className }}
+  ingressClassName: {{ $ingress.className }}
+  {{- end }}
+  {{- if $ingress.tls }}
+  tls:
+    {{- range $ingress.tls }}
+    - hosts:
+        {{- range .hosts }}
+        - {{ . | quote }}
+        {{- end }}
+      secretName: {{ .secretName }}
+    {{- end }}
+  {{- end }}
+  rules:
+    {{- range $ingress.hosts }}
+    - host: {{ .host | quote }}
+      http:
+        paths:
+          {{- range .paths }}
+          - path: {{ .path }}
+            pathType: {{ .pathType | default "Prefix" }}
+            backend:
+              service:
+                name: {{ .service | default "cheese-orchestrator" }}
+                port:
+                  number: {{ .servicePortNumber | default $svcPort }}
+          {{- end }}
+    {{- end }}
+{{- end }}
+{{- end }}
+{{- end }}

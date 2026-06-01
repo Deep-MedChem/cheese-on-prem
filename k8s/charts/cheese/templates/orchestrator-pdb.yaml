@@ -1,0 +1,13 @@
+{{- if and .Values.orchestrator.enabled .Values.orchestrator.podDisruptionBudget.enabled (gt (int .Values.orchestrator.replicaCount) 1) -}}
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: cheese-orchestrator
+  labels:
+    {{- include "cheese.componentLabels" (list . "orchestrator") | nindent 4 }}
+spec:
+  {{- toYaml .Values.orchestrator.podDisruptionBudget.spec | nindent 2 }}
+  selector:
+    matchLabels:
+      {{- include "cheese.componentSelectorLabels" (list . "orchestrator") | nindent 6 }}
+{{- end }}
