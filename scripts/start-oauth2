@@ -9,5 +9,6 @@ source "$(dirname "$(readlink -f "$0")")/_compose-env"
 export COMPOSE_PROFILES="sso"
 
 echo "Starting oauth2-proxy (sso profile)..."
+clear_stray_cheese_containers
 $COMPOSE_CMD --profile sso up -d oauth2-proxy
 echo "oauth2-proxy is up on :4180."

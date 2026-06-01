@@ -44,6 +44,7 @@ done
 ensure_all_free_ports
 
 echo "Starting cheese-database stack..."
+clear_stray_cheese_containers
 $COMPOSE_CMD up -d db jobs-db jobs-exec download-exec file-server
 
 echo "Waiting for cheese-database to be healthy (this can take up to 3 min on first start)..."
