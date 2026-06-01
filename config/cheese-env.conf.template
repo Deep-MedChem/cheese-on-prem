@@ -1,8 +1,22 @@
 CHEESE_CUSTOMER=cheese-customer
+
+# Thank you for installing CHEESE.
+# Please, reach out to the DeepMedChem team for the following:
+
+# 1. Container registery password
 CHEESE_PASSWORD=XXX
-VISUALISATION_MODELS_PATH=/data/on-prem/visualisation_models/models
-VISUALISATION_DATA_PATH=/data/on-prem/visualization_data
-NGINX=false
+# 2. Database SFTP server + password for `cheese configure-dbs` / `cheese download-dbs`.
+# Both are required to download databases.
+DB_SERVER=XXX
+CHEESE_DB_PASSWORD=XXX
+
+# On-disk location for job state (search jobs, downloads). The installer prompts
+# for this and writes the resolved (absolute) value into cheese-env-file.conf;
+# ENTER accepts the default $HOME/.local/share/cheese-jobs. It is NOT set here as
+# a literal because ${HOME} would not be expanded and compose would then build a
+# broken /data${HOME}/... mount path. To move it, re-run the installer or edit
+# the value in cheese-env-file.conf, then `cheese stop` / `cheese start`.
+
 
 # Images pulled by `cheese update-images`. Drop entries you don't need.
 #   cheese-search-ui                — web UI
@@ -10,20 +24,19 @@ NGINX=false
 #   cheese-orchestrator             — public CHEESE API
 #   cheese-electrostatics-inference — ESP/RESP charge prediction (optional ESP viewer)
 #   cheese-inference                — embedding/indexing inference (alignment, `cheese run-inference`)
+
 CHEESE_PACKAGE=cheese-search-ui,cheese-database,cheese-orchestrator,cheese-electrostatics-inference,cheese-inference
+
+
+## ====================================
+#    No need to change anything below
+## ====================================
 
 # Dummy values keep the UI's Supabase client constructor happy when ENABLE_AUTH=false.
 SUPABASE_URL=http://localhost
 SUPABASE_ANON_KEY=dummy
 SUPABASE_SERVICE_ROLE_KEY=dummy
 
-# On-disk location for job state (search jobs, downloads). The installer prompts
-# for this and writes the chosen value below; ENTER accepts the default
-# ${HOME}/.local/share/cheese-jobs. Edit here to move it, then `cheese stop` /
-# `cheese start` to apply. Must exist — the file-server mounts it.
-#JOBS_DATA_PATH=
-
-# Database SFTP server for `cheese configure-dbs` / `cheese download-dbs`.
-# DeepMedChem provides this address on request — fill it in here.
-# (Optional: CHEESE_DB_PASSWORD if the SFTP password differs from CHEESE_PASSWORD.)
-#DB_SERVER=
+VISUALISATION_MODELS_PATH=/data/on-prem/visualisation_models/models
+VISUALISATION_DATA_PATH=/data/on-prem/visualization_data
+NGINX=false

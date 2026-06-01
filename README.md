@@ -5,10 +5,11 @@ This is a public repository for installing the CHEESE on-premises version.
 ### Requirements
 
 - Ubuntu
-
+- git
 - Docker
+The unix user must be a member of the group `docker` (check by running `docker ps`.)
 
-### Installing CHEESE
+## Installing CHEESE
 
 You can install CHEESE on your instance using the following steps :
 
@@ -20,12 +21,42 @@ You can install CHEESE on your instance using the following steps :
 
 4. Run `cheese update-env` and insert the `CHEESE_PASSWORD` in the config file
 
-5. Run `cheese update-images` to be able to download the docker images.
+5. Run `cheese update-images` to be able to download the docker images. This step will take a while!
 
-6. After the docker images are downloaded, run `cheese generate-license-key` to generate your license key.
+6. After `cheese-database` image is successfully pulled, run `cheese generate-license-key` to generate your license key.
 
 7. Send us the key so that we can generate your license file.
 
 8. Once we send you the JSON license file, run `cheese update-license` and paste its contents there
 
-9. You can now use CHEESE on-prem version, for usage instructions please consult our [CHEESE Docs page](https://cheese-docs.deepmedchem.com/on-prem-installation/#how-to-install-cheese)
+9. You can now use CHEESE on-prem version.
+
+## Adding the databases
+
+By default, Cheese comes with a small test database which can be used to test the general workflow. 
+
+To download real databases, run 
+1. `cheese configure-dbs`
+
+Will fetch the list of available databases from the CHEESE SFTP server. 
+
+`cheese download-dbs --dest <folder>` then fetches the selected databases and
+auto-registers them in the engine config. For how the engine recognizes a
+database (the required folder structure and the `OUTPUT_DIRECTORIES` /
+`INDEX_TYPES` / `DELIMITERS` config entries), and how to fix a DB that won't
+load, see [docs/database-configuration.md](docs/database-configuration.md).
+
+
+
+## Running CHEESE
+
+- To start the CHEESE instance, run `cheese start`. 
+> This starts a docker network of about 7 docker images. The startup takes a few minutes. 
+
+
+## Housekeeping
+
+### Updating databases
+`cheese update-dbs`
+
+COMING SOON
