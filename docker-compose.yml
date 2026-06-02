@@ -182,6 +182,15 @@ services:
     image: cheese.azurecr.io/on-prem/cheese-inference/${CHEESE_CUSTOMER}:latest
     container_name: cheese-alignment
     entrypoint: ["python", "-um", "cheese_inference.app"]
+    # This image verifies the license at startup: cheese_inference.cheese_license
+    # reads CHEESE_LICENSE_FILE and opens it at /data/$CHEESE_LICENSE_FILE. Without
+    # the env_file the var is unset and it tries to open '/data/None'
+    # (FileNotFoundError, crash-loop); without the /:/data mount the host license
+    # file isn't visible. Both are required — same as the db services and api.
+    env_file:
+      - ${HOME}/.config/cheese/cheese-env-file.conf
+    volumes:
+      - /:/data
     networks:
       cheese-network:
         aliases:
