@@ -79,6 +79,22 @@ diagnose() {
     echo "      fix:   cheese check-license   (refresh with  cheese update-license)"
     return
   fi
+  if printf '%s' "$logs" | grep -qF "/data/None"; then
+    echo "      cause: this service reads CHEESE_LICENSE_FILE and opens"
+    echo "             /data/\$CHEESE_LICENSE_FILE, but the var is unset (→ '/data/None')."
+    echo "             Its compose service is missing the env_file and/or the /:/data mount."
+    echo "      fix:   add the cheese-env-file.conf env_file + '- /:/data' volume to the"
+    echo "             service in docker-compose.yml (same as the db services and api)."
+    return
+  fi
+  if printf '%s' "$logs" | grep -qiE "No module named '?cheese_inference\.app'?"; then
+    echo "      cause: the conformer-alignment backend isn't in this image — its entrypoint"
+    echo "             runs cheese_inference.app, but that module (app.py) is not built in."
+    echo "      fix:   the alignment service has no working backend on-prem; leave it"
+    echo "             disabled (the UI hides the feature) until an image that ships app.py"
+    echo "             is available. Not fixable by config."
+    return
+  fi
   # Fallback: surface the most relevant error line so it's not a black box.
   local line
   line=$(printf '%s\n' "$logs" | grep -iE 'Error|Exception|Traceback|CRITICAL|Failed' | tail -1)
@@ -101,6 +117,7 @@ for name in "${names[@]}"; do
   state=$(docker inspect -f '{{.State.Status}}' "$name" 2>/dev/null)
   health=$(docker inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{end}}' "$name" 2>/dev/null)
   exitcode=$(docker inspect -f '{{.State.ExitCode}}' "$name" 2>/dev/null)
+  restarts=$(docker inspect -f '{{.RestartCount}}' "$name" 2>/dev/null)
   label="$state"
   [ -n "$health" ] && label="$state ($health)"
   [ "$state" = "exited" ] && label="exited ($exitcode)"
@@ -111,6 +128,11 @@ for name in "${names[@]}"; do
     exited)     [ "$exitcode" != "0" ] && bad=1 ;;
   esac
   [ "$health" = "unhealthy" ] && bad=1
+  # A process that crashes faster than its healthcheck's start_period never
+  # reaches "unhealthy" — it just exit/restart-loops, and an instantaneous
+  # inspect can catch it mid-cycle as "running (starting)". The restart count is
+  # the reliable tell of a crash-loop regardless of the moment we look.
+  if [ "${restarts:-0}" -ge 3 ]; then bad=1; label="$label, ${restarts} restarts"; fi
 
   if [ "$bad" -eq 1 ]; then
     echo "   ✗ $name: $label"
