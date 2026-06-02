@@ -155,14 +155,31 @@ while [[ $# -gt 0 ]]; do
             ;;
         esac
       done
+      # Core first: db + API (blocks until the API is healthy), then the UI — so
+      # the UI is usable as soon as the core is up. The UI only depends_on `api`
+      # (compose: condition service_healthy), not on the optional services below.
       start-server "${start_args[@]}"
-      start-inference || echo "(inference service failed to start; ESP charge feature will be hidden)"
-      start-alignment || echo "(alignment service failed to start; conformer alignment feature will be hidden)"
       if [ -n "$api_port" ]; then
         start-app --api_port "$api_port"
       else
         start-app
       fi
+
+      # ESP-charge (inference) and conformer-alignment are OPTIONAL and slow to
+      # boot (alignment can take minutes). The UI proxies to them per-request and
+      # returns a graceful 503 while they're down (src/server.ts), so blocking the
+      # whole start on their health-waits just delays a usable UI for no reason.
+      # Bring them up in the BACKGROUND instead: the features light up on their
+      # own once the containers answer — no UI restart needed, because the UI
+      # talks to a fixed container alias resolved by Docker DNS at request time.
+      mkdir -p "${HOME}/.cache/cheese"
+      echo "UI is up. ESP-charge + alignment services are starting in the background"
+      echo "(logs: ${HOME}/.cache/cheese/{inference,alignment}.log); those features"
+      echo "appear automatically once ready — no restart needed."
+      ( start-inference >>"${HOME}/.cache/cheese/inference.log" 2>&1 \
+          || echo "(inference service failed to start; ESP charge feature will be hidden)" ) &
+      ( start-alignment >>"${HOME}/.cache/cheese/alignment.log" 2>&1 \
+          || echo "(alignment service failed to start; conformer alignment feature will be hidden)" ) &
 
       if [ "$NGINX" = "true" ] ; then
       start-oauth2
