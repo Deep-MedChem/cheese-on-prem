@@ -40,6 +40,13 @@ done
 
 # Job-data directory is ensured by _compose-env (sourced above).
 
+# Validate & auto-heal the engine config before bringing the DB up. A drift
+# between OUTPUT_DIRECTORIES / INDEX_TYPES / DELIMITERS otherwise surfaces only
+# as cheese-db crash-looping unhealthy; catching it here turns it into a fix (or
+# a clear, actionable message) before any container starts. set -e aborts the
+# start if preflight finds an unfixable problem.
+"$(dirname "$(readlink -f "$0")")/preflight-config"
+
 # Pick free host ports automatically if the requested/default ones are taken.
 ensure_all_free_ports
 

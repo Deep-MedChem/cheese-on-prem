@@ -33,6 +33,12 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
+# `up -d api` pulls up the db stack via compose deps, so validate & auto-heal
+# the engine config here too — otherwise a config drift just crash-loops the DB
+# behind the API's health wait. set -e aborts on an unfixable problem before any
+# container starts.
+"$(dirname "$(readlink -f "$0")")/preflight-config"
+
 # Pick free host ports automatically if the requested/default ones are taken.
 # `up -d api` also starts the db stack (incl. file-server), so adapt all ports.
 ensure_all_free_ports
