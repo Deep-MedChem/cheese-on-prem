@@ -1,0 +1,132 @@
+#!/bin/bash
+# cheese doctor — one command to answer "why is CHEESE unhealthy, and how do I
+# fix it?" without reading container logs or engine source by hand.
+#
+# It does three things:
+#   1. Validates the engine config (the OUTPUT_DIRECTORIES / INDEX_TYPES /
+#      DELIMITERS three-map consistency the engine requires). With --fix it
+#      auto-heals what it can infer from the downloaded folders.
+#   2. Reports the status of every cheese-* container.
+#   3. For any container that's crash-looping / unhealthy / exited badly, reads
+#      its recent logs and maps the real error to a plain-language cause + the
+#      exact command that fixes it, across the known on-prem failure catalog.
+#
+# Usage: cheese doctor [--fix]
+#   --fix   Also auto-heal fixable engine-config problems (default: report only).
+
+source "$(dirname "$(readlink -f "$0")")/_engine-config"
+
+FIX=0
+case "$1" in
+  --fix) FIX=1 ;;
+  -h|--help) echo "Usage: cheese doctor [--fix]"; exit 0 ;;
+esac
+
+bold()  { printf '\033[1m%s\033[0m\n' "$1"; }
+
+# ── 1. Engine config ─────────────────────────────────────────────────────────
+bold "1) Engine config"
+cfg=$(engine_config_path)
+echo "   $cfg"
+if [ "$FIX" -eq 1 ]; then validate_engine_config "$cfg" fix; else validate_engine_config "$cfg" report; fi
+cfg_rc=$?
+if [ "$EC_ERROR" -gt 0 ]; then
+  echo "   → $EC_ERROR unfixable problem(s); fix the ✗ items above."
+elif [ "$EC_FIXED" -gt 0 ] || [ "$EC_WARN" -gt 0 ]; then
+  if [ "$FIX" -eq 1 ]; then echo "   → healed $EC_FIXED, $EC_WARN warning(s). Restart to apply:  cheese stop && cheese start"
+  else echo "   → $EC_FIXED entr(ies) can be auto-healed. Run:  cheese doctor --fix"; fi
+else
+  echo "   → consistent."
+fi
+echo
+
+# ── 2 & 3. Containers + log diagnosis ────────────────────────────────────────
+# Map a blob of recent container logs to the first matching known failure. Each
+# case prints a one-line cause and the command that fixes it.
+diagnose() {
+  local logs="$1" m
+  if m=$(printf '%s' "$logs" | grep -oE "KeyError: '[^']+'" | head -1); then
+    if [ -n "$m" ]; then
+      echo "      cause: engine-config drift — a DB in OUTPUT_DIRECTORIES is missing from"
+      echo "             INDEX_TYPES/DELIMITERS ($m)."
+      echo "      fix:   cheese doctor --fix   (then  cheese stop && cheese start)"
+      return
+    fi
+  fi
+  if printf '%s' "$logs" | grep -qiE 'Expected unicode, got list'; then
+    echo "      cause: stale cheese-database image (the compiled search_smiles bug)."
+    echo "      fix:   cheese update-images   (then  cheese stop && cheese start)"
+    return
+  fi
+  if printf '%s' "$logs" | grep -qiE "doesn't exist ! Please check your configuration|numlines\.txt|Directory structure not correct|Cluster sizes file not found"; then
+    echo "      cause: a configured database folder is missing or incompletely downloaded."
+    echo "      fix:   cheese download-dbs --dest <db-root>   (or correct the path in the engine config)"
+    return
+  fi
+  if printf '%s' "$logs" | grep -qiE 'No sentence-transformers model found|does not appear to have a file named|/data/home|missing ML models'; then
+    echo "      cause: MODELS_DIRECTORY is empty/misconfigured, so the engine globs the"
+    echo "             mount root (/data) into the model loader."
+    echo "      fix:   ensure MODELS_DIRECTORY is unset for on-prem (cheese configure-engine), then restart."
+    return
+  fi
+  if printf '%s' "$logs" | grep -qiE 'unable to authenticate|handshake failed|permission denied.*ssh'; then
+    echo "      cause: cannot authenticate to the database SFTP server."
+    echo "      fix:   cheese update-env   (set DB_SERVER / CHEESE_DB_PASSWORD from DeepMedChem)"
+    return
+  fi
+  if printf '%s' "$logs" | grep -qiE 'license.*(invalid|expired|not valid|verify)|verify_cheese_license'; then
+    echo "      cause: license problem."
+    echo "      fix:   cheese check-license   (refresh with  cheese update-license)"
+    return
+  fi
+  # Fallback: surface the most relevant error line so it's not a black box.
+  local line
+  line=$(printf '%s\n' "$logs" | grep -iE 'Error|Exception|Traceback|CRITICAL|Failed' | tail -1)
+  [ -n "$line" ] && echo "      last error: ${line}"
+  echo "      (no known signature matched — see full logs: docker logs <name>)"
+}
+
+bold "2) Containers"
+mapfile -t names < <(docker ps -a --filter "name=cheese-" --format '{{.Names}}' 2>/dev/null | sort)
+if [ "${#names[@]}" -eq 0 ]; then
+  echo "   No cheese-* containers found. Start the stack with:  cheese start"
+  echo
+  bold "Summary"
+  [ "$cfg_rc" -eq 0 ] && echo "   Engine config OK; stack not running." || echo "   Engine config has problems (above); stack not running."
+  exit $([ "$cfg_rc" -eq 0 ] && echo 0 || echo 1)
+fi
+
+unhealthy=0
+for name in "${names[@]}"; do
+  state=$(docker inspect -f '{{.State.Status}}' "$name" 2>/dev/null)
+  health=$(docker inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{end}}' "$name" 2>/dev/null)
+  exitcode=$(docker inspect -f '{{.State.ExitCode}}' "$name" 2>/dev/null)
+  label="$state"
+  [ -n "$health" ] && label="$state ($health)"
+  [ "$state" = "exited" ] && label="exited ($exitcode)"
+
+  bad=0
+  case "$state" in
+    restarting) bad=1 ;;
+    exited)     [ "$exitcode" != "0" ] && bad=1 ;;
+  esac
+  [ "$health" = "unhealthy" ] && bad=1
+
+  if [ "$bad" -eq 1 ]; then
+    echo "   ✗ $name: $label"
+    diagnose "$(docker logs "$name" --tail 60 2>&1)"
+    unhealthy=$((unhealthy+1))
+  else
+    echo "   ✓ $name: $label"
+  fi
+done
+echo
+
+bold "Summary"
+if [ "$unhealthy" -eq 0 ] && [ "$cfg_rc" -eq 0 ]; then
+  echo "   All cheese-* containers healthy and engine config consistent."
+  exit 0
+fi
+[ "$unhealthy" -gt 0 ] && echo "   $unhealthy container(s) need attention (see ✗ above)."
+[ "$cfg_rc" -ne 0 ] && echo "   Engine config has unfixable problems (see section 1)."
+exit 1

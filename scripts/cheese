@@ -28,6 +28,8 @@ show_help() {
   echo "  check-license               Check CHEESE license"
   echo "  configure-dbs                Choose which indexed databases to download"
   echo "  download-dbs                 Download CHEESE indexed databases"
+  echo "  preflight-config             Validate & auto-heal the engine config (run before start)"
+  echo "  doctor                       Diagnose stack/config problems and suggest fixes"
   echo "  -h, --help                   Show this help message"
   exit 1
 }
@@ -217,6 +219,16 @@ while [[ $# -gt 0 ]]; do
     download-dbs)
       shift 1
       download-dbs $@
+      exit 0
+      ;;
+    preflight-config)
+      shift 1
+      preflight-config $@
+      exit 0
+      ;;
+    doctor)
+      shift 1
+      doctor $@
       exit 0
       ;;
     uninstall)
