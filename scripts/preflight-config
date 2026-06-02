@@ -1,0 +1,47 @@
+#!/bin/bash
+# Validate (and auto-heal) the CHEESE engine config BEFORE the containers start.
+#
+# This is the guard that turns a config drift into a one-line fix at the host
+# instead of a silent cheese-db crash-loop. It is run automatically by start-db
+# and start-server; you can also run it on its own:  cheese preflight-config
+#
+# Behaviour (matches the "auto-fix + report" policy): repairs everything it can
+# infer from the downloaded folders (missing/mismatched INDEX_TYPES, missing
+# DELIMITERS), prints exactly what it changed, and only exits non-zero for
+# problems it must not guess at — a DB folder that's missing or whose structure
+# it can't recognize. Pass --check to report without writing.
+
+source "$(dirname "$(readlink -f "$0")")/_engine-config"
+
+mode="fix"
+case "$1" in
+  --check|--dry-run) mode="report" ;;
+  -h|--help)
+    echo "Usage: cheese preflight-config [--check]"
+    echo "  (no args)   Validate and auto-heal the engine config, then report."
+    echo "  --check     Report problems without modifying the config."
+    exit 0 ;;
+esac
+
+cfg=$(engine_config_path)
+echo "Checking engine config: $cfg"
+
+validate_engine_config "$cfg" "$mode"
+rc=$?
+
+echo
+if [ "$EC_ERROR" -gt 0 ]; then
+  echo "Preflight: $EC_ERROR problem(s) need your attention before CHEESE can start."
+  echo "Fix the item(s) marked ✗ above, then start again."
+  exit 1
+fi
+if [ "$EC_FIXED" -gt 0 ] || [ "$EC_WARN" -gt 0 ]; then
+  if [ "$mode" = "fix" ]; then
+    echo "Preflight: healed $EC_FIXED config entr(ies), $EC_WARN warning(s). Continuing."
+  else
+    echo "Preflight: $EC_FIXED entr(ies) would be healed, $EC_WARN warning(s). Run without --check to apply."
+  fi
+else
+  echo "Preflight: engine config is consistent."
+fi
+exit 0

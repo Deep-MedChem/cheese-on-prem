@@ -14,6 +14,11 @@ SMILES/IDs.
 > `cheese download-dbs` writes all three automatically (inferring the latter two
 > from the downloaded folder). The rest of this doc is what it's doing and how to
 > fix it by hand if the inference is wrong.
+>
+> You rarely need to do that by hand: **`cheese start` runs a preflight that
+> validates and auto-heals the config before any container starts**, and
+> **`cheese doctor`** diagnoses a stack that's already misbehaving and prints the
+> fix. See §5.
 
 ---
 
@@ -145,6 +150,11 @@ The editor is **section-scoped**: it updates an existing key in place under the
 right section, or inserts a new one after the section header — so re-running is
 idempotent and the same DB name across three sections is never confused.
 
+This same inference + repair logic lives in `scripts/_engine-config` and is
+shared with the start-time preflight (`cheese preflight-config`), so a DB
+registered at download time always passes the check at start time — the two
+can't drift apart.
+
 ### When inference fails
 
 `download-dbs` prints a loud `!` warning rather than writing a guess when it
@@ -172,6 +182,14 @@ cheese stop && cheese start
 
 ## 5. Troubleshooting
 
+**Start here:** `cheese doctor` checks the engine config *and* every `cheese-*`
+container in one shot, and for any crash-looping/unhealthy one it maps the real
+log line to a cause and the exact fix command. `cheese doctor --fix` also
+auto-heals the config problems it can infer. To validate/heal the config without
+touching containers, run `cheese preflight-config` (this is what `cheese start`
+runs automatically before bringing anything up, so a config drift is fixed — or
+reported with an actionable message — instead of becoming a silent crash-loop).
+
 | symptom | likely cause |
 |---|---|
 | DB container crash-loops immediately on start | a DB is in `OUTPUT_DIRECTORIES` but missing from `INDEX_TYPES` or `DELIMITERS` (KeyError), or the three maps' keys don't match |
@@ -183,5 +201,6 @@ cheese stop && cheese start
 ---
 
 *Source of truth: `cheese-database/cheese_database/indices/database.py`
-(config load + structure checks) and `cheese-on-prem/scripts/download-dbs`
-(auto-registration). If those change, update this doc.*
+(config load + structure checks), `cheese-on-prem/scripts/_engine-config`
+(validation + inference + repair, shared by `download-dbs`, `preflight-config`
+and `doctor`). If those change, update this doc.*

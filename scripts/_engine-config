@@ -1,0 +1,260 @@
+#!/bin/bash
+# Shared helpers for reading, validating and auto-healing the CHEESE engine
+# config (cheese_config_file.yaml). Sourced by download-dbs (to register freshly
+# downloaded DBs), preflight-config (run before every start) and doctor.
+#
+# Why this exists: the engine (cheese_database/indices/database.py) needs THREE
+# parallel, same-keyed maps for every database or it won't even import —
+# OUTPUT_DIRECTORIES (path), INDEX_TYPES (clustered|in_memory) and DELIMITERS
+# (the column separator used to split a result line into SMILES + ID). A DB
+# present in OUTPUT_DIRECTORIES but missing from INDEX_TYPES/DELIMITERS raises a
+# bare `KeyError: '<dir-name>'` deep in module import, which (the image is
+# Cythonized, so there's no traceback) surfaces only as cheese-db crash-looping
+# unhealthy. This library keeps the three maps in sync so that never reaches a
+# container.
+#
+# Provided to callers:
+#   engine_config_path                         → resolves the engine config path
+#   yaml_section_keys <section> <cfg>          → keys under a top-level section
+#   yaml_get <section> <key> <cfg>             → value for key (quotes stripped)
+#   detect_index_type <dir>                    → clustered | in_memory | ""
+#   detect_delimiter <dir> <itype>             → tab | comma | ""
+#   set_config_entry <key> <value> <sec> <cfg> → upsert `  key: value` in section
+#   heal_db_entry <key> <path> <cfg> <mode>    → fill/repair INDEX_TYPES+DELIMITERS
+#   validate_engine_config <cfg> <mode>        → walk OUTPUT_DIRECTORIES, heal all
+#
+# <mode> is "report" (read-only, just print findings) or "fix" (write repairs).
+
+# Resolve the engine config path the same way every script does: prefer the
+# CONFIG_FILE exported by cheese-env.sh, fall back to the standard location.
+engine_config_path() {
+  echo "${CONFIG_FILE:-${HOME}/.config/cheese/cheese_config_file.yaml}"
+}
+
+# ── YAML readers ────────────────────────────────────────────────────────────
+# These are deliberately minimal — the engine config is a flat file of top-level
+# sections each holding `  key: value` pairs, so a full YAML parser is overkill
+# and would be one more host dependency. awk reads ENVIRON (not -v) so backslash
+# escapes in values (the "\t" delimiter) survive untouched.
+
+# Is `key` an entry under top-level `section`? (section-scoped, so the same
+# db_name under several sections isn't confused for a match.) Exit 0 if present.
+_yaml_key_in_section() {
+  local section="$1" key="$2" cfg="$3"
+  _CS="$section" _CK="$key" awk '
+    function toplevel(l){ return (l ~ /^[A-Za-z_][A-Za-z0-9_-]*:/) }
+    BEGIN{ section=ENVIRON["_CS"]; key=ENVIRON["_CK"] }
+    { if (toplevel($0)) { h=$0; sub(/:.*/,"",h); cur=h; next }
+      if (cur==section) { k=$0; sub(/^[[:space:]]+/,"",k); sub(/:.*/,"",k); if (k==key) found=1 } }
+    END{ exit (found?0:1) }
+  ' "$cfg"
+}
+
+# Print every key under top-level `section`, one per line.
+yaml_section_keys() {
+  local section="$1" cfg="$2"
+  _CS="$section" awk '
+    function toplevel(l){ return (l ~ /^[A-Za-z_][A-Za-z0-9_-]*:/) }
+    BEGIN{ section=ENVIRON["_CS"] }
+    { if (toplevel($0)) { h=$0; sub(/:.*/,"",h); cur=h; next }
+      if (cur==section) { k=$0; sub(/^[[:space:]]+/,"",k); sub(/[[:space:]]*:.*/,"",k)
+                          if (k!="" && k !~ /^#/) print k } }
+  ' "$cfg"
+}
+
+# Print the value for `section`.`key` with surrounding quotes stripped. Empty if
+# absent.
+yaml_get() {
+  local section="$1" key="$2" cfg="$3"
+  _CS="$section" _CK="$key" awk '
+    function toplevel(l){ return (l ~ /^[A-Za-z_][A-Za-z0-9_-]*:/) }
+    BEGIN{ section=ENVIRON["_CS"]; key=ENVIRON["_CK"] }
+    { if (toplevel($0)) { h=$0; sub(/:.*/,"",h); cur=h; next }
+      if (cur==section) {
+        k=$0; sub(/^[[:space:]]+/,"",k); sub(/[[:space:]]*:.*/,"",k)
+        if (k==key) { v=$0; sub(/^[[:space:]]*[^:]+:[[:space:]]*/,"",v); print v; exit } } }
+  ' "$cfg" | sed -e 's/[[:space:]]*$//' -e "s/^'\(.*\)'$/\1/" -e 's/^"\(.*\)"$/\1/'
+}
+
+# ── Structure inference ─────────────────────────────────────────────────────
+# Mirror the has_clustered_smiles_structure / has_in_memory_structure checks in
+# the engine so what we infer matches what the engine will actually accept.
+
+detect_index_type() {
+  local dir="$1"
+  if [ -d "$dir/smiles_clusters" ] && [ -d "$dir/clusters" ]; then echo "clustered"
+  elif [ -d "$dir/embeddings" ] && [ -d "$dir/fingerprints" ]; then echo "in_memory"
+  else echo ""; fi
+}
+
+# Guess the column delimiter by peeking at one real data line: a cluster file
+# for clustered DBs, database.txt for in_memory. Prints "tab", "comma" or "".
+#
+# `find` order is NOT sorted, so the first file it returns can be an empty
+# placeholder cluster (e.g. cluster_-1.txt.gz) whose blank line would make a
+# perfectly comma/tab-delimited DB look "undetectable" — and silently default to
+# comma, corrupting a tab DB's results. So scan files until we get a non-empty
+# data line (grep -m1 . = first non-empty line; bounded so a pathological dir
+# can't make this run forever).
+detect_delimiter() {
+  local dir="$1" itype="$2" sample="" f
+  if [ "$itype" = "clustered" ]; then
+    while IFS= read -r f; do
+      [ -n "$f" ] || continue
+      sample=$(zcat "$f" 2>/dev/null | grep -m1 .)
+      [ -n "$sample" ] && break
+    done < <(find "$dir/smiles_clusters" -name '*.txt.gz' 2>/dev/null | head -50)
+  elif [ "$itype" = "in_memory" ] && [ -f "$dir/database.txt" ]; then
+    sample=$(grep -m1 . "$dir/database.txt" 2>/dev/null)
+  fi
+  case "$sample" in
+    "")       echo "" ;;
+    *$'\t'*)  echo "tab" ;;
+    *,*)      echo "comma" ;;
+    *)        echo "" ;;
+  esac
+}
+
+# ── Config writer ────────────────────────────────────────────────────────────
+# Set `  <key>: <value>` under top-level `section`. `value` must arrive already
+# quoted (e.g. "'/data/x'", "\"clustered\"", "\"\\t\""). Updates in place if the
+# key exists under that section (indentation preserved), otherwise inserts it
+# right after the section header; if the section is absent, appends both.
+set_config_entry() {
+  local key="$1" value="$2" section="$3" cfg="$4"
+  if ! grep -qE "^${section}:" "$cfg"; then
+    printf '%s:\n  %s: %s\n' "$section" "$key" "$value" >> "$cfg"; return 0
+  fi
+  if _yaml_key_in_section "$section" "$key" "$cfg"; then
+    _CS="$section" _CK="$key" _CV="$value" awk '
+      function toplevel(l){ return (l ~ /^[A-Za-z_][A-Za-z0-9_-]*:/) }
+      BEGIN{ section=ENVIRON["_CS"]; key=ENVIRON["_CK"]; value=ENVIRON["_CV"] }
+      { if (toplevel($0)) { h=$0; sub(/:.*/,"",h); cur=h; print; next }
+        if (cur==section && !done) {
+          k=$0; sub(/^[[:space:]]+/,"",k); sub(/:.*/,"",k)
+          if (k==key) { match($0,/^[[:space:]]*/); ind=substr($0,1,RLENGTH)
+                        print ind key ": " value; done=1; next } }
+        print }
+    ' "$cfg" > "$cfg.tmp" && mv "$cfg.tmp" "$cfg"
+  else
+    _CS="$section" _CK="$key" _CV="$value" awk '
+      function toplevel(l){ return (l ~ /^[A-Za-z_][A-Za-z0-9_-]*:/) }
+      BEGIN{ section=ENVIRON["_CS"]; key=ENVIRON["_CK"]; value=ENVIRON["_CV"] }
+      { print
+        if (toplevel($0)) { h=$0; sub(/:.*/,"",h)
+          if (h==section && !done) { print "  " key ": " value; done=1 } } }
+    ' "$cfg" > "$cfg.tmp" && mv "$cfg.tmp" "$cfg"
+  fi
+}
+
+# ── Per-DB heal ──────────────────────────────────────────────────────────────
+# Ensure INDEX_TYPES[key] and DELIMITERS[key] exist and agree with the on-disk
+# structure of `path`. Does NOT touch OUTPUT_DIRECTORIES (the caller owns that —
+# at download time it's just been written; at preflight it's the source of the
+# walk). Prints a per-DB line. In "report" mode nothing is written.
+#
+# Counters (incremented in the caller's scope): EC_FIXED, EC_WARN, EC_ERROR.
+# Returns 0 if the entry is usable (already-good or healed), 1 if it has an
+# unfixable problem that will break startup.
+heal_db_entry() {
+  local key="$1" path="$2" cfg="$3" mode="$4"
+  local itype declared_itype delim verb
+
+  if [ "$mode" = "fix" ]; then verb="fixed"; else verb="WOULD FIX"; fi
+
+  if [ ! -d "$path" ]; then
+    echo "  ✗ $key: folder not found ($path)"
+    echo "      → download it:  cheese download-dbs --dest <db-root>   (or fix the path in $cfg)"
+    EC_ERROR=$((EC_ERROR+1)); return 1
+  fi
+
+  itype=$(detect_index_type "$path")
+  if [ -z "$itype" ]; then
+    echo "  ✗ $key: folder exists but its structure is unrecognized ($path)"
+    echo "      → expected a clustered (smiles_clusters/ + clusters/) or in_memory"
+    echo "        (embeddings/ + fingerprints/) layout; the download may be incomplete."
+    EC_ERROR=$((EC_ERROR+1)); return 1
+  fi
+
+  # INDEX_TYPES — structure on disk is authoritative.
+  declared_itype=$(yaml_get INDEX_TYPES "$key" "$cfg")
+  if [ -z "$declared_itype" ]; then
+    [ "$mode" = "fix" ] && set_config_entry "$key" "\"$itype\"" INDEX_TYPES "$cfg"
+    echo "  • $key: INDEX_TYPES missing → $verb to \"$itype\" (from folder structure)"
+    EC_FIXED=$((EC_FIXED+1))
+  elif [ "$declared_itype" != "$itype" ]; then
+    [ "$mode" = "fix" ] && set_config_entry "$key" "\"$itype\"" INDEX_TYPES "$cfg"
+    echo "  • $key: INDEX_TYPES says \"$declared_itype\" but folder is \"$itype\" → $verb to \"$itype\""
+    EC_FIXED=$((EC_FIXED+1))
+  fi
+
+  # DELIMITERS — only fill when absent; never override a deliberate choice.
+  if [ -z "$(yaml_get DELIMITERS "$key" "$cfg")" ]; then
+    delim=$(detect_delimiter "$path" "$itype")
+    case "$delim" in
+      tab)   [ "$mode" = "fix" ] && set_config_entry "$key" '"\t"' DELIMITERS "$cfg"
+             echo "  • $key: DELIMITERS missing → $verb to tab (from a data sample)"
+             EC_FIXED=$((EC_FIXED+1)) ;;
+      comma) [ "$mode" = "fix" ] && set_config_entry "$key" '","'  DELIMITERS "$cfg"
+             echo "  • $key: DELIMITERS missing → $verb to comma (from a data sample)"
+             EC_FIXED=$((EC_FIXED+1)) ;;
+      *)     [ "$mode" = "fix" ] && set_config_entry "$key" '","'  DELIMITERS "$cfg"
+             echo "  ! $key: DELIMITERS missing and undetectable → $verb to comma (default)"
+             echo "      → verify it (tab vs comma) in $cfg, else returned SMILES/IDs may be wrong."
+             EC_WARN=$((EC_WARN+1)) ;;
+    esac
+  fi
+  return 0
+}
+
+# ── Whole-config validation ──────────────────────────────────────────────────
+# Walk OUTPUT_DIRECTORIES and heal every DB. Also checks the required top-level
+# sections exist and flags orphan INDEX_TYPES/DELIMITERS keys (harmless, but a
+# sign of hand-editing). Sets EC_FIXED / EC_WARN / EC_ERROR. Returns non-zero if
+# any unfixable error remains (caller should refuse to start).
+validate_engine_config() {
+  local cfg="$1" mode="${2:-report}"
+  EC_FIXED=0; EC_WARN=0; EC_ERROR=0
+
+  if [ ! -f "$cfg" ]; then
+    echo "  ✗ engine config not found: $cfg"
+    echo "      → run the installer, or set CONFIG_FILE to the right path."
+    EC_ERROR=1; return 1
+  fi
+
+  local sec
+  for sec in TRANSFORMERS DIM OUTPUT_DIRECTORIES INDEX_TYPES DELIMITERS; do
+    if ! grep -qE "^${sec}:" "$cfg"; then
+      echo "  ✗ required section '$sec' is missing from $cfg"
+      EC_ERROR=$((EC_ERROR+1))
+    fi
+  done
+  # Without OUTPUT_DIRECTORIES there's nothing to walk.
+  grep -qE "^OUTPUT_DIRECTORIES:" "$cfg" || { return 1; }
+
+  local key path
+  while IFS= read -r key; do
+    [ -z "$key" ] && continue
+    path=$(yaml_get OUTPUT_DIRECTORIES "$key" "$cfg")
+    if [ -z "$path" ]; then
+      echo "  ✗ $key: listed in OUTPUT_DIRECTORIES but has no path"
+      EC_ERROR=$((EC_ERROR+1)); continue
+    fi
+    heal_db_entry "$key" "$path" "$cfg" "$mode"
+  done < <(yaml_section_keys OUTPUT_DIRECTORIES "$cfg")
+
+  # Orphans: an INDEX_TYPES/DELIMITERS key with no OUTPUT_DIRECTORIES entry is
+  # dead config — not fatal (the engine only iterates OUTPUT_DIRECTORIES), but
+  # worth surfacing as it usually means a typo or half-removed DB.
+  local k
+  for sec in INDEX_TYPES DELIMITERS; do
+    while IFS= read -r k; do
+      [ -z "$k" ] && continue
+      if ! _yaml_key_in_section OUTPUT_DIRECTORIES "$k" "$cfg"; then
+        echo "  · $k: in $sec but not in OUTPUT_DIRECTORIES (ignored by the engine)"
+      fi
+    done < <(yaml_section_keys "$sec" "$cfg")
+  done
+
+  [ "$EC_ERROR" -eq 0 ]
+}
