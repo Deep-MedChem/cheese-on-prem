@@ -30,7 +30,7 @@ case "$answer" in
         # deterministic. cheese-database is first because it's also the image
         # that generates the license key (cheese generate-license-key), so it
         # must be available before anything else.
-        CHEESE_PULL_ORDER="cheese-database cheese-search-ui cheese-orchestrator cheese-electrostatics-inference cheese-inference"
+        CHEESE_PULL_ORDER="cheese-database cheese-search-ui cheese-orchestrator cheese-electrostatics-inference cheese-inference cheese-alignment-service"
 
         # Normalise CHEESE_PACKAGE into a whitespace-trimmed, space-delimited
         # lookup string (",a, b ,c," → " a b c ") for membership tests.
