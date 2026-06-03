@@ -116,8 +116,9 @@ services:
   # ── cheese-search-ui: Vite build + Express proxy ──────────────────────────────
   # CHEESE_API points at the api service by name on cheese-network — stable, so
   # restarting `api` no longer requires restarting `ui`.
-  # ELECTROSTATICS_API points at the inference service alias (always set; if the
-  # service isn't running, the UI's optional-service proxy returns 503 cleanly).
+  # ELECTROSTATICS_API / ALIGNMENT_API point at the optional inference + alignment
+  # service aliases (always set; if a service isn't running, the UI's optional-
+  # service proxy returns 503 cleanly and the feature is hidden).
   ui:
     image: cheese.azurecr.io/on-prem/cheese-search-ui/${CHEESE_CUSTOMER}:latest
     container_name: cheese-ui
@@ -125,6 +126,7 @@ services:
       CHEESE_API: http://cheese-api:${API_INTERNAL_PORT:-8001}
       VITE_CHEESE_API: ${VITE_CHEESE_API:-http://${IP:-localhost}:${API_HOST_PORT:-8001}/docs}
       ELECTROSTATICS_API: http://cheese-inference:${INFERENCE_INTERNAL_PORT:-8000}
+      ALIGNMENT_API: http://cheese-alignment-app:${ALIGNMENT_INTERNAL_PORT:-8001}
       CHEESE_UI_USER_SECRET: ${CHEESE_UI_USER_SECRET:-local-dev}
       SUPABASE_URL: ${SUPABASE_URL:-}
       SUPABASE_ANON_KEY: ${SUPABASE_ANON_KEY:-}
@@ -172,48 +174,29 @@ services:
       start_period: 30s
     restart: unless-stopped
 
-  # ── cheese-inference: conformer alignment HTTP service (optional) ─────────────
-  # Same image the `cheese run-inference` CLI uses for building indices, but
-  # launched in HTTP-server mode here. The image's default entrypoint runs the
-  # index-building pipeline, so we override it to start the FastAPI app.
-  # Registered on cheese-network under the alias 'cheese-alignment-app' (which
-  # is the hardcoded default in the UI's server.ts, so no extra config needed).
+  # ── cheese-alignment-service: conformer alignment HTTP service (optional) ─────
+  # Standalone RDKit+FastAPI service (github.com/Deep-MedChem/conformer-alignment-api)
+  # serving POST /align — the same backend the SaaS UI uses. Self-contained: no
+  # license, env, secrets, data mounts or GPU. Runs the image's default entrypoint
+  # (uvicorn app.main:app on :8001). Registered on cheese-network under the alias
+  # 'cheese-alignment-app', which the UI's ALIGNMENT_API points at.
   alignment:
-    image: cheese.azurecr.io/on-prem/cheese-inference/${CHEESE_CUSTOMER}:latest
+    image: cheese.azurecr.io/on-prem/cheese-alignment-service/${CHEESE_CUSTOMER}:latest
     container_name: cheese-alignment
-    entrypoint: ["python", "-um", "cheese_inference.app"]
-    # This image verifies the license at startup: cheese_inference.cheese_license
-    # reads CHEESE_LICENSE_FILE and opens it at /data/$CHEESE_LICENSE_FILE. Without
-    # the env_file the var is unset and it tries to open '/data/None'
-    # (FileNotFoundError, crash-loop); without the /:/data mount the host license
-    # file isn't visible. Both are required — same as the db services and api.
-    env_file:
-      - ${HOME}/.config/cheese/cheese-env-file.conf
-    volumes:
-      - /:/data
     networks:
       cheese-network:
         aliases:
           - cheese-alignment-app
     ports:
-      - "${ALIGNMENT_HOST_PORT:-8006}:${ALIGNMENT_INTERNAL_PORT:-8000}"
+      - "${ALIGNMENT_HOST_PORT:-8006}:${ALIGNMENT_INTERNAL_PORT:-8001}"
     healthcheck:
-      # Image ships without wget/curl, so probe via python.
-      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:${ALIGNMENT_INTERNAL_PORT:-8000}/health',timeout=3).status==200 else 1)"]
+      # Image ships without wget/curl, so probe via python (python:3.10-slim base).
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:${ALIGNMENT_INTERNAL_PORT:-8001}/health',timeout=3).status==200 else 1)"]
       interval: 10s
       timeout: 5s
       retries: 6
-      start_period: 60s
+      start_period: 30s
     restart: unless-stopped
-    # Uncomment to enable GPU acceleration (requires nvidia-container-toolkit on
-    # the host). Without GPU the service still works but is considerably slower.
-    # deploy:
-    #   resources:
-    #     reservations:
-    #       devices:
-    #         - driver: nvidia
-    #           count: all
-    #           capabilities: [gpu]
 
   # ── nginx + oauth2-proxy (perimeter auth) ─────────────────────────────────────
   # Off by default. Brought up only via `--profile sso` (cheese wrapper sets

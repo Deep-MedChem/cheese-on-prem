@@ -23,9 +23,10 @@ CHEESE_DB_PASSWORD=XXX
 #   cheese-database                 — search/embeddings DB
 #   cheese-orchestrator             — public CHEESE API
 #   cheese-electrostatics-inference — ESP/RESP charge prediction (optional ESP viewer)
-#   cheese-inference                — embedding/indexing inference (alignment, `cheese run-inference`)
+#   cheese-inference                — embedding/indexing inference (`cheese run-inference`)
+#   cheese-alignment-service        — conformer alignment HTTP service (optional alignment viewer)
 
-CHEESE_PACKAGE=cheese-search-ui,cheese-database,cheese-orchestrator,cheese-electrostatics-inference,cheese-inference
+CHEESE_PACKAGE=cheese-search-ui,cheese-database,cheese-orchestrator,cheese-electrostatics-inference,cheese-inference,cheese-alignment-service
 
 
 ## ====================================
