@@ -46,6 +46,7 @@ ensure_all_free_ports
 # Compose handles the database deps automatically. The job-data directory is
 # ensured by _compose-env (sourced above).
 echo "Starting CHEESE API (compose will start the database stack if it isn't running)..."
+clear_stray_cheese_containers
 $COMPOSE_CMD up -d api
 
 echo "Waiting for cheese-api to be healthy..."

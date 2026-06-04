@@ -6,6 +6,13 @@ set -e
 source "$(dirname "$(readlink -f "$0")")/_compose-env"
 
 echo "Stopping all CHEESE services..."
-# `--profiles "*"` ensures sso services are included even if NGINX=false.
-$COMPOSE_CMD --profile sso down
+# `--profile sso` ensures sso services are included even if NGINX=false.
+# `--remove-orphans` drops containers for services since removed from the
+# compose file.
+$COMPOSE_CMD --profile sso down --remove-orphans
+# Also clear containers that squat on our stable names under a different/legacy
+# compose project (e.g. the pre-rename "cheese-on-prem" project), which `down`
+# above can't touch — otherwise `cheese stop` reports nothing to remove while
+# stale containers linger and block the next `cheese start`.
+clear_stray_cheese_containers
 echo "Stopped."

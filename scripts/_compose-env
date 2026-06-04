@@ -138,5 +138,27 @@ ensure_all_free_ports() {
   ensure_free_port ALIGNMENT_HOST_PORT   8006 cheese-alignment
 }
 
+# clear_stray_cheese_containers — remove containers that squat on our stable
+# container_names but belong to a DIFFERENT compose project (or none) — e.g.
+# leftovers from the pre-rename "cheese-on-prem" project, or ad-hoc `docker
+# run`s. Compose cannot override a name owned by another project, so an `up`
+# fails with a name conflict; and `down` only removes our own project's
+# containers, so it can't clear them either. Containers that ARE part of our
+# project are left untouched, so this is safe to call before `up` and during
+# `down` without disturbing a healthy stack. Names are read from the compose
+# file, so new services are covered automatically.
+clear_stray_cheese_containers() {
+  local names c proj
+  names=$(grep -E '^[[:space:]]*container_name:' "$COMPOSE_FILE" 2>/dev/null | awk '{print $2}')
+  for c in $names; do
+    docker container inspect "$c" >/dev/null 2>&1 || continue
+    proj=$(docker inspect -f '{{index .Config.Labels "com.docker.compose.project"}}' "$c" 2>/dev/null)
+    if [ "$proj" != "$COMPOSE_PROJECT_NAME" ]; then
+      echo "Removing stray container '$c' (project '${proj:-none}') to avoid a name conflict..."
+      docker rm -f "$c" >/dev/null 2>&1 || true
+    fi
+  done
+}
+
 # Exported for the wrappers:
 export COMPOSE_CMD="docker compose -p ${COMPOSE_PROJECT_NAME} -f ${COMPOSE_FILE}"
