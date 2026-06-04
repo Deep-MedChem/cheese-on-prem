@@ -90,7 +90,6 @@ if [ ! "$env_file" = "" ]; then
         echo "CONFIG_FILE=${HOME}/.config/cheese/cheese_config_file.yaml" >> "${HOME}/.config/cheese/cheese-env-file.conf";
         echo "CHEESE_LICENSE_FILE=${HOME}/.config/cheese/cheese_license_file.json" >> "${HOME}/.config/cheese/cheese-env-file.conf";
         echo "JOBS_DATA_PATH=${JOBS_DATA_PATH}" >> "${HOME}/.config/cheese/cheese-env-file.conf";
-        echo "TESTING=false" >> "${HOME}/.config/cheese/cheese-env-file.conf";
         echo "VISUALIZATION=false" >> "${HOME}/.config/cheese/cheese-env-file.conf";
         sed -i '/^$/d' "${HOME}/.config/cheese/cheese-env-file.conf"
     fi
