@@ -76,17 +76,12 @@ cheese update
 ```
 It pulls the latest scripts from this repo and writes them as well as the images from the container repository.
 
-### Updating databases
-
-```bash
-cheese update-dbs
-```
-
 ### Troubleshooting
 
 ```bash
 cheese doctor
 ```
+Identifies unhealthy containers and runs basic diagnostics. 
 
 ## Uninstall
 
@@ -101,12 +96,36 @@ Following the prompts, you chose to delete all or either of:
 
 ## What's under the hood
 
-CHEESE stack is managed by `docker compose` - you can use common `compose` commands to diagnose and troubleshoot. 
+CHEESE stack is managed by `docker compose` - you can use common `compose` commands to diagnose and troubleshoot.
+The stack runs as the compose project `cheese`, so target it with `-p cheese`.
+Service names are `db`, `api`, `ui`, `jobs-db`, `jobs-exec`, `download-exec`, `file-server`, `inference`, `alignment`.
 Examples:
 
-* Inspecting
+* Status — every CHEESE container and whether it's healthy:
 ```bash
-docker logs cheese-file-server --tail 20
+docker compose -p cheese ps
+```
+
+* Inspecting — follow a service's logs live, tail the whole stack, or look at one container by name:
+```bash
+docker compose -p cheese logs -f api        # follow one service
+docker compose -p cheese logs --tail 100    # last 100 lines, all services
+docker logs cheese-file-server --tail 20    # a single container by name
+```
+
+* Restart a single service (e.g. after editing the engine config):
+```bash
+docker compose -p cheese restart api
+```
+
+* Open a shell inside a container to poke around:
+```bash
+docker compose -p cheese exec db bash
+```
+
+* Resource usage (CPU / memory) of the running containers:
+```bash
+docker stats $(docker compose -p cheese ps -q)
 ```
 
 
