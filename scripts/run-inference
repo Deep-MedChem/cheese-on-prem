@@ -39,10 +39,6 @@ clustering_batch_size=10000
 
 CONFIG_FILE="${HOME}/.config/cheese/cheese-env-file.conf"
 
-if [ "$TESTING" = "true" ] ; then
-    CONFIG_FILE="${HOME}/.config/cheese/cheese-env-file-test.conf"
-fi
-
 
 
 # Parse command-line arguments manually
