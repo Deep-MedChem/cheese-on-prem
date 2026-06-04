@@ -15,16 +15,12 @@ show_help() {
   echo "  stop-apps                    Stop all CHEESE UIs"
   echo "  start-app                    Run CHEESE UI"
   echo "  start                        Run CHEESE server + UI (+ inference + alignment)"
-  echo "  embeddings-cpu               Run CHEESE Embeddings computation on CPU"
-  echo "  search                       Run CHEESE Search"
-  echo "  visualize                    Run CHEESE Embeddings visualization"
   echo "  run-inference                Run CHEESE indexing"
-  echo "  explorer                     Run CHEESE Explorer"
   echo "  update-scripts               Update CHEESE scripts"
   echo "  update-env                   Update CHEESE environment file"
   echo "  update-images                Update CHEESE Docker Images"
   echo "  update-license               Update CHEESE license file"
-  echo "  check-license               Check CHEESE license"
+  echo "  check-license                Check CHEESE license"
   echo "  configure-dbs                Choose which indexed databases to download"
   echo "  download-dbs                 Download CHEESE indexed databases"
   echo "  preflight-config             Validate & auto-heal the engine config (run before start)"
@@ -187,37 +183,9 @@ while [[ $# -gt 0 ]]; do
       run-inference $@
       exit 0
       ;;
-    embeddings-cpu)
-      shift 1
-      set -e
-      check-license
-      embeddings-cpu $@
-      exit 0
-      ;;
-    search)
-      shift 1
-      set -e
-      check-license
-      search $@
-      exit 0
-      ;;
-    visualize)
-      shift 1
-      set -e
-      check-license
-      visualize $@
-      exit 0
-      ;;
     generate-license-key)
       shift 1
       generate-license-key $@
-      exit 0
-      ;;
-    explorer)
-      shift 1
-      set -e
-      check-license
-      explorer $@
       exit 0
       ;;
     configure-dbs)
