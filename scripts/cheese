@@ -7,7 +7,6 @@ show_help() {
   echo "Usage: cheese [options]"
   echo "Commands:"
   echo "  configure-engine             Edit the CHEESE engine config (cheese_config_file.yaml)"
-  echo "  test                         Test CHEESE commands"
   echo "  generate-license-key         Generate CHEESE license key"
   echo "  start-server                 Run CHEESE server (API)"
   echo "  start-inference              Run CHEESE electrostatics inference service (optional)"
@@ -49,13 +48,6 @@ source ${HOME}/.config/cheese/cheese-env.sh
 # Parse command-line arguments manually
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    test)
-      shift 1
-      set -e
-      check-license
-      test-cheese $@
-      exit 0
-      ;;
     update-images)
       shift 1
       update-images $@
