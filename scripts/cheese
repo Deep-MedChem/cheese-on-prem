@@ -6,31 +6,40 @@ show_help() {
   echo "Welcome to CHEESE !"
   echo "Usage: cheese [options]"
   echo "Commands:"
+  echo "  -h, --help                   Show this help message"
+  echo
+  echo "--- Installation --- "
+  echo "  update-license               Update CHEESE license file"
   echo "  configure-engine             Edit the CHEESE engine config (cheese_config_file.yaml)"
-  echo "  test                         Test CHEESE commands"
   echo "  generate-license-key         Generate CHEESE license key"
-  echo "  start-server                 Run CHEESE server (API)"
-  echo "  start-inference              Run CHEESE electrostatics inference service (optional)"
-  echo "  start-alignment              Run CHEESE conformer alignment service (optional)"
-  echo "  stop-servers                 Stop all CHEESE servers"
-  echo "  stop-apps                    Stop all CHEESE UIs"
-  echo "  start-app                    Run CHEESE UI"
-  echo "  start                        Run CHEESE server + UI (+ inference + alignment)"
-  echo "  embeddings-cpu               Run CHEESE Embeddings computation on CPU"
-  echo "  search                       Run CHEESE Search"
-  echo "  visualize                    Run CHEESE Embeddings visualization"
+  echo "  configure-dbs                Choose which indexed databases to download"
+  echo "  download-dbs                 Download CHEESE indexed databases"
+  echo "  update-images                Update CHEESE Docker Images"
+  echo "  configure-nginx              Configure the HTTPS reverse proxy (optional, for SSO)"
+  echo "  configure-oauth2             Configure OAuth2 sign-in (optional, for SSO)"
+  echo
+  echo "--- Running CHEESE --- "
+  echo "  start                        Run CHEESE"
+  echo "  stop                         Stop CHEESE"
+  echo "  start-server                 Start CHEESE API"
+  echo "  start-app                    Start CHEESE UI"
+  echo "  start-inference              Start CHEESE electrostatics inference service (optional)"
+  echo "  start-alignment              Start CHEESE conformer alignment service (optional)"
+  echo "  stop-servers                 Stop CHEESE backend"
+  echo "  stop-app                     Stop CHEESE UI"
+  echo
+  echo "--- Custom DBs --- "
   echo "  run-inference                Run CHEESE indexing"
-  echo "  explorer                     Run CHEESE Explorer"
+  echo
+  echo "--- Housekeeping --- "
+  echo "  update                       Update CHEESE (scripts + images)"
   echo "  update-scripts               Update CHEESE scripts"
   echo "  update-env                   Update CHEESE environment file"
   echo "  update-images                Update CHEESE Docker Images"
-  echo "  update-license               Update CHEESE license file"
-  echo "  check-license               Check CHEESE license"
-  echo "  configure-dbs                Choose which indexed databases to download"
-  echo "  download-dbs                 Download CHEESE indexed databases"
-  echo "  preflight-config             Validate & auto-heal the engine config (run before start)"
+  echo "  check-license                Check CHEESE license"
+  echo "  preflight-config             Validate & auto-heal the engine config"
   echo "  doctor                       Diagnose stack/config problems and suggest fixes"
-  echo "  -h, --help                   Show this help message"
+  echo "  uninstall                    Uninstall CHEESE"
   exit 1
 }
 
@@ -49,11 +58,9 @@ source ${HOME}/.config/cheese/cheese-env.sh
 # Parse command-line arguments manually
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    test)
+    update)
       shift 1
-      set -e
-      check-license
-      test-cheese $@
+      update $@
       exit 0
       ;;
     update-images)
@@ -121,9 +128,9 @@ while [[ $# -gt 0 ]]; do
       stop-servers $@
       exit 0
       ;;
-    stop-apps)
+    stop-app)
       shift 1
-      stop-apps $@
+      stop-app $@
       exit 0
       ;;
     stop)
@@ -195,37 +202,9 @@ while [[ $# -gt 0 ]]; do
       run-inference $@
       exit 0
       ;;
-    embeddings-cpu)
-      shift 1
-      set -e
-      check-license
-      embeddings-cpu $@
-      exit 0
-      ;;
-    search)
-      shift 1
-      set -e
-      check-license
-      search $@
-      exit 0
-      ;;
-    visualize)
-      shift 1
-      set -e
-      check-license
-      visualize $@
-      exit 0
-      ;;
     generate-license-key)
       shift 1
       generate-license-key $@
-      exit 0
-      ;;
-    explorer)
-      shift 1
-      set -e
-      check-license
-      explorer $@
       exit 0
       ;;
     configure-dbs)

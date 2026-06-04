@@ -1,0 +1,11 @@
+#!/bin/bash
+# Convenience wrapper: update CHEESE in one step — pull the latest scripts, then
+# the latest Docker images. Equivalent to running `cheese update-scripts`
+# followed by `cheese update-images`. Scripts are refreshed first so the newest
+# update-images (and the rest of the CLI) is in place before images are pulled.
+set -e
+
+echo "Updating CHEESE (scripts + images)..."
+update-scripts
+update-images
+echo "CHEESE is up to date."
