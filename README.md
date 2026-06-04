@@ -19,7 +19,7 @@ You can install CHEESE on your instance using the following steps :
 1. Clone this repository 
 
 ```bash
-git@github.com:Deep-MedChem/cheese-on-prem.git
+git clone git@github.com:Deep-MedChem/cheese-on-prem.git
 ```
 
 2. Install CHEESE CLI: 
@@ -67,16 +67,14 @@ load, see [docs/database-configuration.md](docs/database-configuration.md).
 
 ## Housekeeping
 
-Available cheese commands:
-
 ### Updating CHEESE
 
 Currently, there is no support for automatic updates (COMING SOON!). 
 When we notify you that the update is necessary, please run:
 ```bash
-cheese update-scripts    # Pulls the latest scripts from this repo
-cheese update-images     # Pulls the latest images from DeepMedChem container registry.
+cheese update  
 ```
+It pulls the latest scripts from this repo and writes them as well as the images from the container repository.
 
 ### Updating databases
 
@@ -89,3 +87,33 @@ cheese update-dbs
 ```bash
 cheese doctor
 ```
+
+## Uninstall
+
+```bash
+cheese uninstall
+```
+
+Following the prompts, you chose to delete all or either of:
+- cheese environment
+- cheese images
+- cheese scripts
+
+## What's under the hood
+
+CHEESE stack is managed by `docker compose` - you can use common `compose` commands to diagnose and troubleshoot. 
+Examples:
+
+* Inspecting
+```bash
+docker logs cheese-file-server --tail 20
+```
+
+
+### External dependencies
+
+* Nginx
+* Oauth2
+* Rclone
+
+Automatically pulled by `docker` upon installation. 
