@@ -34,6 +34,7 @@ done
 ensure_all_free_ports
 
 echo "Starting CHEESE electrostatics inference..."
+clear_stray_cheese_containers
 $COMPOSE_CMD up -d inference
 
 echo "Waiting for inference to be healthy..."

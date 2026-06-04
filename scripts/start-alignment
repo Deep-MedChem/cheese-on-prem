@@ -34,6 +34,7 @@ done
 ensure_all_free_ports
 
 echo "Starting CHEESE alignment service..."
+clear_stray_cheese_containers
 $COMPOSE_CMD up -d alignment
 
 echo "Waiting for alignment to be healthy..."

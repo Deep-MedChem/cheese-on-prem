@@ -37,6 +37,7 @@ done
 ensure_all_free_ports
 
 echo "Starting CHEESE UI (compose will pull in the API + DB deps if needed)..."
+clear_stray_cheese_containers
 $COMPOSE_CMD up -d ui
 
 # Best-effort readiness probe; the UI is up almost immediately once the API is.
