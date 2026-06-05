@@ -20,6 +20,25 @@ if [ ! -f "$COMPOSE_FILE" ]; then
   exit 1
 fi
 
+# ── Image channel (develop vs main) ───────────────────────────────────────────
+# On-prem images are published per product branch: main builds → :latest,
+# develop builds → :dev (see each component's make-on-prem.yml). The channel a
+# deployment tracks is derived from THIS repo's branch, so a `develop` checkout
+# runs the develop images and a `main` checkout runs the main (:latest) images.
+# An explicit CHEESE_IMAGE_TAG in the environment always wins; if this isn't a
+# git checkout we fall back to the stable :latest (main) channel.
+if [ -z "${CHEESE_IMAGE_TAG:-}" ]; then
+  _onprem_branch="$(git -C "$REPO_FOLDER" rev-parse --abbrev-ref HEAD 2>/dev/null || true)"
+  case "$_onprem_branch" in
+    main) export CHEESE_IMAGE_TAG="latest"  ;;
+    "")   export CHEESE_IMAGE_TAG="latest"  ;;  # not a git checkout → stable channel
+    *)    export CHEESE_IMAGE_TAG="develop" ;;  # develop and any other branch
+  esac
+  unset _onprem_branch
+else
+  export CHEESE_IMAGE_TAG
+fi
+
 # Load the human-readable port map (config/ports.env) so its values feed both
 # docker-compose interpolation and ensure_all_free_ports below. A value already
 # present in the environment wins (so `API_HOST_PORT=9999 cheese start` and the
