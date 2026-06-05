@@ -184,8 +184,11 @@ services:
   # design. Runs the image's default entrypoint (uvicorn app.main:app on :8001).
   # Registered on cheese-network under the alias 'cheese-alignment-app', which the
   # UI's ALIGNMENT_API points at.
+  # Channel-tagged like db/orchestrator/ui: its make-on-prem.yml builds per branch
+  # (develop→:develop, main→:latest), so it follows ${CHEESE_IMAGE_TAG:-latest}.
+  # (inference, by contrast, has no per-branch on-prem build and stays :latest.)
   alignment:
-    image: cheese.azurecr.io/on-prem/cheese-alignment-service/${CHEESE_CUSTOMER}:latest
+    image: cheese.azurecr.io/on-prem/cheese-alignment-service/${CHEESE_CUSTOMER}:${CHEESE_IMAGE_TAG:-latest}
     container_name: cheese-alignment
     env_file:
       - ${HOME}/.config/cheese/cheese-env-file.conf

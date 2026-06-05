@@ -10,8 +10,8 @@ REPO_NAME="${REGISTRY}/on-prem"
 # Mirror the resolution in scripts/_compose-env so `update-images` pulls exactly
 # the tags `cheese start` will run. main checkout → :latest, develop (or any
 # other branch) → :dev; an explicit CHEESE_IMAGE_TAG wins; non-git → :latest.
-# Only the per-branch product images (database/orchestrator/search-ui) are
-# channel-tagged — the rest are published as :latest only.
+# Only the per-branch product images (database/orchestrator/search-ui/
+# alignment-service) are channel-tagged — the rest are published as :latest only.
 if [ -z "${CHEESE_IMAGE_TAG:-}" ]; then
   _onprem_branch="$(git -C "${REPO_FOLDER:-.}" rev-parse --abbrev-ref HEAD 2>/dev/null || true)"
   case "$_onprem_branch" in
@@ -20,13 +20,13 @@ if [ -z "${CHEESE_IMAGE_TAG:-}" ]; then
   esac
   unset _onprem_branch
 fi
-echo "Image channel: pulling '${CHEESE_IMAGE_TAG}' tag for product images (database/orchestrator/search-ui)."
+echo "Image channel: pulling '${CHEESE_IMAGE_TAG}' tag for product images (database/orchestrator/search-ui/alignment-service)."
 
 # image_tag IMAGE → the tag to pull for that image. Branch-tagged product images
 # follow the channel; everything else is :latest.
 image_tag() {
   case "$1" in
-    cheese-database|cheese-orchestrator|cheese-search-ui) echo "$CHEESE_IMAGE_TAG" ;;
+    cheese-database|cheese-orchestrator|cheese-search-ui|cheese-alignment-service) echo "$CHEESE_IMAGE_TAG" ;;
     *) echo "latest" ;;
   esac
 }
