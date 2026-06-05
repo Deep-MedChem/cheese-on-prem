@@ -10,7 +10,7 @@
 # breaks others that referenced it by name (e.g. UI → orchestrator).
 
 x-cheese-db-image: &cheese-db-image
-  image: cheese.azurecr.io/on-prem/cheese-database/${CHEESE_CUSTOMER}:latest
+  image: cheese.azurecr.io/on-prem/cheese-database/${CHEESE_CUSTOMER}:${CHEESE_IMAGE_TAG:-latest}
 
 x-cheese-db-common: &cheese-db-common
   <<: *cheese-db-image
@@ -76,7 +76,7 @@ services:
 
   # ── cheese-orchestrator: the public CHEESE API ────────────────────────────────
   api:
-    image: cheese.azurecr.io/on-prem/cheese-orchestrator/${CHEESE_CUSTOMER}:latest
+    image: cheese.azurecr.io/on-prem/cheese-orchestrator/${CHEESE_CUSTOMER}:${CHEESE_IMAGE_TAG:-latest}
     container_name: cheese-api
     env_file:
       - ${HOME}/.config/cheese/cheese-env-file.conf
@@ -120,7 +120,7 @@ services:
   # service aliases (always set; if a service isn't running, the UI's optional-
   # service proxy returns 503 cleanly and the feature is hidden).
   ui:
-    image: cheese.azurecr.io/on-prem/cheese-search-ui/${CHEESE_CUSTOMER}:latest
+    image: cheese.azurecr.io/on-prem/cheese-search-ui/${CHEESE_CUSTOMER}:${CHEESE_IMAGE_TAG:-latest}
     container_name: cheese-ui
     environment:
       CHEESE_API: http://cheese-api:${API_INTERNAL_PORT:-8001}
