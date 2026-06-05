@@ -176,13 +176,23 @@ services:
 
   # ── cheese-alignment-service: conformer alignment HTTP service (optional) ─────
   # Standalone RDKit+FastAPI service (github.com/Deep-MedChem/conformer-alignment-api)
-  # serving POST /align — the same backend the SaaS UI uses. Self-contained: no
-  # license, env, secrets, data mounts or GPU. Runs the image's default entrypoint
-  # (uvicorn app.main:app on :8001). Registered on cheese-network under the alias
-  # 'cheese-alignment-app', which the UI's ALIGNMENT_API points at.
+  # serving POST /align — the same backend the SaaS UI uses. The on-prem image is
+  # Cython-compiled and license-gated (like the db/api services), so it needs the
+  # CHEESE license at startup: the cheese-env-file.conf env (CHEESE_LICENSE_FILE),
+  # the host root mounted at /data, and running as the invoking UID so it can read
+  # the license file under the user's home — without these it exits at startup by
+  # design. Runs the image's default entrypoint (uvicorn app.main:app on :8001).
+  # Registered on cheese-network under the alias 'cheese-alignment-app', which the
+  # UI's ALIGNMENT_API points at.
   alignment:
     image: cheese.azurecr.io/on-prem/cheese-alignment-service/${CHEESE_CUSTOMER}:latest
     container_name: cheese-alignment
+    env_file:
+      - ${HOME}/.config/cheese/cheese-env-file.conf
+    volumes:
+      - /:/data
+    user: "${UID:-1000}"
+    privileged: true
     networks:
       cheese-network:
         aliases:
