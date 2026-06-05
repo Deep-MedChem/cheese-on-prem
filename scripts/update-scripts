@@ -36,6 +36,5 @@ else
 fi
 
 cp "${REPO_FOLDER}/install/cheese-env.sh" ${HOME}/.config/cheese
-cp "${REPO_FOLDER}/assets/check_database_server.py" ${HOME}/.config/cheese
 
 chmod -R 777 ${HOME}/.config/cheese
