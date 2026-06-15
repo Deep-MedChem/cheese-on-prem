@@ -25,6 +25,50 @@
 #
 # <mode> is "report" (read-only, just print findings) or "fix" (write repairs).
 
+# ── Distribution folder → canonical DB name ──────────────────────────────────
+# Databases are delivered as SFTP folders whose names are raw/dated (e.g.
+# mcule_purchasable_in_stock_240717_clustered), but the rest of CHEESE is keyed by
+# CANONICAL names (MCULE-IN-STOCK): the orchestrator's db_names enum, the
+# search-ui database cards (databases_ui_config.json) and the shipped metadata
+# catalog (databases_info.json). If the engine config keys a DB by its raw folder
+# name, none of that matches — search 422s on the listed name and the UI renders
+# an unstyled, overflowing card with no vendor flair or molecule count.
+#
+# So register downloaded folders under their canonical name. This table mirrors
+# prod's source of truth, cheese-database/cheese_production/cheese_config_file.yaml
+# (canonical key -> /cheese-databases/<folder>); keep it in sync when a database is
+# re-indexed under a new folder name. A folder with no entry falls back to its own
+# name — still searchable, just without canonical metadata/flair.
+declare -A DB_CANONICAL_NAME=(
+  [enamine_new]="ENAMINE-REAL"
+  [chemriya]="CHEMRIYA"
+  [eXplore_Diverse_12M]="EXPLORE-DIVERSE"
+  [eXplore_Enumerated_55M]="EXPLORE-ENUMERATED"
+  [mcule_purchasable_full_240610]="MCULE-FULL"
+  [mcule_purchasable_in_stock_240717_clustered]="MCULE-IN-STOCK"
+  [Synple-new-1B]="SYNPLE-1B"
+  [molport_10_25]="MOLPORT"
+  [M1]="MOLECULE-ONE"
+  [chemspace_screening]="CHEMSPACE-SCREENING"
+  [10B_RO5_chunks]="CHEMSPACE-10B-RO5"
+  [10B_Beyond_RO5_chunks]="CHEMSPACE-10B-BEYOND-RO5"
+  [Aurigene]="AURIGENE"
+  [Synple-4B]="SYNPLE-4B"
+  [zinc15]="ZINC15"
+  [xtalpi-09-03-2026]="XTALPI"
+  [enamine_amino_acids]="ENAMINE-AA"
+  [chemspace_5B_Beyond_Rule_of_5]="CHEMSPACE-5B-BEYOND-RO5"
+  [chemspace_5B_Rule_of_5]="CHEMSPACE-5B-RO5"
+  [chemspace_5B_Freedom_5_fvn]="CHEMSPACE-5B-FREEDOM"
+)
+
+# Print the canonical DB name for a distribution folder, or the folder name itself
+# when there's no mapping.
+canonical_db_name() {
+  local folder="$1"
+  printf '%s' "${DB_CANONICAL_NAME[$folder]:-$folder}"
+}
+
 # Resolve the engine config path the same way every script does: prefer the
 # CONFIG_FILE exported by cheese-env.sh, fall back to the standard location.
 engine_config_path() {

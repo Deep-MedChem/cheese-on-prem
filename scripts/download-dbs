@@ -134,8 +134,14 @@ for db in "${selected[@]}"; do
   RCLONE_LOG_LEVEL="$copy_log_level" rclone_sftp copy "$(db_remote "$db")" "/dest/$db" \
     --transfers "$transfers" "${progress_opts[@]}"
   # Wire the freshly-downloaded folder into the engine config automatically
-  # (OUTPUT_DIRECTORIES + INDEX_TYPES + DELIMITERS, all keyed by the DB name).
-  register_db "$db" "$dest/$db" "$ENGINE_CONFIG"
+  # (OUTPUT_DIRECTORIES + INDEX_TYPES + DELIMITERS). Register under the CANONICAL
+  # DB name — the raw/dated folder name is what's on disk (the path), but the
+  # orchestrator's db_names, the UI database cards and the metadata catalog are
+  # all keyed by canonical names, so keying the config by the folder name leaves
+  # search 422-ing and cards unstyled. Path stays the downloaded folder.
+  canonical="$(canonical_db_name "$db")"
+  [ "$canonical" != "$db" ] && echo "  Mapping folder '$db' → canonical DB name '$canonical'"
+  register_db "$canonical" "$dest/$db" "$ENGINE_CONFIG"
 done
 
 echo
