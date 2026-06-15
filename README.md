@@ -8,6 +8,7 @@ Full CHEESE platform on-premises version.
 
 - A physical or virtual machine with Ubuntu 24.
 - git
+- nano
 - Docker; the unix user must be a member of the `docker` group (check by running `docker ps`).
 
 ## Installing CHEESE
