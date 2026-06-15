@@ -127,6 +127,13 @@ services:
       VITE_CHEESE_API: ${VITE_CHEESE_API:-http://${IP:-localhost}:${API_HOST_PORT:-8001}/docs}
       ELECTROSTATICS_API: http://cheese-inference:${INFERENCE_INTERNAL_PORT:-8000}
       ALIGNMENT_API: http://cheese-alignment-app:${ALIGNMENT_INTERNAL_PORT:-8001}
+      # Browser-reachable URL of the self-hosted Ketcher iframe (see the ketcher
+      # service below). The molecule editor iframe is loaded directly by the END
+      # USER's browser, so — like VITE_CHEESE_API — it must use ${IP}:port, not an
+      # in-network alias. server.ts serves this to the frontend via
+      # /api/runtime-config so the editor points at the on-prem Ketcher image
+      # instead of the public ketcher.deepmedchem.com.
+      KETCHER_ORIGIN: ${KETCHER_ORIGIN:-http://${IP:-localhost}:${KETCHER_HOST_PORT:-8007}}
       CHEESE_UI_USER_SECRET: ${CHEESE_UI_USER_SECRET:-local-dev}
       SUPABASE_URL: ${SUPABASE_URL:-}
       SUPABASE_ANON_KEY: ${SUPABASE_ANON_KEY:-}
@@ -209,6 +216,32 @@ services:
       timeout: 5s
       retries: 6
       start_period: 30s
+    restart: unless-stopped
+
+  # ── ketcher: self-hosted molecule editor iframe (optional) ───────────────────
+  # Open-source EPAM Ketcher (Apache-2.0), packaged from Deep-MedChem/ketcher-docker
+  # as a plain nginx static SPA — so unlike the cheese-* images it needs no license,
+  # no /data mount and no UID. Published as :latest only (not channel-tagged) since
+  # it changes rarely. The UI embeds it in an iframe, so the URL must be reachable
+  # from the END USER's browser — hence a host-published port, surfaced to the UI
+  # via KETCHER_ORIGIN (see the ui service). No depends_on: like inference/alignment
+  # it's optional; if it's down the editor just fails to load, nothing else breaks.
+  ketcher:
+    image: cheese.azurecr.io/on-prem/ketcher/${CHEESE_CUSTOMER}:latest
+    container_name: cheese-ketcher
+    networks:
+      cheese-network:
+        aliases:
+          - cheese-ketcher
+    ports:
+      - "${KETCHER_HOST_PORT:-8007}:80"
+    healthcheck:
+      # nginx:alpine ships BusyBox wget (no curl); --spider isn't supported, so GET to /dev/null.
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://localhost:80/ || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 10s
     restart: unless-stopped
 
   # ── nginx + oauth2-proxy (perimeter auth) ─────────────────────────────────────
