@@ -191,6 +191,51 @@ set_config_entry() {
   fi
 }
 
+# Like yaml_get but preserves the value VERBATIM (quotes and the "\t" delimiter
+# intact) so it can be re-inserted under a new key by set_config_entry without
+# mangling. Only trailing whitespace is trimmed.
+_yaml_raw_value() {
+  local section="$1" key="$2" cfg="$3"
+  _CS="$section" _CK="$key" awk '
+    function toplevel(l){ return (l ~ /^[A-Za-z_][A-Za-z0-9_-]*:/) }
+    BEGIN{ section=ENVIRON["_CS"]; key=ENVIRON["_CK"] }
+    { if (toplevel($0)) { h=$0; sub(/:.*/,"",h); cur=h; next }
+      if (cur==section) {
+        k=$0; sub(/^[[:space:]]+/,"",k); sub(/[[:space:]]*:.*/,"",k)
+        if (k==key) { v=$0; sub(/^[[:space:]]*[^:]+:[[:space:]]*/,"",v); sub(/[[:space:]]*$/,"",v); print v; exit } } }
+  ' "$cfg"
+}
+
+# Drop `  key: ...` under top-level `section` (section-scoped, leaves other
+# sections' identically-named keys alone).
+delete_config_key() {
+  local key="$1" section="$2" cfg="$3"
+  _CS="$section" _CK="$key" awk '
+    function toplevel(l){ return (l ~ /^[A-Za-z_][A-Za-z0-9_-]*:/) }
+    BEGIN{ section=ENVIRON["_CS"]; key=ENVIRON["_CK"] }
+    { if (toplevel($0)) { h=$0; sub(/:.*/,"",h); cur=h; print; next }
+      if (cur==section) {
+        k=$0; sub(/^[[:space:]]+/,"",k); sub(/[[:space:]]*:.*/,"",k)
+        if (k==key) next }
+      print }
+  ' "$cfg" > "$cfg.tmp" && mv "$cfg.tmp" "$cfg"
+}
+
+# Rename a database key raw→canonical across the three parallel sections,
+# preserving each value verbatim. No-op for a section where the raw key is
+# absent (so a half-drifted config still migrates cleanly). Used to lift configs
+# that were written with raw distribution-folder names (e.g. before canonical
+# registration) onto the canonical names the orchestrator/UI/catalog expect.
+rename_db_key() {
+  local raw="$1" canon="$2" cfg="$3" sec rawval
+  for sec in OUTPUT_DIRECTORIES INDEX_TYPES DELIMITERS; do
+    _yaml_key_in_section "$sec" "$raw" "$cfg" || continue
+    rawval=$(_yaml_raw_value "$sec" "$raw" "$cfg")
+    set_config_entry "$canon" "$rawval" "$sec" "$cfg"
+    delete_config_key "$raw" "$sec" "$cfg"
+  done
+}
+
 # ── Per-DB heal ──────────────────────────────────────────────────────────────
 # Ensure INDEX_TYPES[key] and DELIMITERS[key] exist and agree with the on-disk
 # structure of `path`. Does NOT touch OUTPUT_DIRECTORIES (the caller owns that —
@@ -275,6 +320,31 @@ validate_engine_config() {
   done
   # Without OUTPUT_DIRECTORIES there's nothing to walk.
   grep -qE "^OUTPUT_DIRECTORIES:" "$cfg" || { return 1; }
+
+  # Canonical-name migration: a DB keyed by its raw distribution-folder name
+  # (e.g. mcule_purchasable_in_stock_240717_clustered) doesn't match the
+  # orchestrator's db_names, the UI database cards, or the metadata catalog —
+  # all of which are keyed by canonical names (MCULE-IN-STOCK) — so search 422s
+  # and the card renders unstyled/overflowing with no count. Rename such keys to
+  # canonical (across all three sections) before the heal walk, so heal then
+  # operates on the canonical keys. Only keys with an explicit mapping in
+  # DB_CANONICAL_NAME are touched; custom/unknown DBs are left alone. Runs before
+  # the walk so a downloaded-then-renamed DB still gets INDEX_TYPES/DELIMITERS
+  # healed under its canonical name.
+  local rk canon rawkeys=()
+  while IFS= read -r rk; do [ -n "$rk" ] && rawkeys+=("$rk"); done \
+    < <(yaml_section_keys OUTPUT_DIRECTORIES "$cfg")
+  for rk in "${rawkeys[@]}"; do
+    canon=$(canonical_db_name "$rk")
+    [ "$canon" = "$rk" ] && continue
+    if [ "$mode" = "fix" ]; then
+      rename_db_key "$rk" "$canon" "$cfg"
+      echo "  • $rk: renamed to canonical name '$canon' (OUTPUT_DIRECTORIES + INDEX_TYPES + DELIMITERS)"
+    else
+      echo "  • $rk: WOULD rename to canonical name '$canon'"
+    fi
+    EC_FIXED=$((EC_FIXED+1))
+  done
 
   local key path
   while IFS= read -r key; do
