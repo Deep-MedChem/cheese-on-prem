@@ -125,6 +125,10 @@ services:
     environment:
       CHEESE_API: http://cheese-api:${API_INTERNAL_PORT:-8001}
       VITE_CHEESE_API: ${VITE_CHEESE_API:-http://${IP:-localhost}:${API_HOST_PORT:-8001}/docs}
+      # Lets server.ts read completed-job data (list, info, results, download
+      # link) straight from the jobs file server, falling back to CHEESE_API.
+      # cheese-file-server serves JOBS_DATA_PATH over HTTP on cheese-network.
+      JOBS_FILE_SERVER_URL: http://cheese-file-server:${FILE_SERVER_INTERNAL_PORT:-8000}
       ELECTROSTATICS_API: http://cheese-inference:${INFERENCE_INTERNAL_PORT:-8000}
       ALIGNMENT_API: http://cheese-alignment-app:${ALIGNMENT_INTERNAL_PORT:-8001}
       # Browser-reachable URL of the self-hosted Ketcher iframe (see the ketcher
