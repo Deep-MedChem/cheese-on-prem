@@ -1,14 +1,20 @@
 apiVersion: v2
 name: cheese
 description: |
-  Single Helm chart for the CHEESE on-prem prototype stack:
-  cheese-database (search engine, four roles off one image),
-  cheese-synthongpt (synthon model server, optional),
-  cheese-orchestrator (API the UI calls),
-  cheese-search-ui (public-facing frontend).
+  Single Helm chart for the CHEESE on-prem stack. One `helm install` brings up
+  the whole thing; every component is toggled with a top-level `.enabled` key.
 
-  One `helm install` brings up the full stack. Components are toggled with
-  per-component `.enabled` keys in values.
+  Core:     cheese-database (search engine — app / jobs-db / jobs-exec /
+            download-exec / file-server roles off one image),
+            cheese-orchestrator (the API the UI calls),
+            cheese-search-ui (public frontend).
+  Optional: cheese-synthongpt, ketcher (self-hosted molecule editor),
+            inference (electrostatics), alignment (conformer alignment),
+            supabase (in-cluster auth + per-user spaces), oauth2-proxy (SSO stub).
+
+  Environment is selected with `deployment.target` (local | aws); azure is
+  deprecated. Secrets support an `existingSecret` per component for external
+  secret management, with an inline fallback for self-contained installs.
 type: application
-version: 0.2.0
+version: 0.3.0
 appVersion: "0.0.1"

@@ -1,0 +1,41 @@
+{{- if and .Values.ketcher.enabled .Values.ketcher.ingress.enabled -}}
+{{- $svcPort := .Values.ketcher.service.port -}}
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: cheese-ketcher
+  labels:
+    {{- include "cheese.componentLabels" (list . "ketcher") | nindent 4 }}
+  {{- with .Values.ketcher.ingress.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  {{- $ic := .Values.ketcher.ingress.className | default (include "cheese.ingressClass" .) }}
+  {{- if $ic }}
+  ingressClassName: {{ $ic }}
+  {{- end }}
+  {{- if .Values.ketcher.ingress.tls }}
+  tls:
+    {{- range .Values.ketcher.ingress.tls }}
+    - hosts:
+        {{- range .hosts }}
+        - {{ . | quote }}
+        {{- end }}
+      secretName: {{ .secretName }}
+    {{- end }}
+  {{- end }}
+  rules:
+    {{- range .Values.ketcher.ingress.hosts }}
+    - host: {{ .host | quote }}
+      http:
+        paths:
+          - path: {{ .path | default "/" }}
+            pathType: {{ .pathType | default "Prefix" }}
+            backend:
+              service:
+                name: cheese-ketcher
+                port:
+                  number: {{ $svcPort }}
+    {{- end }}
+{{- end }}

@@ -1,0 +1,22 @@
+{{- if .Values.supabase.enabled -}}
+{{- $s := .Values.supabase -}}
+{{- /* Build the SQL array literal of allowed signup domains for the overlay. */ -}}
+{{- $quoted := list -}}
+{{- range $s.allowedEmailDomains }}{{- $quoted = append $quoted (printf "'%s'" .) -}}{{- end -}}
+{{- $domainsSql := printf "ARRAY[%s]" (join "," $quoted) -}}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: cheese-supabase-sql
+  labels:
+    {{- include "cheese.componentLabels" (list . "supabase") | nindent 4 }}
+data:
+  # 00-roles keeps the __POSTGRES_PASSWORD__ placeholder — the init Job seds it
+  # from the secret (keeps the password out of the ConfigMap).
+  00-roles.sql: |
+{{ .Files.Get "files/supabase/sql/00-roles.sql" | indent 4 }}
+  01-cheese-schema.sql: |
+{{ .Files.Get "files/supabase/sql/01-cheese-schema.sql" | indent 4 }}
+  02-onprem-overlay.sql: |
+{{ .Files.Get "files/supabase/sql/02-onprem-overlay.sql" | replace "__ALLOWED_DOMAINS_SQL__" $domainsSql | indent 4 }}
+{{- end }}

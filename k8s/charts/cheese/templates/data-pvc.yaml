@@ -1,0 +1,22 @@
+{{- /*
+Shared data-plane PVC (mounted at /data by database, orchestrator, synthongpt,
+alignment). storageClassName is resolved from deployment.target via the
+cheese.storageClass helper. Replaces the hand-applied manifests/base PVC so the
+whole stack comes up from one `helm install`.
+*/ -}}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ .Values.data.pvcName }}
+  labels:
+    {{- include "cheese.labels" . | nindent 4 }}
+spec:
+  accessModes:
+    - {{ .Values.deployment.storage.accessMode }}
+  resources:
+    requests:
+      storage: {{ .Values.deployment.storage.size }}
+  {{- $sc := include "cheese.storageClass" . }}
+  {{- if $sc }}
+  storageClassName: {{ $sc | quote }}
+  {{- end }}

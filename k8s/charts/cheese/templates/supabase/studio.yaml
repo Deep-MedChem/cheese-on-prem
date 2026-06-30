@@ -1,0 +1,85 @@
+{{- if and .Values.supabase.enabled .Values.supabase.studio.enabled -}}
+{{- $s := .Values.supabase -}}
+{{- $sec := include "cheese.supabaseSecretName" . -}}
+{{- $pub := include "cheese.supabasePublicUrl" . -}}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: supabase-studio
+  labels:
+    {{- include "cheese.componentLabels" (list . "supabase-studio") | nindent 4 }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      {{- include "cheese.componentSelectorLabels" (list . "supabase-studio") | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "cheese.componentSelectorLabels" (list . "supabase-studio") | nindent 8 }}
+    spec:
+      securityContext:
+        {{- toYaml $s.securityContext | nindent 8 }}
+      containers:
+        - name: studio
+          image: "{{ $s.images.studio.repository }}:{{ $s.images.studio.tag }}"
+          imagePullPolicy: {{ $s.imagePullPolicy }}
+          ports:
+            - name: http
+              containerPort: 3000
+              protocol: TCP
+          env:
+            - name: STUDIO_PG_META_URL
+              value: http://supabase-meta:8080
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $sec }}
+                  key: postgresPassword
+            - name: DEFAULT_ORGANIZATION_NAME
+              value: {{ $s.studio.organization | quote }}
+            - name: DEFAULT_PROJECT_NAME
+              value: {{ $s.studio.project | quote }}
+            - name: SUPABASE_URL
+              value: "http://supabase-gateway:{{ $s.gateway.port }}"
+            - name: SUPABASE_PUBLIC_URL
+              value: {{ $pub | quote }}
+            - name: SUPABASE_ANON_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $sec }}
+                  key: anonKey
+            - name: SUPABASE_SERVICE_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $sec }}
+                  key: serviceRoleKey
+            - name: AUTH_JWT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $sec }}
+                  key: jwtSecret
+          readinessProbe:
+            tcpSocket:
+              port: http
+            initialDelaySeconds: 15
+            periodSeconds: 15
+          resources:
+            {{- toYaml $s.resources | nindent 12 }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: supabase-studio
+  labels:
+    {{- include "cheese.componentLabels" (list . "supabase-studio") | nindent 4 }}
+spec:
+  type: ClusterIP
+  ports:
+    - port: 3000
+      targetPort: http
+      protocol: TCP
+      name: http
+  selector:
+    {{- include "cheese.componentSelectorLabels" (list . "supabase-studio") | nindent 4 }}
+{{- end }}

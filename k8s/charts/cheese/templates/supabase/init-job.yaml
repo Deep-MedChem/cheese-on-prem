@@ -1,0 +1,62 @@
+{{- if .Values.supabase.enabled -}}
+{{- $s := .Values.supabase -}}
+{{- $sec := include "cheese.supabaseSecretName" . -}}
+{{- /* Applies the cheese schema + on-prem overlay once, after the DB is up and
+       GoTrue has created the auth schema. Mirrors what `cheese setup-supabase`
+       does via psql. post-install only so it runs once per fresh install. */ -}}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: cheese-supabase-init
+  labels:
+    {{- include "cheese.componentLabels" (list . "supabase") | nindent 4 }}
+  annotations:
+    "helm.sh/hook": post-install
+    "helm.sh/hook-weight": "5"
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+spec:
+  backoffLimit: 20
+  template:
+    metadata:
+      labels:
+        {{- include "cheese.componentSelectorLabels" (list . "supabase") | nindent 8 }}
+    spec:
+      restartPolicy: OnFailure
+      securityContext:
+        {{- toYaml $s.securityContext | nindent 8 }}
+      volumes:
+        - name: sql
+          configMap:
+            name: cheese-supabase-sql
+      containers:
+        - name: init
+          image: "{{ $s.images.db.repository }}:{{ $s.images.db.tag }}"   # ships psql
+          env:
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $sec }}
+                  key: postgresPassword
+          volumeMounts:
+            - name: sql
+              mountPath: /sql
+              readOnly: true
+          command:
+            - bash
+            - -c
+            - |
+              set -euo pipefail
+              export PGPASSWORD="$POSTGRES_PASSWORD"
+              echo "waiting for supabase-db..."
+              until pg_isready -h supabase-db -U postgres -d postgres >/dev/null 2>&1; do sleep 2; done
+              echo "waiting for GoTrue auth schema (auth.users)..."
+              until psql -h supabase-db -U postgres -d postgres -c "SELECT 1 FROM auth.users LIMIT 1" >/dev/null 2>&1; do sleep 3; done
+              echo "applying 00-roles.sql"
+              sed "s|__POSTGRES_PASSWORD__|${POSTGRES_PASSWORD}|g" /sql/00-roles.sql \
+                | psql -v ON_ERROR_STOP=1 -h supabase-db -U postgres -d postgres
+              echo "applying 01-cheese-schema.sql"
+              psql -v ON_ERROR_STOP=1 -h supabase-db -U postgres -d postgres -f /sql/01-cheese-schema.sql
+              echo "applying 02-onprem-overlay.sql"
+              psql -v ON_ERROR_STOP=1 -h supabase-db -U postgres -d postgres -f /sql/02-onprem-overlay.sql
+              echo "supabase init complete"
+{{- end }}
