@@ -90,6 +90,83 @@ if [ ! -d "$JOBS_DATA_PATH" ]; then
   mkdir -p "$JOBS_DATA_PATH"
 fi
 
+# ── Least-privilege mount + bind resolution ───────────────────────────────────
+# The stack runs least-privilege by default (see docker-compose.yml and
+# docs/security-hardening.md): no `privileged`, no host-root mount. Instead of
+# `- /:/data` it mounts only the DB/model dir (read-only), ~/.config/cheese
+# (read-only) and JOBS_DATA_PATH (read-write). Those are keyed off CHEESE_DATA_DIR
+# and BIND_ADDR, resolved and exported here so compose sees them at parse time.
+
+# BIND_ADDR — interface the published host ports bind to. Localhost by default;
+# set it to a specific NIC (or 0.0.0.0) only when the stack must be reachable
+# off-box WITHOUT the nginx/oauth2 SSO proxy in front.
+export BIND_ADDR="${BIND_ADDR:-127.0.0.1}"
+
+# CHEESE_DATA_DIR — host directory holding the downloaded databases + models,
+# mounted read-only. `cheese download-dbs --dest <dir>` records it into
+# cheese-env-file.conf. If a pre-existing install predates that (CHEESE_DATA_DIR
+# unset), derive it from the engine config's OUTPUT_DIRECTORIES: the common parent
+# directory of the registered DB folders, ignoring the in-repo TEST fixture.
+_collapse_slashes() { printf '%s' "$1" | tr -s '/'; }
+
+# Emit each OUTPUT_DIRECTORIES path (one per line) from a block-style engine
+# config, skipping the built-in TEST fixture (its path lives inside this repo,
+# not in the customer's database directory).
+_extract_output_dirs() {
+  local cfg="$1" inblock=0 line key val
+  [ -f "$cfg" ] || return 0
+  while IFS= read -r line; do
+    case "$line" in OUTPUT_DIRECTORIES:*) inblock=1; continue ;; esac
+    [ "$inblock" = 1 ] || continue
+    case "$line" in
+      "" ) continue ;;            # blank line inside the block
+      [[:space:]]* ) : ;;         # indented → a "KEY: path" entry
+      * ) inblock=0; continue ;;  # dedent → block ended
+    esac
+    key="${line%%:*}"; key="${key//[[:space:]]/}"       # DB name before the colon
+    [ "$key" = "TEST" ] && continue                      # skip the in-repo fixture
+    val="${line#*:}"                                     # strip "  KEY:"
+    val="${val#"${val%%[![:space:]]*}"}"                 # ltrim
+    val="${val%"${val##*[![:space:]]}"}"                 # rtrim
+    val="${val#[\'\"]}"; val="${val%[\'\"]}"             # strip surrounding quotes
+    [ -n "$val" ] && printf '%s\n' "$(_collapse_slashes "$val")"
+  done < "$cfg"
+}
+
+# Longest common directory prefix (segment-aware) of the paths read on stdin.
+_common_dir_prefix() {
+  local common="" p first=1
+  while IFS= read -r p; do
+    [ -n "$p" ] || continue
+    p="${p%/}"
+    if [ "$first" = 1 ]; then common="$p"; first=0; continue; fi
+    while [ -n "$common" ] && [ "$common" != "/" ] \
+          && [ "$p" != "$common" ] && [ "${p#"$common"/}" = "$p" ]; do
+      common="$(dirname "$common")"
+    done
+  done
+  [ "$first" = 1 ] && return 0
+  printf '%s\n' "$common"
+}
+
+if [ -z "${CHEESE_DATA_DIR:-}" ]; then
+  _cfg="${CONFIG_FILE:-${HOME}/.config/cheese/cheese_config_file.yaml}"
+  if [ -n "${REPO_FOLDER:-}" ]; then
+    _derived="$(_extract_output_dirs "$_cfg" | grep -v -F "${REPO_FOLDER}/" | _common_dir_prefix)"
+  else
+    _derived="$(_extract_output_dirs "$_cfg" | _common_dir_prefix)"
+  fi
+  if [ -n "$_derived" ] && [ "$_derived" != "/" ] && [ -d "$_derived" ]; then
+    export CHEESE_DATA_DIR="$_derived"
+  else
+    export CHEESE_DATA_DIR="${HOME}/.local/share/cheese-databases"
+    echo "ℹ️  CHEESE_DATA_DIR not set and none derivable from ${_cfg}; defaulting the read-only DB mount to ${CHEESE_DATA_DIR}." >&2
+    echo "    Set CHEESE_DATA_DIR in cheese-env-file.conf (or re-run 'cheese download-dbs --dest <dir>') to point at your database directory." >&2
+  fi
+  unset _cfg _derived
+fi
+mkdir -p "$CHEESE_DATA_DIR" 2>/dev/null || true
+
 # ── Automatic host-port adaptation ────────────────────────────────────────────
 # The start-* wrappers call ensure_all_free_ports before `compose up` so a busy
 # host port no longer aborts the launch with "port is already allocated" — we pick

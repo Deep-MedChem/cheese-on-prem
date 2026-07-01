@@ -1,4 +1,4 @@
-# CHEESE on-prem stack.
+# CHEESE on-prem stack — least-privilege by default.
 #
 # Default profile (no profile flag): db + jobs + orchestrator + ui + inference.
 # `--profile sso` adds nginx + oauth2-proxy for HTTPS + corporate IdP auth.
@@ -8,18 +8,58 @@
 #
 # Container names are stable (no random uuid) — restarting one service no longer
 # breaks others that referenced it by name (e.g. UI → orchestrator).
+#
+# ── Security posture (see docs/security-hardening.md) ─────────────────────────
+# This stack runs least-privilege out of the box — suitable for shared/HPC hosts:
+#   1. NO `privileged: true`. Every container gets cap_drop: ALL +
+#      no-new-privileges and runs as the invoking non-root UID.
+#   2. NO host-root mount. The engine resolves host-absolute paths under a /data
+#      mount root, so instead of `- /:/data` we mount only the three subtrees it
+#      actually touches, at the SAME /data<abs-path> location so no code changes:
+#        - ${CHEESE_DATA_DIR} (databases + models)  -> read-only
+#        - ~/.config/cheese   (license + config)    -> read-only
+#        - ${JOBS_DATA_PATH}  (jobs + downloads)     -> read-write (only writable mount)
+#      CHEESE_DATA_DIR / JOBS_DATA_PATH / BIND_ADDR are resolved and exported by
+#      scripts/_compose-env (CHEESE_DATA_DIR is derived from the engine config's
+#      OUTPUT_DIRECTORIES for pre-existing installs).
+#   3. Published ports bind ${BIND_ADDR:-127.0.0.1}. Internal-only services
+#      (inference, alignment, oauth2-proxy) always bind localhost. Under
+#      `--profile sso`, nginx is the only service meant to face the network.
 
 x-cheese-db-image: &cheese-db-image
   image: cheese.azurecr.io/on-prem/cheese-database/${CHEESE_CUSTOMER}:${CHEESE_IMAGE_TAG:-latest}
 
+# Drop-everything baseline applied to every cheese-* service.
+x-hardening: &hardening
+  user: "${UID:-1000}"
+  cap_drop: ["ALL"]
+  security_opt:
+    - "no-new-privileges:true"
+  # Optional next step (validate in your environment first): a read-only root
+  # filesystem with a writable /tmp tmpfs. The app writes caches under /tmp
+  # (e.g. CUPY_CACHE_DIR=/tmp); point any other HOME-based caches at /tmp too,
+  # then enable:
+  # read_only: true
+  # tmpfs:
+  #   - /tmp
+
+# Minimal mounts in place of the old `- /:/data`. Read-only except the jobs dir.
+x-cheese-data-mounts: &cheese-data-mounts
+  volumes:
+    # Databases + models the engine reads. CHEESE_DATA_DIR is the host directory
+    # `cheese download-dbs --dest` populates (and where on-prem/visualisation
+    # models live). Read-only: the running stack only reads indices/models;
+    # they are written offline by download-dbs / the indexing tools.
+    - ${CHEESE_DATA_DIR:-${HOME}/.local/share/cheese-databases}:/data${CHEESE_DATA_DIR:-${HOME}/.local/share/cheese-databases}:ro
+    # License file + generated config (nginx certs, supabase env, ...). Read-only.
+    - ${HOME}/.config/cheese:/data${HOME}/.config/cheese:ro
+    # The ONLY writable mount: search-job state + download artifacts.
+    - ${JOBS_DATA_PATH:-${HOME}/.local/share/cheese-jobs}:/data${JOBS_DATA_PATH:-${HOME}/.local/share/cheese-jobs}:rw
+
 x-cheese-db-common: &cheese-db-common
-  <<: *cheese-db-image
+  <<: [*cheese-db-image, *hardening, *cheese-data-mounts]
   env_file:
     - ${HOME}/.config/cheese/cheese-env-file.conf
-  volumes:
-    - /:/data
-  user: "${UID:-1000}"
-  privileged: true
   networks:
     - cheese-network
   restart: unless-stopped
@@ -72,12 +112,14 @@ services:
     # http.server exit and crash-loop under restart: unless-stopped.
     entrypoint: ["bash", "-c", "mkdir -p /data${JOBS_DATA_PATH:-${HOME}/.local/share/cheese-jobs} && python3 -m http.server ${FILE_SERVER_INTERNAL_PORT:-8000} --directory /data${JOBS_DATA_PATH:-${HOME}/.local/share/cheese-jobs}"]
     ports:
-      - "${JOBS_FILE_SERVER_PORT:-8000}:${FILE_SERVER_INTERNAL_PORT:-8000}"
+      # Browser-reachable (download links). Bind the controlled interface, not 0.0.0.0.
+      - "${BIND_ADDR:-127.0.0.1}:${JOBS_FILE_SERVER_PORT:-8000}:${FILE_SERVER_INTERNAL_PORT:-8000}"
 
   # ── cheese-orchestrator: the public CHEESE API ────────────────────────────────
   api:
     image: cheese.azurecr.io/on-prem/cheese-orchestrator/${CHEESE_CUSTOMER}:${CHEESE_IMAGE_TAG:-latest}
     container_name: cheese-api
+    <<: [*hardening, *cheese-data-mounts]
     env_file:
       - ${HOME}/.config/cheese/cheese-env-file.conf
     environment:
@@ -86,14 +128,10 @@ services:
       # SynthonGPT isn't part of the on-prem package; point at a closed local port so /available_databases fails fast instead of hitting the orchestrator's 30s connect timeout.
       SYNTHONGPT_API_URL: http://127.0.0.1:1
       SYNTHONGPT_API_TIMEOUT_SECONDS: 2
-    volumes:
-      - /:/data
-    user: "${UID:-1000}"
-    privileged: true
     networks:
       - cheese-network
     ports:
-      - "${API_HOST_PORT:-8001}:${API_INTERNAL_PORT:-8001}"
+      - "${BIND_ADDR:-127.0.0.1}:${API_HOST_PORT:-8001}:${API_INTERNAL_PORT:-8001}"
     depends_on:
       db:
         condition: service_healthy
@@ -119,9 +157,11 @@ services:
   # ELECTROSTATICS_API / ALIGNMENT_API point at the optional inference + alignment
   # service aliases (always set; if a service isn't running, the UI's optional-
   # service proxy returns 503 cleanly and the feature is hidden).
+  # The UI needs no /data mount and no license — only cap_drop + no-new-privileges + UID.
   ui:
     image: cheese.azurecr.io/on-prem/cheese-search-ui/${CHEESE_CUSTOMER}:${CHEESE_IMAGE_TAG:-latest}
     container_name: cheese-ui
+    <<: *hardening
     environment:
       CHEESE_API: http://cheese-api:${API_INTERNAL_PORT:-8001}
       VITE_CHEESE_API: ${VITE_CHEESE_API:-http://${IP:-localhost}:${API_HOST_PORT:-8001}/docs}
@@ -149,12 +189,10 @@ services:
       VITE_ENABLE_ANALYTICS: ${ENABLE_ANALYTICS:-false}
       ENABLE_SUPABASE: ${ENABLE_SUPABASE:-false}
       LOCAL: "True"
-    user: "${UID:-1000}"
-    privileged: true
     networks:
       - cheese-network
     ports:
-      - "${UI_HOST_PORT:-3001}:${UI_INTERNAL_PORT:-3001}"
+      - "${BIND_ADDR:-127.0.0.1}:${UI_HOST_PORT:-3001}:${UI_INTERNAL_PORT:-3001}"
     depends_on:
       api:
         condition: service_healthy
@@ -166,12 +204,17 @@ services:
   inference:
     image: cheese.azurecr.io/on-prem/cheese-electrostatics-inference/${CHEESE_CUSTOMER}:latest
     container_name: cheese-inference
+    cap_drop: ["ALL"]
+    security_opt:
+      - "no-new-privileges:true"
     networks:
       cheese-network:
         aliases:
           - cheese-inference
     ports:
-      - "${INFERENCE_HOST_PORT:-8005}:${INFERENCE_INTERNAL_PORT:-8000}"
+      # Reached only by the UI server over cheese-network -> bind localhost.
+      # If GPU is ever needed here, use `gpus: all` / device reservations, NOT privileged.
+      - "127.0.0.1:${INFERENCE_HOST_PORT:-8005}:${INFERENCE_INTERNAL_PORT:-8000}"
     healthcheck:
       # The inference image ships without wget/curl, so probe via python (which is always present).
       test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:${INFERENCE_INTERNAL_PORT:-8000}/health',timeout=3).status==200 else 1)"]
@@ -186,9 +229,9 @@ services:
   # serving POST /align — the same backend the SaaS UI uses. The on-prem image is
   # Cython-compiled and license-gated (like the db/api services), so it needs the
   # CHEESE license at startup: the cheese-env-file.conf env (CHEESE_LICENSE_FILE),
-  # the host root mounted at /data, and running as the invoking UID so it can read
-  # the license file under the user's home — without these it exits at startup by
-  # design. Runs the image's default entrypoint (uvicorn app.main:app on :8001).
+  # the scoped data mounts, and running as the invoking UID so it can read the
+  # license file under the user's config dir — without these it exits at startup
+  # by design. Runs the image's default entrypoint (uvicorn app.main:app on :8001).
   # Registered on cheese-network under the alias 'cheese-alignment-app', which the
   # UI's ALIGNMENT_API points at.
   # Channel-tagged like db/orchestrator/ui: its make-on-prem.yml builds per branch
@@ -197,18 +240,16 @@ services:
   alignment:
     image: cheese.azurecr.io/on-prem/cheese-alignment-service/${CHEESE_CUSTOMER}:${CHEESE_IMAGE_TAG:-latest}
     container_name: cheese-alignment
+    <<: [*hardening, *cheese-data-mounts]
     env_file:
       - ${HOME}/.config/cheese/cheese-env-file.conf
-    volumes:
-      - /:/data
-    user: "${UID:-1000}"
-    privileged: true
     networks:
       cheese-network:
         aliases:
           - cheese-alignment-app
     ports:
-      - "${ALIGNMENT_HOST_PORT:-8006}:${ALIGNMENT_INTERNAL_PORT:-8001}"
+      # Reached only by the UI server over cheese-network -> bind localhost.
+      - "127.0.0.1:${ALIGNMENT_HOST_PORT:-8006}:${ALIGNMENT_INTERNAL_PORT:-8001}"
     healthcheck:
       # Image ships without wget/curl, so probe via python (python:3.10-slim base).
       test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:${ALIGNMENT_INTERNAL_PORT:-8001}/health',timeout=3).status==200 else 1)"]
@@ -229,12 +270,16 @@ services:
   ketcher:
     image: cheese.azurecr.io/on-prem/ketcher/${CHEESE_CUSTOMER}:latest
     container_name: cheese-ketcher
+    cap_drop: ["ALL"]
+    security_opt:
+      - "no-new-privileges:true"
     networks:
       cheese-network:
         aliases:
           - cheese-ketcher
     ports:
-      - "${KETCHER_HOST_PORT:-8007}:80"
+      # Browser iframe -> controlled interface, not 0.0.0.0.
+      - "${BIND_ADDR:-127.0.0.1}:${KETCHER_HOST_PORT:-8007}:80"
     healthcheck:
       # nginx:alpine ships BusyBox wget (no curl); --spider isn't supported, so GET to /dev/null.
       test: ["CMD-SHELL", "wget -q -O /dev/null http://localhost:80/ || exit 1"]
@@ -246,19 +291,28 @@ services:
 
   # ── nginx + oauth2-proxy (perimeter auth) ─────────────────────────────────────
   # Off by default. Brought up only via `--profile sso` (cheese wrapper sets
-  # COMPOSE_PROFILES=sso when NGINX=true in cheese-env-file.conf).
+  # COMPOSE_PROFILES=sso when NGINX=true in cheese-env-file.conf). In this mode
+  # nginx is the ONLY service meant to face the network: every other service stays
+  # on ${BIND_ADDR:-127.0.0.1}, and users reach only nginx on the host's real NIC
+  # (set NGINX_BIND_ADDR to that interface, or leave 0.0.0.0 to listen on all).
   nginx:
     image: nginx:alpine
     container_name: cheese-nginx
     profiles: [sso]
     command: ["nginx", "-g", "daemon off;"]
+    cap_drop: ["ALL"]
+    # nginx:alpine needs these to bind 80/443 and drop the workers to the nginx user.
+    cap_add: ["NET_BIND_SERVICE", "CHOWN", "SETUID", "SETGID"]
+    security_opt:
+      - "no-new-privileges:true"
     volumes:
       - ${HOME}/.config/cheese/nginx.conf:/etc/nginx/nginx.conf:ro
       - ${HOME}/.config/cheese/nginx.crt:/etc/ssl/certs/nginx.crt:ro
       - ${HOME}/.config/cheese/nginx.key:/etc/ssl/private/nginx.key:ro
     ports:
-      - "80:80"
-      - "443:443"
+      # The intentional public entrypoint. Set NGINX_BIND_ADDR to the VM's NIC.
+      - "${NGINX_BIND_ADDR:-0.0.0.0}:443:443"
+      - "${NGINX_BIND_ADDR:-0.0.0.0}:80:80"
     networks:
       - cheese-network
     depends_on:
@@ -270,10 +324,14 @@ services:
     image: quay.io/oauth2-proxy/oauth2-proxy:latest
     container_name: cheese-oauth2-proxy
     profiles: [sso]
+    cap_drop: ["ALL"]
+    security_opt:
+      - "no-new-privileges:true"
     env_file:
       - ${HOME}/.config/cheese/oauth2.env
     ports:
-      - "4180:4180"
+      # Reached only by nginx over cheese-network -> bind localhost.
+      - "127.0.0.1:4180:4180"
     networks:
       - cheese-network
     restart: unless-stopped
