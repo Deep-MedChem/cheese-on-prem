@@ -4,6 +4,7 @@
 # preserving any yes/no choices you've already made.
 set -e
 source "$(dirname "$(readlink -f "$0")")/_db-common"
+source "$(dirname "$(readlink -f "$0")")/_editor"
 
 show_help() {
   echo "Usage: cheese configure-dbs [options]"
@@ -80,7 +81,7 @@ if [ "$edit" = true ]; then
   read -r -p "Open it now to adjust which databases to download? [Y/n] " ans
   case "${ans:-Y}" in
     [Nn]*) : ;;
-    *) "${EDITOR:-nano}" "$DB_CONFIG" ;;
+    *) open_in_editor "$DB_CONFIG" ;;
   esac
 fi
 

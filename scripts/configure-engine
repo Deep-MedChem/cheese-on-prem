@@ -1,3 +1,4 @@
 #!/bin/bash
+source "$(dirname "$(readlink -f "$0")")/_editor"
 
-nano ${CONFIG_FILE}
+open_in_editor "${CONFIG_FILE:-${HOME}/.config/cheese/cheese_config_file.yaml}"
