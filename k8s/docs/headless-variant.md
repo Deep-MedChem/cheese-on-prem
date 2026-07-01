@@ -1,5 +1,10 @@
 # Headless variant — API-only install
 
+> **⚠️ Updated (chart v0.3.0).** There is no longer a `values-headless.yaml`
+> overlay. Get the headless install by setting `searchUi.enabled: false`,
+> `ketcher.enabled: false`, and the orchestrator auth/supabase toggles off — see
+> the "Headless (API-only)" section of [../README.md](../README.md).
+
 "Headless" here means the on-prem stack with the **search UI**, **user
 authorization**, and **Supabase** all removed, leaving just the orchestrator
 API in front of the database and SynthonGPT.

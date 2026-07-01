@@ -1,4 +1,23 @@
 {{- if .Values.searchUi.enabled -}}
+{{- $ui := .Values.searchUi -}}
+{{- /* Effective config = searchUi.config plus runtime-config auto-wiring for the
+       optional in-cluster components, without mutating values. Browser-reachable
+       origins (KETCHER_ORIGIN, SUPABASE_PUBLIC_URL) come from ingress hosts /
+       publicUrl — never in-cluster service DNS, which the browser can't resolve.
+       SUPABASE_URL is server-side, so the in-cluster gateway is fine there. */ -}}
+{{- $cfg := deepCopy $ui.config -}}
+{{- if and .Values.ketcher.enabled .Values.ketcher.ingress.enabled (not (get $cfg "KETCHER_ORIGIN")) -}}
+{{- $kh := first .Values.ketcher.ingress.hosts -}}
+{{- if $kh -}}
+{{- $scheme := ternary "https" "http" (gt (len .Values.ketcher.ingress.tls) 0) -}}
+{{- $_ := set $cfg "KETCHER_ORIGIN" (printf "%s://%s" $scheme $kh.host) -}}
+{{- end -}}
+{{- end -}}
+{{- if .Values.supabase.enabled -}}
+{{- $gw := printf "http://supabase-gateway.cheese.svc.cluster.local:%v" .Values.supabase.gateway.port -}}
+{{- if not (get $cfg "SUPABASE_URL") -}}{{- $_ := set $cfg "SUPABASE_URL" $gw -}}{{- end -}}
+{{- if and .Values.supabase.publicUrl (not (get $cfg "SUPABASE_PUBLIC_URL")) -}}{{- $_ := set $cfg "SUPABASE_PUBLIC_URL" .Values.supabase.publicUrl -}}{{- end -}}
+{{- end -}}
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -6,7 +25,7 @@ metadata:
   labels:
     {{- include "cheese.componentLabels" (list . "search-ui") | nindent 4 }}
 data:
-  {{- range $k, $v := .Values.searchUi.config }}
+  {{- range $k, $v := $cfg }}
   {{ $k }}: {{ $v | quote }}
   {{- end }}
 {{- end }}

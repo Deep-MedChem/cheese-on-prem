@@ -1,5 +1,12 @@
 # Playbook — install order
 
+> **⚠️ Updated flow (chart v0.3.0).** The install is now driven by a single
+> `values.yaml` + `deployment.target` (no `values-onprem.yaml`/`values-headless.yaml`
+> overlays), and the chart now creates the PV/PVC itself (no manual
+> `kubectl apply -f manifests/base/persistent-volume*`). See **[../README.md](../README.md)**
+> for the current quick-start and profiles; the data-staging and license steps
+> below remain accurate.
+
 End-to-end install of the on-prem prototype on a fresh kind cluster. Steps run
 top to bottom; do not skip ahead. For data placement on the PVC, see
 [`pvc-data-runbook.md`](./pvc-data-runbook.md).

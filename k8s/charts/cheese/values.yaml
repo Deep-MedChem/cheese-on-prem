@@ -1,19 +1,43 @@
-# cheese — single Helm chart for the on-prem prototype.
+# cheese — single Helm chart for the on-prem stack.
 #
-# Top-level keys (database / synthongpt / orchestrator / searchUi) gate the four
-# components. Resource names are hardcoded (`cheese-database-app`,
-# `cheese-orchestrator`, `cheese-synthongpt`, `cheese-search-ui`, …) so the
-# orchestrator's in-cluster service URLs work out of the box.
+# ONE values.yaml drives everything. Every component is toggled with a
+# top-level `.enabled` key; non-core components (supabase, ketcher, inference,
+# alignment, synthongpt, oauth2Proxy) default off-or-optional so prod stays lean
+# while the test profile turns them on. Resource names are hardcoded
+# (`cheese-database-app`, `cheese-orchestrator`, `cheese-search-ui`,
+# `cheese-ketcher`, `cheese-inference`, `cheese-alignment-app`, …) so the
+# orchestrator/UI in-cluster service URLs work out of the box.
 #
-# Layered install:
-#   helm install cheese cheese-k8s/charts/cheese \
-#     --namespace cheese \
-#     -f cheese-k8s/charts/cheese/values-onprem.yaml \
-#     -f cheese-k8s/charts/cheese/values-secrets.yaml
+# Environment is selected with `deployment.target` (local | aws) — there are no
+# per-environment overlay files. Install is the SAME for every target:
+#   helm install cheese cheese-k8s/charts/cheese -n cheese --create-namespace \
+#     -f my-values.yaml [-f my-secrets.yaml]
+# See k8s/README.md for the local and prod profile snippets.
+#
+# Secrets: each secret-producing component accepts `secret.existingSecret: <name>`
+# to reference a pre-created Secret (client-managed / Vault / ESO / SealedSecrets);
+# leave it empty for the inline self-contained path (values-secrets.yaml.example).
+
+# --- Deployment target -----------------------------------------------------
+# Selects storage class + ingress class via the cheese.storageClass /
+# cheese.ingressClass helpers (templates/_platform.tpl).
+#   local : kind / bare-metal dev — hostPath PV + nginx. Fully supported + tested.
+#   aws   : SCAFFOLD ONLY — no AWS sources/images yet; gp3/efs-sc + alb stubs.
+# azure is DEPRECATED and unsupported.
+deployment:
+  target: local                            # local | aws
+  storage:
+    className: ""                          # "" → target default (local: cheese-local-manual; aws: gp3/efs-sc)
+    size: 10Ti
+    accessMode: ReadWriteOnce             # RWO single-node; set ReadWriteMany (aws→efs-sc) to scale search across nodes
+    createLocalPV: true                   # local only: render the hostPath PersistentVolume
+    hostPath: /data                       # local only: node path backing the PV
+  ingress:
+    className: ""                         # "" → target default (local: nginx; aws: alb)
 
 # --- Shared data plane -----------------------------------------------------
-# Single RWO PVC mounted at /data by database, orchestrator, and synthongpt.
-# Search UI is stateless and doesn't mount it.
+# Single PVC mounted at /data by database, orchestrator, synthongpt, alignment.
+# Search UI / ketcher / inference are stateless and don't mount it.
 data:
   pvcName: cheese-data-pvc
   mountPath: /data
@@ -58,6 +82,7 @@ database:
       delimiter: ","
 
   secret:
+    existingSecret: ""                     # if set, reference this pre-created Secret (keys: production, cheeseLicense, discordWebhookUrl) and render NO inline Secret
     production: ""                         # OUR_SECRET-style value enabling licensing-prod path
     cheeseLicense: ""                      # optional inline license; if set, used instead of file
     cheeseLicenseFile: "cheese_license_file.json"  # filename on the PVC (relative to /data)
@@ -70,6 +95,8 @@ database:
     verbose: "0"
     ui_url: "http://cheese-ui.localtest.me"
     db_url: "http://cheese-database-app.cheese.svc.cluster.local:8001"
+    # URL of the file-server role (below); download-exec embeds it in download links.
+    jobs_file_server_url: "http://cheese-database-file-server.cheese.svc.cluster.local:8000"
 
   # One Deployment per role. Roles with `port` also get a Service of the same name.
   roles:
@@ -132,6 +159,22 @@ database:
       resources:
         requests: { cpu: "500m", memory: 1Gi }
         limits:   { cpu: "2",    memory: 4Gi }
+
+    # Static HTTP server over /data/<jobs_data_path>; download-exec writes result
+    # zips there and embeds jobs_file_server_url links. Mirrors the compose
+    # `file-server` service. fileServer:true makes the template emit the
+    # mkdir + `python3 -m http.server` command instead of a cheese module.
+    file-server:
+      enabled: true
+      replicaCount: 1
+      fileServer: true
+      port: 8000
+      service:
+        enabled: true
+      env: {}
+      resources:
+        requests: { cpu: "100m", memory: 128Mi }
+        limits:   { cpu: "500m", memory: 512Mi }
 
   podAnnotations: {}
   podSecurityContext: {}
@@ -274,6 +317,7 @@ orchestrator:
     jwtIssuer: ""                          # optional override
 
   secret:
+    existingSecret: ""                     # if set, reference this pre-created Secret (keys: supabaseServiceRoleKey, discordWebhookUrl) and render NO inline Secret
     discordWebhookUrl: ""
     cheeseLicenseFile: "cheese_license_file.json"  # filename on the shared PVC; must match database.secret.cheeseLicenseFile
 
@@ -355,7 +399,7 @@ searchUi:
 
   ingress:
     enabled: true
-    className: nginx
+    className: ""                          # "" → deployment target default (local: nginx; aws: alb)
     annotations: {}
     hosts:
       - host: cheese-ui.localtest.me
@@ -368,18 +412,28 @@ searchUi:
   # Feature gates (ENABLE_AUTH, etc.) are baked into the Vite bundle at build
   # time — see cheese-k8s/env/build.env.example — so they live outside the chart.
   config:
-    LOCAL: "True"
+    LOCAL: "False"                         # "True" only for dev; production serving = "False"
     NODE_ENV: "production"
     HOST: "0.0.0.0"
     PORT: "3001"
     FRONTEND_URL: "http://cheese-ui.localtest.me"
     CHEESE_API: "http://cheese-orchestrator.cheese.svc.cluster.local"
-    SUPABASE_URL: ""
-    VITE_SUPABASE_URL: ""
+    SUPABASE_URL: ""                       # in-cluster URL the UI server uses
+    VITE_SUPABASE_URL: ""                  # build-time fallback (SaaS)
     VITE_CDN_ENABLED: "false"
     VITE_CDN_BASE_URL: ""
+    # --- Runtime-config injection (server reads these, injects window.__CHEESE_RUNTIME__
+    #     via /api/runtime-config). Only effective on a UI image built from a branch
+    #     that has the feature (develop+); the :latest image may not yet. ---
+    MODIFY_INDEX_HTML: "true"              # enable runtime injection into index.html
+    KETCHER_ORIGIN: ""                     # self-hosted ketcher origin; auto-set when ketcher.enabled (see _helpers/runtime wiring in configmap)
+    SUPABASE_PUBLIC_URL: ""               # browser-reachable Supabase origin (on-prem); auto-set when supabase.enabled
+    # Server-side optional service URLs (UI 503s gracefully if the service is absent).
+    ELECTROSTATICS_API: "http://cheese-inference.cheese.svc.cluster.local:8000"
+    ALIGNMENT_API: "http://cheese-alignment-app.cheese.svc.cluster.local:8001"
 
   secret:
+    existingSecret: ""                     # if set, reference this pre-created Secret (keys below) and render NO inline Secret
     cheeseUiUserSecret: ""                 # CHEESE_UI_USER_SECRET
     supabaseAnonKey: ""                    # SUPABASE_ANON_KEY
     supabaseServiceRoleKey: ""             # SUPABASE_SERVICE_ROLE_KEY
@@ -415,3 +469,212 @@ searchUi:
   podAntiAffinityPreset:
     type: soft
     topologyKey: kubernetes.io/hostname
+# ===========================================================================
+# ketcher — self-hosted molecule editor (static nginx SPA). NON-CORE, on by
+# default. The search UI iframes it and resolves its origin at runtime
+# (searchUi.config.KETCHER_ORIGIN auto-points here when enabled). Mirrors the
+# compose `ketcher` service. Service name: cheese-ketcher.
+# ===========================================================================
+ketcher:
+  enabled: true
+  image:
+    source: acr                            # local | acr
+    local:
+      repository: cheese-ketcher-local
+      tag: dev
+      pullPolicy: IfNotPresent
+    acr:
+      repository: cheese.azurecr.io/on-prem/ketcher/cheese-customer
+      tag: latest
+      pullPolicy: IfNotPresent
+      pullSecret: cheese-acr-pull
+  replicaCount: 1
+  containerPort: 80
+  service:
+    type: ClusterIP
+    port: 80
+  ingress:
+    enabled: false                         # usually reached only by the UI iframe in-cluster
+    className: ""                          # "" → deployment target default
+    annotations: {}
+    hosts: []
+    tls: []
+  resources:
+    requests: { cpu: "50m",  memory: 64Mi  }
+    limits:   { cpu: "250m", memory: 128Mi }
+  podAnnotations: {}
+  podSecurityContext: {}
+  securityContext: {}
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+  podAntiAffinityPreset:
+    type: soft
+    topologyKey: kubernetes.io/hostname
+
+# ===========================================================================
+# inference — electrostatics inference server. NON-CORE, OFF by default. The UI
+# calls it via ELECTROSTATICS_API and degrades gracefully (503) when absent.
+# Mirrors the compose `inference` service. Service name MUST be cheese-inference
+# (the UI server's default ELECTROSTATICS_API host).
+# ===========================================================================
+inference:
+  enabled: false
+  image:
+    source: acr
+    local:
+      repository: cheese-inference-local
+      tag: dev
+      pullPolicy: IfNotPresent
+    acr:
+      repository: cheese.azurecr.io/on-prem/cheese-electrostatics-inference/cheese-customer
+      tag: latest                          # this image has no per-branch tag upstream; always latest
+      pullPolicy: IfNotPresent
+      pullSecret: cheese-acr-pull
+  replicaCount: 1
+  containerPort: 8000
+  service:
+    type: ClusterIP
+    port: 8000
+  resources:
+    requests: { cpu: "500m", memory: 1Gi  }
+    limits:   { cpu: "2",    memory: 4Gi  }
+  podAnnotations: {}
+  podSecurityContext: {}
+  securityContext: {}
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+  podAntiAffinityPreset:
+    type: soft
+    topologyKey: kubernetes.io/hostname
+
+# ===========================================================================
+# alignment — conformer alignment service. NON-CORE, OFF by default, LICENSE-
+# GATED. The UI calls it via ALIGNMENT_API; degrades gracefully when absent.
+# Mounts the shared PVC for the license file. Mirrors the compose `alignment`
+# service. Service name MUST be cheese-alignment-app.
+# ===========================================================================
+alignment:
+  enabled: false
+  image:
+    source: acr
+    local:
+      repository: cheese-alignment-service-local
+      tag: dev
+      pullPolicy: IfNotPresent
+    acr:
+      repository: cheese.azurecr.io/on-prem/cheese-alignment-service/cheese-customer
+      tag: latest
+      pullPolicy: IfNotPresent
+      pullSecret: cheese-acr-pull
+  replicaCount: 1
+  containerPort: 8001
+  service:
+    type: ClusterIP
+    port: 8001
+  secret:
+    cheeseLicenseFile: "cheese_license_file.json"   # on the shared PVC; must match database.secret.cheeseLicenseFile
+  resources:
+    requests: { cpu: "1", memory: 2Gi }
+    limits:   { cpu: "4", memory: 8Gi }
+  podAnnotations: {}
+  podSecurityContext: {}
+  securityContext:
+    runAsUser: 2112                        # must read the license file owned by 2112:0 on the PVC
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+  podAntiAffinityPreset:
+    type: soft
+    topologyKey: kubernetes.io/hostname
+
+# ===========================================================================
+# oauth2-proxy — OIDC/SSO perimeter auth. NON-CORE, OFF by default. STUB/SCAFFOLD
+# only — an alternate auth path to Supabase (compose `sso` profile). Enable and
+# supply provider config + an existingSecret to wire ingress-level auth.
+# ===========================================================================
+oauth2Proxy:
+  enabled: false
+  image:
+    repository: quay.io/oauth2-proxy/oauth2-proxy
+    tag: latest
+    pullPolicy: IfNotPresent
+  replicaCount: 1
+  containerPort: 4180
+  service:
+    type: ClusterIP
+    port: 4180
+  existingSecret: ""                       # Secret with OAUTH2_PROXY_* (client id/secret, cookie secret)
+  config: {}                               # extra OAUTH2_PROXY_* env (provider, oidc-issuer-url, …)
+  resources:
+    requests: { cpu: "50m",  memory: 64Mi  }
+    limits:   { cpu: "250m", memory: 128Mi }
+  podAnnotations: {}
+  securityContext: {}
+  nodeSelector: {}
+  tolerations: []
+
+# ===========================================================================
+# supabase — self-hosted auth + per-user spaces, IN-CLUSTER. NON-CORE, OFF by
+# default (test/dev only; prod uses an external Supabase via orchestrator.supabase
+# or no auth). When enabled, ports the slim self-host stack (db / auth / rest /
+# meta / studio / gateway) to k8s; the orchestrator + UI auto-wire to the
+# in-cluster gateway. See templates/supabase/ and files/supabase/.
+# ===========================================================================
+supabase:
+  enabled: false
+
+  # Browser-reachable gateway origin (e.g. https://supabase.example.com). Empty →
+  # the in-cluster gateway service URL is used (fine inside the cluster / kind).
+  publicUrl: ""
+
+  # Sign-up allow-list (enforced by a DB trigger; renders __ALLOWED_DOMAINS_SQL__).
+  allowedEmailDomains:
+    - deepmedchem.com
+
+  jwtExpiry: "3600"
+  disableSignup: "false"
+  mailerAutoconfirm: "true"
+
+  secret:
+    existingSecret: ""                     # keys: postgresPassword, jwtSecret, anonKey, serviceRoleKey
+    postgresPassword: ""                   # REQUIRED when inline (generate a strong value)
+    jwtSecret: ""                          # REQUIRED; shared HS256 secret for GoTrue + PostgREST
+    anonKey: ""                            # REQUIRED; anon JWT signed with jwtSecret
+    serviceRoleKey: ""                     # REQUIRED; service_role JWT signed with jwtSecret
+
+  images:
+    db:      { repository: supabase/postgres,      tag: "15.8.1.060" }
+    auth:    { repository: supabase/gotrue,        tag: "v2.177.0" }
+    rest:    { repository: postgrest/postgrest,    tag: "v12.2.12" }
+    meta:    { repository: supabase/postgres-meta, tag: "v0.89.3" }
+    studio:  { repository: supabase/studio,        tag: "2025.06.30-sha-6f5982d" }
+    gateway: { repository: nginx,                  tag: "alpine" }
+  imagePullPolicy: IfNotPresent
+
+  gateway:
+    port: 8000
+
+  studio:
+    enabled: true
+    organization: CHEESE
+    project: cheese-onprem
+    adminUser: admin                       # HTTP basic-auth user guarding Studio behind the gateway
+    adminPassword: cheese-admin            # CHANGE for any real use; rendered into the gateway .htpasswd
+
+  db:
+    storageSize: 8Gi
+    resources:
+      requests: { cpu: "250m", memory: 512Mi }
+      limits:   { cpu: "2",    memory: 2Gi  }
+
+  # Default resources for the stateless supabase services (auth/rest/meta/studio/gateway).
+  resources:
+    requests: { cpu: "50m",  memory: 128Mi }
+    limits:   { cpu: "500m", memory: 512Mi }
+
+  podAnnotations: {}
+  securityContext: {}
+  nodeSelector: {}
+  tolerations: []

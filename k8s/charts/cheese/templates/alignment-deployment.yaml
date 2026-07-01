@@ -1,0 +1,73 @@
+{{- if .Values.alignment.enabled -}}
+{{- $root := . -}}
+{{- $al := .Values.alignment -}}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: cheese-alignment-app
+  labels:
+    {{- include "cheese.componentLabels" (list $root "alignment") | nindent 4 }}
+spec:
+  replicas: {{ $al.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "cheese.componentSelectorLabels" (list $root "alignment") | nindent 6 }}
+  template:
+    metadata:
+      {{- with $al.podAnnotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      labels:
+        {{- include "cheese.componentSelectorLabels" (list $root "alignment") | nindent 8 }}
+    spec:
+      {{- include "cheese.imagePullSecrets" $al.image | nindent 6 }}
+      securityContext:
+        {{- toYaml $al.podSecurityContext | nindent 8 }}
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: {{ $root.Values.data.pvcName }}
+      containers:
+        - name: alignment
+          securityContext:
+            {{- toYaml $al.securityContext | nindent 12 }}
+          image: {{ include "cheese.image" $al.image | quote }}
+          imagePullPolicy: {{ include "cheese.imagePullPolicy" $al.image }}
+          ports:
+            - name: http
+              containerPort: {{ $al.containerPort }}
+              protocol: TCP
+          env:
+            - name: CHEESE_LICENSE_FILE
+              value: {{ $al.secret.cheeseLicenseFile | quote }}
+          readinessProbe:
+            tcpSocket:
+              port: http
+            initialDelaySeconds: 20
+            periodSeconds: 15
+          livenessProbe:
+            tcpSocket:
+              port: http
+            initialDelaySeconds: 45
+            periodSeconds: 30
+          resources:
+            {{- toYaml $al.resources | nindent 12 }}
+          volumeMounts:
+            - name: data
+              mountPath: {{ $root.Values.data.mountPath | quote }}
+      {{- with $al.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with $al.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      affinity:
+      {{- if $al.affinity }}
+        {{- $al.affinity | toYaml | nindent 8 }}
+      {{- else }}
+        {{- include "cheese.affinityPreset" (list $root "alignment" $al) | nindent 8 }}
+      {{- end }}
+{{- end }}

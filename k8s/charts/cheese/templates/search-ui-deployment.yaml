@@ -1,6 +1,7 @@
 {{- if .Values.searchUi.enabled -}}
 {{- $root := . -}}
 {{- $ui := .Values.searchUi -}}
+{{- $uiSecret := include "cheese.secretName" (list $ui.secret.existingSecret "cheese-search-ui-secret") -}}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -40,7 +41,7 @@ spec:
             - configMapRef:
                 name: cheese-search-ui-config
             - secretRef:
-                name: cheese-search-ui-secret
+                name: {{ $uiSecret }}
           readinessProbe:
             tcpSocket:
               port: http

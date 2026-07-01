@@ -11,8 +11,9 @@ metadata:
     {{- toYaml . | nindent 4 }}
   {{- end }}
 spec:
-  {{- if .Values.searchUi.ingress.className }}
-  ingressClassName: {{ .Values.searchUi.ingress.className }}
+  {{- $ic := .Values.searchUi.ingress.className | default (include "cheese.ingressClass" .) }}
+  {{- if $ic }}
+  ingressClassName: {{ $ic }}
   {{- end }}
   {{- if .Values.searchUi.ingress.tls }}
   tls:

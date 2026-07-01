@@ -64,6 +64,30 @@ imagePullSecrets:
 {{- end -}}
 
 {{/*
+Secret name resolver for the external-secret pattern. Pass (list <existingSecret> <chartDefaultName>).
+Returns the operator-provided existingSecret when set (client manages it externally —
+Vault / ESO / SealedSecrets / pre-created kubectl secret), else the chart's own
+rendered secret name (local self-contained path). The chart's Secret template is
+skipped whenever existingSecret is set, so keys must match the documented set.
+*/}}
+{{- define "cheese.secretName" -}}
+{{- $existing := index . 0 -}}
+{{- $default := index . 1 -}}
+{{- if $existing }}{{ $existing }}{{ else }}{{ $default }}{{ end -}}
+{{- end -}}
+
+{{/* Resolved name of the supabase secret (existingSecret-aware). Pass root context. */}}
+{{- define "cheese.supabaseSecretName" -}}
+{{- include "cheese.secretName" (list .Values.supabase.secret.existingSecret "cheese-supabase") -}}
+{{- end -}}
+
+{{/* Browser/external Supabase origin: supabase.publicUrl, else the in-cluster gateway. Pass root. */}}
+{{- define "cheese.supabasePublicUrl" -}}
+{{- $s := .Values.supabase -}}
+{{- if $s.publicUrl }}{{ $s.publicUrl }}{{ else }}{{ printf "http://supabase-gateway.cheese.svc.cluster.local:%v" $s.gateway.port }}{{ end -}}
+{{- end -}}
+
+{{/*
 Pod anti-affinity preset. Pass (list $ "<component>" <componentValues>). The
 <componentValues> arg supplies .podAntiAffinityPreset.
 */}}

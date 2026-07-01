@@ -5,6 +5,7 @@ One Deployment per enabled role. Resource name: cheese-database-<roleName>.
 {{- $root := . -}}
 {{- $db := .Values.database -}}
 {{- $cfgMountFile := printf "%s/%s" (trimSuffix "/" $root.Values.data.mountPath) $db.config.fileName -}}
+{{- $dbSecret := include "cheese.secretName" (list $db.secret.existingSecret "cheese-database") -}}
 {{- range $roleName, $role := $db.roles -}}
 {{- if $role.enabled }}
 {{- $component := printf "database-%s" $roleName -}}
@@ -48,7 +49,12 @@ spec:
             {{- toYaml $db.securityContext | nindent 12 }}
           image: {{ include "cheese.image" $db.image | quote }}
           imagePullPolicy: {{ include "cheese.imagePullPolicy" $db.image }}
+          {{- if $role.fileServer }}
+          {{- $served := printf "%s/%s" (trimSuffix "/" $root.Values.data.mountPath) (trimPrefix "/" $db.env.jobs_data_path) }}
+          command: ["bash", "-c", {{ printf "mkdir -p %s && exec python3 -m http.server %v --directory %s" $served $role.port $served | quote }}]
+          {{- else }}
           command: ["python", "-um", {{ $role.command | quote }}]
+          {{- end }}
           {{- if $role.port }}
           ports:
             - name: http
@@ -68,24 +74,26 @@ spec:
               value: {{ $db.env.ui_url | quote }}
             - name: DB_URL
               value: {{ $db.env.db_url | quote }}
+            - name: JOBS_FILE_SERVER_URL
+              value: {{ $db.env.jobs_file_server_url | quote }}
             - name: CHEESE_LICENSE_FILE
               value: {{ $db.secret.cheeseLicenseFile | quote }}
             - name: PRODUCTION
               valueFrom:
                 secretKeyRef:
-                  name: cheese-database
+                  name: {{ $dbSecret }}
                   key: production
                   optional: true
             - name: CHEESE_LICENSE
               valueFrom:
                 secretKeyRef:
-                  name: cheese-database
+                  name: {{ $dbSecret }}
                   key: cheeseLicense
                   optional: true
             - name: DISCORD_WEBHOOK_URL
               valueFrom:
                 secretKeyRef:
-                  name: cheese-database
+                  name: {{ $dbSecret }}
                   key: discordWebhookUrl
                   optional: true
             {{- range $k, $v := $role.env }}
