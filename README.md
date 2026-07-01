@@ -42,11 +42,11 @@ in the repo's directory. Follow the prompts. Then re-log in to the shell (or run
 8. Once we send you the JSON license file, run `cheese update-license` and paste its contents there.
 
 9. You can now use CHEESE on-prem version. Start the platform by running `cheese start`
-> This starts a docker network of about 7 docker images. The startup takes a few minutes. 
+> This starts a docker network of about 10 containers. The startup takes a few minutes.
 
 ### 2. CHEESE databases
 
-By default, Cheese comes with a small test database which can be used to test the general workflow. 
+By default, CHEESE comes with a small test database which can be used to test the general workflow.
 
 Database download happens in two steps:
 
@@ -98,7 +98,7 @@ Following the prompts, you chose to delete all or either of:
 
 CHEESE stack is managed by `docker compose` - you can use common `compose` commands to diagnose and troubleshoot.
 The stack runs as the compose project `cheese`, so target it with `-p cheese`.
-Service names are `db`, `api`, `ui`, `jobs-db`, `jobs-exec`, `download-exec`, `file-server`, `inference`, `alignment`.
+Service names are `db`, `api`, `ui`, `jobs-db`, `jobs-exec`, `download-exec`, `file-server`, `inference`, `alignment`, `ketcher`.
 Examples:
 
 * Status — every CHEESE container and whether it's healthy:
@@ -135,4 +135,4 @@ docker stats $(docker compose -p cheese ps -q)
 * Oauth2
 * Rclone
 
-Automatically pulled by `docker` upon installation. 
+Automatically pulled by `docker` upon installation.
