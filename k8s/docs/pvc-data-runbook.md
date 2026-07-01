@@ -1,5 +1,11 @@
 # Runbook — PVC data layout
 
+> **⚠️ Updated (chart v0.3.0).** The PV + PVC are now created by the chart
+> (`templates/data-pvc.yaml` / `data-pv-local.yaml`, driven by `deployment.target`
+> + `deployment.storage`) — you no longer `kubectl apply` them from `manifests/base`.
+> The `/data` layout and kind staging commands below are unchanged. The new
+> `file-server` role also serves `/data/<jobs_data_path>` over HTTP.
+
 The five data-plane pods (`cheese-database-{app,jobs-db,jobs-exec,download-exec}`
 and `cheese-synthongpt`) all mount one shared `cheese-data-pvc` at `/data`.
 **The data on this volume is loaded out-of-band, not by Helm.** This runbook is

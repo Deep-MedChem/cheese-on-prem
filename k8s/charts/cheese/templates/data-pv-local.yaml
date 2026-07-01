@@ -1,0 +1,25 @@
+{{- /*
+Local-only hostPath PersistentVolume backing the shared PVC on kind / bare-metal
+dev (deployment.target=local). Cloud targets (aws) use dynamic provisioning, so
+this is not rendered there. Replaces manifests/base/persistent-volume.local-example.yaml.
+
+On kind, hostPath resolves INSIDE the kind-control-plane container — stage data
+with `docker cp ... kind-control-plane:/data/...` (see k8s/docs/pvc-data-runbook.md).
+*/ -}}
+{{- if and (eq .Values.deployment.target "local") .Values.deployment.storage.createLocalPV -}}
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: cheese-data-pv
+  labels:
+    {{- include "cheese.labels" . | nindent 4 }}
+spec:
+  capacity:
+    storage: {{ .Values.deployment.storage.size }}
+  accessModes:
+    - {{ .Values.deployment.storage.accessMode }}
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: {{ include "cheese.storageClass" . | quote }}
+  hostPath:
+    path: {{ .Values.deployment.storage.hostPath | quote }}
+{{- end }}

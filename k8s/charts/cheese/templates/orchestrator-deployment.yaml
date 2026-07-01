@@ -1,6 +1,13 @@
 {{- if .Values.orchestrator.enabled -}}
 {{- $root := . -}}
 {{- $oc := .Values.orchestrator -}}
+{{- $ocSecret := include "cheese.secretName" (list $oc.secret.existingSecret "cheese-orchestrator") -}}
+{{- /* When in-cluster supabase is enabled and no explicit URL is set, point the
+       orchestrator at the in-cluster gateway. */ -}}
+{{- $supabaseUrl := $oc.supabase.url -}}
+{{- if and .Values.supabase.enabled (not $supabaseUrl) -}}
+{{- $supabaseUrl = printf "http://supabase-gateway.cheese.svc.cluster.local:%v" .Values.supabase.gateway.port -}}
+{{- end -}}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -87,7 +94,7 @@ spec:
             - name: ENABLE_SUPABASE
               value: {{ $oc.supabase.enable | quote }}
             - name: SUPABASE_URL
-              value: {{ $oc.supabase.url | quote }}
+              value: {{ $supabaseUrl | quote }}
             {{- if $oc.supabase.jwtIssuer }}
             - name: SUPABASE_JWT_ISSUER
               value: {{ $oc.supabase.jwtIssuer | quote }}
@@ -95,12 +102,12 @@ spec:
             - name: SUPABASE_SERVICE_ROLE_KEY
               valueFrom:
                 secretKeyRef:
-                  name: cheese-orchestrator
+                  name: {{ $ocSecret }}
                   key: supabaseServiceRoleKey
             - name: DISCORD_WEBHOOK_URL
               valueFrom:
                 secretKeyRef:
-                  name: cheese-orchestrator
+                  name: {{ $ocSecret }}
                   key: discordWebhookUrl
           livenessProbe:
             httpGet:

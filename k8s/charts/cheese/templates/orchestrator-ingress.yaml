@@ -15,8 +15,9 @@ metadata:
     {{- toYaml . | nindent 4 }}
   {{- end }}
 spec:
-  {{- if $ingress.className }}
-  ingressClassName: {{ $ingress.className }}
+  {{- $ic := $ingress.className | default (include "cheese.ingressClass" $root) }}
+  {{- if $ic }}
+  ingressClassName: {{ $ic }}
   {{- end }}
   {{- if $ingress.tls }}
   tls:
