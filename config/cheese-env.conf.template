@@ -17,6 +17,21 @@ CHEESE_DB_PASSWORD=XXX
 # broken /data${HOME}/... mount path. To move it, re-run the installer or edit
 # the value in cheese-env-file.conf, then `cheese stop` / `cheese start`.
 
+# ── Security / least-privilege (see docs/security-hardening.md) ───────────────
+# The stack runs least-privilege: no privileged containers, no host-root mount,
+# ports bound to localhost by default. Two knobs control that:
+#
+# CHEESE_DATA_DIR — host directory holding your downloaded databases + models,
+#   mounted READ-ONLY. `cheese download-dbs --dest <dir>` records it automatically;
+#   set it explicitly only to override. If unset, `cheese start` derives it from
+#   the database paths in cheese_config_file.yaml. Absolute path, no ${HOME}.
+# CHEESE_DATA_DIR=/mnt/data/cheese-databases
+#
+# BIND_ADDR — interface the published ports bind to (default 127.0.0.1). Set to a
+#   specific NIC, or 0.0.0.0 for all interfaces, ONLY if users must reach the stack
+#   directly without the nginx/oauth2 SSO proxy (NGINX=true) in front of it.
+# BIND_ADDR=127.0.0.1
+
 
 # Images pulled by `cheese update-images`. Drop entries you don't need.
 #   cheese-search-ui                — web UI

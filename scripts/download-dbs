@@ -55,6 +55,24 @@ register_db() {
   echo "  Registered '$key' in $(basename "$cfg") (OUTPUT_DIRECTORIES + INDEX_TYPES + DELIMITERS)"
 }
 
+# Record a key in cheese-env-file.conf (replace an existing line or append), so
+# the value survives restarts. Used to persist CHEESE_DATA_DIR — the read-only DB
+# mount root the hardened compose stack binds (see docs/security-hardening.md).
+persist_env_var() {
+  local key="$1" val="$2" file="${HOME}/.config/cheese/cheese-env-file.conf"
+  [ -f "$file" ] || return 0
+  if grep -q "^${key}=" "$file" 2>/dev/null; then
+    [ "$(grep "^${key}=" "$file" | tail -1 | cut -d= -f2-)" = "$val" ] && return 0
+    local tmp; tmp="$(mktemp)"
+    grep -v "^${key}=" "$file" > "$tmp"
+    printf '%s=%s\n' "$key" "$val" >> "$tmp"
+    cat "$tmp" > "$file"; rm -f "$tmp"
+  else
+    printf '%s=%s\n' "$key" "$val" >> "$file"
+  fi
+  echo "  Recorded ${key}=${val} in $(basename "$file")"
+}
+
 dest=""
 transfers=4
 while [[ $# -gt 0 ]]; do
@@ -71,6 +89,10 @@ while [[ $# -gt 0 ]]; do
 done
 
 [ -z "$dest" ] && { echo "Destination folder is required (use --dest)."; show_help; }
+
+# The destination IS the read-only DB mount root the hardened stack binds. Persist
+# it so `cheese start` mounts the right directory without having to re-derive it.
+persist_env_var CHEESE_DATA_DIR "$dest"
 
 # Verify we can actually reach the server with the configured credentials, and
 # fail fast with a targeted message if not.
