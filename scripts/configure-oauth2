@@ -1,3 +1,4 @@
 #!/bin/bash
+source "$(dirname "$(readlink -f "$0")")/_editor"
 
-nano ${HOME}/.config/cheese/oauth2.env
+open_in_editor "${HOME}/.config/cheese/oauth2.env"
