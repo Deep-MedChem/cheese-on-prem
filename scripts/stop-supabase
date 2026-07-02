@@ -1,0 +1,17 @@
+#!/bin/bash
+# Stop the self-hosted Supabase stack. Data persists in the supabase-db-data
+# volume, so `cheese start-supabase` brings it back with all users intact.
+# Pass --wipe to also delete that volume (DESTROYS ALL USER ACCOUNTS + DATA).
+
+set -e
+source "$(dirname "$(readlink -f "$0")")/_supabase-common"
+
+if [ "${1:-}" = "--wipe" ]; then
+  read -rp "This DELETES all Supabase users and per-user data. Type 'wipe' to confirm: " ans
+  [ "$ans" = "wipe" ] || { echo "Aborted."; exit 1; }
+  supabase_compose down -v
+  echo "Supabase stopped and its data volume removed."
+else
+  supabase_compose down
+  echo "Supabase stopped (data preserved). Restart with: cheese start-supabase"
+fi
