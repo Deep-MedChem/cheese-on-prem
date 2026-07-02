@@ -182,9 +182,15 @@ while [[ $# -gt 0 ]]; do
       done
       # If self-hosted Supabase has been set up, bring it up before the core so
       # the orchestrator/UI find it on the network at boot (accounts + per-user
-      # spaces). Skipped silently when auth isn't configured.
+      # spaces). Skipped silently when auth isn't configured (no supabase.env),
+      # and skipped explicitly when SUPABASE_ENABLED=false in cheese-env-file.conf
+      # — the off-switch that keeps the accounts config around for later.
       if [ -f "${HOME}/.config/cheese/supabase.env" ]; then
-        start-supabase || echo "(Supabase failed to start; accounts/login will be unavailable)"
+        if [ "${SUPABASE_ENABLED:-true}" = "false" ]; then
+          echo "(Supabase accounts disabled via SUPABASE_ENABLED=false — skipping)"
+        else
+          start-supabase || echo "(Supabase failed to start; accounts/login will be unavailable)"
+        fi
       fi
 
       # Core first: db + API (blocks until the API is healthy), then the UI — so

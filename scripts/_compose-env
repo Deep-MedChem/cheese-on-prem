@@ -244,12 +244,16 @@ ensure_all_free_ports() {
 # `down` without disturbing a healthy stack. Names are read from the compose
 # file, so new services are covered automatically.
 clear_stray_cheese_containers() {
-  local names c proj
-  names=$(grep -E '^[[:space:]]*container_name:' "$COMPOSE_FILE" 2>/dev/null | awk '{print $2}')
+  # Args (optional): COMPOSE_FILE_PATH EXPECTED_PROJECT — default to the main
+  # stack. The supabase wrappers pass their own compose file + project
+  # ("cheese-supabase") so supabase-named strays get cleared too, not just the
+  # main stack's cheese-* names.
+  local names c proj file="${1:-$COMPOSE_FILE}" expect="${2:-$COMPOSE_PROJECT_NAME}"
+  names=$(grep -E '^[[:space:]]*container_name:' "$file" 2>/dev/null | awk '{print $2}')
   for c in $names; do
     docker container inspect "$c" >/dev/null 2>&1 || continue
     proj=$(docker inspect -f '{{index .Config.Labels "com.docker.compose.project"}}' "$c" 2>/dev/null)
-    if [ "$proj" != "$COMPOSE_PROJECT_NAME" ]; then
+    if [ "$proj" != "$expect" ]; then
       echo "Removing stray container '$c' (project '${proj:-none}') to avoid a name conflict..."
       docker rm -f "$c" >/dev/null 2>&1 || true
     fi
