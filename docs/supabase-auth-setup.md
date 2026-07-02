@@ -1,52 +1,31 @@
-# On-prem user accounts with self-hosted Supabase
+# Per-user accounts for CHEESE on-prem (self-hosted Supabase)
 
-This sets up **real per-user accounts** on-prem — every user signs in with their
-own email/password and gets their **own private space** (their searches,
-downloads, quotations and ADMET history are visible only to them), while every
-account still has full ("premium") access to the whole product.
+Adds authentication and per-user data isolation to a CHEESE on-prem
+deployment: users sign in with email/password, and each account can only
+reach its own application data — enforced by Postgres Row-Level Security,
+not by the UI. Backing store is a slim self-hosted Supabase (Postgres +
+GoTrue + PostgREST) running as a second compose project next to CHEESE.
 
-It needs nothing from the customer's cluster except Docker — no Azure, no
-corporate IdP, no SMTP. Authentication is Supabase's own email/password (GoTrue),
-self-hosted alongside CHEESE.
+Setup is one command plus an image pull. Requires Docker only — no corporate
+IdP, no SMTP, no cloud services, no outbound connections.
 
-## How it works (and why everyone is still "premium")
-
-Two independent layers:
-
-- **Per-user spaces** come from **Supabase Row-Level Security**. The browser
-  signs in, gets a JWT, and writes its rows (`searches`, `downloads`,
-  `quotations`, `admet_properties`) straight to Supabase through PostgREST. Each
-  table's RLS policy is `auth.uid() = user_id`, so a user can only ever read/write
-  their own rows. A `handle_new_user` trigger auto-creates a profile on signup.
-
-- **Everyone is premium** because the orchestrator stays in non-`PRODUCTION`
-  mode: regardless of `ENABLE_AUTH`, its `if not PRODUCTION:` branch makes every
-  request run as the `universal-cheese` user — full access to all databases, no
-  tier/paywall checks (`cheese-orchestrator/.../app.py`). The UI's upsell paths
-  are gated behind `ENABLE_STRIPE`, which stays `false`. And to be safe, new
-  accounts are created with `account_type = 'premium'` (the on-prem SQL overlay).
-
-So accounts gate *who you are* (and isolate your data); they never downgrade
-*what you can do*.
 
 ## What gets deployed
 
-A **slim** self-hosted Supabase — only what CHEESE uses — as its own compose
-project (`cheese-supabase`) on the shared `cheese-network`:
+Compose project `cheese-supabase` on the shared `cheese-network`:
 
-| Service            | Image                  | Role                                            |
-| ------------------ | ---------------------- | ----------------------------------------------- |
-| `supabase-db`      | `supabase/postgres`    | Users (`auth.users`) + app tables + RLS         |
-| `supabase-auth`    | `supabase/gotrue`      | Email/password signup & login, issues JWTs      |
-| `supabase-rest`    | `postgrest/postgrest`  | REST API the browser writes per-user rows through |
-| `supabase-meta`    | `supabase/postgres-meta`| Backs Studio                                   |
-| `supabase-studio`  | `supabase/studio`      | Admin dashboard (manage/inspect users)          |
-| `supabase-gateway` | `nginx:alpine`         | One public origin: `/auth/v1`→auth, `/rest/v1`→rest, `/`→Studio (basic-auth) |
+| Service            | Image                    | Role                                              |
+| ------------------ | ------------------------ | ------------------------------------------------- |
+| `supabase-db`      | `supabase/postgres`      | Users + per-user tables + RLS policies            |
+| `supabase-auth`    | `supabase/gotrue`        | Email/password signup & login, issues JWTs        |
+| `supabase-rest`    | `postgrest/postgrest`    | REST API the browser reads/writes its rows through |
+| `supabase-meta`    | `supabase/postgres-meta` | Backs Studio                                      |
+| `supabase-studio`  | `supabase/studio`        | Admin dashboard (manage users), behind basic auth |
+| `supabase-gateway` | `nginx:alpine`           | Single origin routing to the three above          |
 
-No realtime / storage / functions / analytics / vector — add the official
-services later if ever needed.
+No realtime / storage / functions / analytics — only what CHEESE uses.
 
-## Setup
+## Setup (three steps)
 
 ### 1. Run the script
 
@@ -54,164 +33,142 @@ services later if ever needed.
 cheese setup-supabase
 ```
 
-It will, idempotently:
+Idempotent. It creates `~/.config/cheese/supabase.env` and opens it so you can
+set **`CHEESE_AUTH_ALLOWED_DOMAINS`** (comma-separated email domains allowed to
+register, e.g. `customer.com,partner.org`) and confirm **`SUPABASE_PUBLIC_URL`**
+(the origin browsers will hit). It then generates all secrets, starts the
+Supabase stack, loads the schema + RLS policies + the domain-restriction
+trigger, and wires the main stack's config — including selecting the correct
+UI image variant (next step) automatically.
 
-1. Create `~/.config/cheese/supabase.env` from the template and open it so you can
-   set **`CHEESE_AUTH_ALLOWED_DOMAINS`** (comma-separated email domains allowed to
-   register, e.g. `customer.com,partner.org`) and confirm **`SUPABASE_PUBLIC_URL`**
-   (the origin users' browsers will hit — defaults to `http://<IP>:8000`).
-2. Generate all secrets (`POSTGRES_PASSWORD`, `JWT_SECRET`, and the `ANON_KEY` /
-   `SERVICE_ROLE_KEY` signed from it, Studio dashboard password).
-3. Pull the images and start the Supabase stack.
-4. Load the CHEESE schema + the on-prem overlay (premium default + the
-   domain-restriction trigger).
-5. Wire the main stack's `~/.config/cheese/cheese-env-file.conf`:
-   `ENABLE_AUTH=true`, `ENABLE_SUPABASE=true`, `ENABLE_STRIPE=false`,
-   `ENABLE_TRACKING=true`, and the `SUPABASE_*` URL/keys (internal `SUPABASE_URL`
-   for the orchestrator, `SUPABASE_PUBLIC_URL` for the browser, plus
-   `SUPABASE_JWT_ISSUER`).
+Re-running it later is safe: it keeps existing secrets and users, and
+re-applies whatever you changed (e.g. the domain list).
 
-### 2. Use an auth-enabled UI image  ⚠️ required
+### 2. Use the auth-enabled UI image (required)
 
-The UI's client feature flags are **inlined at build time** (`VITE_ENABLE_AUTH`
-in `config/featureFlags.ts`); the default on-prem image is built with
-`AUTH=false`, so its login UI is tree-shaken out and **no amount of runtime env
-will show it**. You must run the **auth variant** of the UI image, built with:
+The login UI is compiled into the CHEESE UI image at build time — the default
+image doesn't contain it, and no setting can switch it on at runtime. Accounts
+need the `-auth` variant of the UI image; `setup-supabase` already selected the
+right tag for your channel, so this is just a pull:
 
-```
-VITE_ENABLE_AUTH=true  VITE_ENABLE_TRACKING=true
-VITE_ENABLE_STRIPE=false  VITE_ENABLE_NOTIFICATIONS=false
+```bash
+cheese update-images
 ```
 
-This variant is published per channel with an `-auth` tag suffix, alongside the
-base image (see cheese-search-ui `make-on-prem.yml`):
+> ⚠️ The generic `-auth` images render the login screen but are built against
+> placeholder Supabase values. For a **working** login, DeepMedChem publishes an
+> image baked for your deployment — send us the `SUPABASE_PUBLIC_URL` and
+> `ANON_KEY` from your `~/.config/cheese/supabase.env`. The anon key is public
+> by design (every browser gets it anyway) — safe to share; your real secrets
+> never leave the box.
 
-| Channel | Base image | Auth variant |
+### 3. Restart
+
+```bash
+cheese stop && cheese start
+```
+
+`cheese start` now brings Supabase up before the core stack. Users can register
+(allowed-domain email), sign in, and see only their own history.
+
+## Verify
+
+```bash
+# All six Supabase containers up and healthy:
+docker compose -p cheese-supabase ps
+
+# Gateway listens on loopback only (no new off-box exposure):
+ss -ltn 'sport = :8000'
+
+# Registration policy: sign up with an email outside your allow-list → rejected.
+# Isolation: create two accounts, do something in each → each sees only its
+# own data. (Database RLS, not a UI filter.)
+```
+
+Admin dashboard: open `SUPABASE_PUBLIC_URL` in a browser — Studio, behind the
+`DASHBOARD_USERNAME`/`DASHBOARD_PASSWORD` from `supabase.env` (and behind your
+IdP too, when the SSO perimeter is on).
+
+## The two URLs
+
+Browsers and CHEESE's own services reach Supabase by different paths — hence
+two values in the config, both managed by `setup-supabase`:
+
+| Variable | Used by | Value |
 |---|---|---|
-| develop | `…/on-prem/cheese-search-ui/cheese-customer:develop` | `:develop-auth` |
-| main    | `…/on-prem/cheese-search-ui/cheese-customer:latest`  | `:latest-auth` |
+| `SUPABASE_URL` | CHEESE services, in-network | `http://supabase-gateway:8000` |
+| `SUPABASE_PUBLIC_URL` | users' browsers | `https://<your-host>/supabase` with SSO, else `http://<host>:8000` |
 
-**You don't select it by hand** — `cheese setup-supabase` sets
-`CHEESE_UI_IMAGE_TAG=<channel>-auth` in `cheese-env-file.conf`, and the `ui`
-service + `cheese update-images` both honor it (the rest of the stack stays on the
-plain channel tag). So after `setup-supabase`, just:
+The UI hands the public URL + anon key to the browser at runtime, so the same
+UI image works if you later change the public origin (just re-run
+`setup-supabase` and restart).
 
-```bash
-cheese update-images       # pulls cheese-search-ui:<channel>-auth
-cheese stop && cheese start
-```
+## With the SSO perimeter
 
-> ⚠️ **Per-deployment Supabase values are baked at build time.** On current
-> production code the **browser** reads the Supabase URL + anon key from build-time
-> `VITE_*` values. The generic `:develop-auth` / `:latest-auth` images bake
-> **placeholders**: they render the login UI, but for a **working** login against
-> your self-hosted Supabase you need an auth image with your deployment's values
-> baked. Two production-compatible ways to get one:
->
-> - **CI**: run the cheese-search-ui `make-on-prem.yml` via `workflow_dispatch` and
->   fill the `supabase_url` / `supabase_anon_key` inputs (your `SUPABASE_PUBLIC_URL`
->   and `ANON_KEY` from `~/.config/cheese/supabase.env`). The anon key is public by
->   design — safe to bake.
-> - **Locally**:
->   ```bash
->   docker build -f Dockerfile \
->     --build-arg ENABLE_AUTH=true --build-arg ENABLE_TRACKING=true \
->     --build-arg ENABLE_STRIPE=false --build-arg ENABLE_ANALYTICS=false \
->     --build-arg ENABLE_NOTIFICATIONS=false \
->     --build-arg SUPABASE_URL=<SUPABASE_PUBLIC_URL> \
->     --build-arg SUPABASE_ANON_KEY=<ANON_KEY> \
->     -t <registry>/on-prem/cheese-search-ui/cheese-customer:<channel>-auth .
->   ```
-> Verify the flags actually inlined (the bundle must contain `Auth-*.js` /
-> `CompleteProfile-*.js` chunks) before shipping.
-
-### 3. Restart the stack
-
-```bash
-cheese stop && cheese start
-```
-
-`cheese start` auto-starts Supabase whenever `~/.config/cheese/supabase.env`
-exists, then brings up the core. Visit the CHEESE UI: users can now register
-(with an allowed-domain email), sign in, and see only their own history.
-
-Manage users at `SUPABASE_PUBLIC_URL/` (Studio, behind the dashboard basic-auth
-in `supabase.env`).
-
-## The internal-vs-public URL split
-
-The browser and the server reach Supabase by different paths, which is why there
-are two URLs:
-
-- `SUPABASE_URL=http://supabase-gateway:8000` — the in-network alias the
-  orchestrator and UI **server** use.
-- `SUPABASE_PUBLIC_URL` — what the **browser** uses (see the perimeter section
-  below for its value). The UI server injects this (+ the anon key) into
-  `index.html` as `window.__CHEESE_RUNTIME__` and also serves it at
-  `/api/runtime-config`; the client Supabase factory reads it before falling back
-  to build-time `VITE_*`.
-- `SUPABASE_JWT_ISSUER=<SUPABASE_PUBLIC_URL>/auth/v1` — matches the `iss` GoTrue
-  stamps into browser JWTs, so the orchestrator validates them while fetching
-  JWKS over the internal URL. GoTrue derives its own issuer/site URL from
-  `SUPABASE_PUBLIC_URL` too, so the three always agree. (Only exercised if you
-  ever set `PRODUCTION`; under the default universal-cheese mode the orchestrator
-  doesn't gate on the token.)
-
-## Supabase behind the nginx perimeter (not exposed off-box)
-
-Supabase does **not** need its own exposed port. The gateway's host port is
-loopback-bound (`127.0.0.1:8000` by default, like the rest of the stack), and the
-`sso` nginx proxies Supabase as a **path on the main origin**:
-
-```
-https://<your-host>/supabase/  →  supabase-gateway:8000   (over cheese-network)
-```
-
-- With `NGINX=true`, `cheese setup-supabase` defaults
-  `SUPABASE_PUBLIC_URL=https://<IP>/supabase`; supabase-js then calls
-  `/supabase/auth/v1/*` and `/supabase/rest/v1/*`, and the nginx `location
-  /supabase/` (see `config/nginx*.conf.template`) strips the prefix before
-  handing the request to the gateway.
-- The location sits behind the same `auth_request /oauth2/auth` as the UI — the
-  browser's Supabase calls are same-origin XHRs, so they carry the oauth2 session
-  cookie. Nothing reaches Supabase without passing the IdP.
-- Studio remains available at `https://<your-host>/supabase/` (IdP + its own
-  basic auth), and directly on the box at `http://localhost:8000`.
-- nginx is then the **only** off-box path to Supabase: gateway, GoTrue, PostgREST
-  and Postgres all stay on `cheese-network`/loopback.
-
-Without the perimeter (`NGINX` unset), the default is the direct gateway origin
-`http://<IP>:8000` — fine for on-box testing (`localhost`), but for real users
-prefer the perimeter above. Set `BIND_ADDR` to a NIC only if browsers must reach
-the gateway directly.
+If you run the corporate-IdP perimeter ([docs/custom-auth-setup.md](custom-auth-setup.md)),
+Supabase is served as `https://<your-host>/supabase/` through the same
+`auth_request` gate as the UI — nothing reaches it without passing your IdP,
+and the gateway port stays on loopback. `setup-supabase` detects `NGINX=true`
+and sets `SUPABASE_PUBLIC_URL` accordingly. The two layers compose: the IdP
+controls who reaches the app at all; accounts isolate each user's data once
+inside.
 
 ## Operations
 
 ```bash
-cheese start-supabase           # bring Supabase up
-cheese stop-supabase            # stop it; user data PERSISTS in the volume
-cheese stop-supabase --wipe     # stop AND delete all users + per-user data
-docker compose -p cheese-supabase ps      # health
-docker logs supabase-auth --tail 50       # signup/login debugging
+cheese start-supabase            # bring Supabase up
+cheese stop-supabase             # stop it; user data PERSISTS in the volume
+cheese stop-supabase --wipe      # stop AND delete all users + per-user data
+docker compose -p cheese-supabase ps          # health
+docker logs supabase-auth --tail 50           # signup/login debugging
 ```
 
-- **Add/remove allowed domains:** edit `CHEESE_AUTH_ALLOWED_DOMAINS` in
-  `supabase.env` and re-run `cheese setup-supabase` (re-applies the trigger;
-  keeps existing secrets and users).
-- **Rotate a secret:** blank it back to `__GENERATED__` in `supabase.env` and
-  re-run setup. Rotating `JWT_SECRET` regenerates the anon/service keys and
-  invalidates live sessions (users re-login).
-- **No SMTP:** email confirmation is off (`GOTRUE_MAILER_AUTOCONFIRM=true`), so
-  accounts work instantly and there's no password-reset email. Reset passwords
-  for users from Studio. Add SMTP env to `supabase-auth` later if you want
-  self-service reset.
+- **Change allowed domains:** edit `CHEESE_AUTH_ALLOWED_DOMAINS` in
+  `supabase.env`, re-run `cheese setup-supabase`. Keeps secrets and users.
+- **Rotate a secret:** blank it back to `__GENERATED__` in `supabase.env`,
+  re-run setup. Rotating `JWT_SECRET` regenerates the API keys and signs
+  everyone out (they just log in again).
+- **Reset a user's password:** from Studio (no SMTP → no self-service reset;
+  add SMTP env to `supabase-auth` later if you want it).
+- **Disable accounts:** move `supabase.env` aside (e.g.
+  `mv supabase.env supabase.env.off`) and restart — `cheese start` only starts
+  Supabase when that file exists. Move it back to re-enable; users and data are
+  untouched.
+- **Backup:** snapshot the `cheese-supabase_supabase-db-data` volume (standard
+  `docker run --rm -v ...:/data ... tar` or your volume-backup tooling).
+
+## Security posture
+
+- **Everything runs on your host.** A slim self-hosted Supabase (Postgres +
+  auth + REST, images from public registries) as its own compose project next
+  to CHEESE. No phone-home, no external calls, no telemetry leaving the box.
+- **Nothing new is exposed off-box by default.** The only published port is the
+  Supabase gateway, bound to `127.0.0.1`. With the SSO perimeter
+  ([docs/custom-auth-setup.md](custom-auth-setup.md)) browsers reach Supabase as
+  a path on the main HTTPS origin, behind your IdP — nginx stays the single
+  off-box entrypoint.
+- **Isolation is enforced in the database**, not in the UI: Postgres Row-Level
+  Security with `auth.uid() = user_id` policies. A user's requests physically
+  cannot read or write another user's rows, regardless of what any client sends.
+- **Registration is closed by default.** Only emails under the domains you
+  allow-list can sign up, enforced by a database trigger — it covers every
+  signup path, not just the web form.
+- **User data lives in one named Docker volume** on your host
+  (`cheese-supabase_supabase-db-data`). Back it up like any volume; wipe it with
+  one command (below).
+- **Secrets are generated locally** at setup into
+  `~/.config/cheese/supabase.env` (DB password, JWT secret, API keys, dashboard
+  password). Keep it `chmod 600`. Rotation is supported (below).
+- **No SMTP** means no password-reset or confirmation emails: accounts work
+  instantly; an admin resets passwords from the bundled dashboard.
 
 ## Notes & limitations
 
-- Signup is open to anyone who can reach the page *with an allowed-domain email*
-  (enforced by a DB trigger, so it covers every signup path). Combine with the
-  network perimeter (or the `sso` nginx) to control who reaches the page at all.
-- Image tags are pinned in `config/supabase.env.template`; bump them there.
-- The CHEESE schema is **vendored** at `config/supabase/sql/01-cheese-schema.sql`
-  from `cheese-supabase`'s base migration (billing/tier migrations intentionally
-  excluded). Re-copy it if the upstream base schema changes.
+- Anyone who can reach the login page *and* has an allowed-domain email can
+  self-register. Combine with the SSO perimeter (or network controls) to gate
+  who reaches the page at all.
+- Supabase image versions are pinned in `config/supabase.env.template`; bump
+  them there deliberately — don't track `latest`.
+- Accounts isolate **data**; they don't gate functionality — every signed-in
+  user gets the full product. There is no billing or tier system in this
+  deployment, and nothing to configure about it.
