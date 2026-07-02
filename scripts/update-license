@@ -1,3 +1,4 @@
 #!/bin/bash
+source "$(dirname "$(readlink -f "$0")")/_editor"
 
-nano ${HOME}/.config/cheese/cheese_license_file.json
+open_in_editor "${HOME}/.config/cheese/cheese_license_file.json"

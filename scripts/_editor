@@ -1,0 +1,69 @@
+#!/bin/bash
+# Shared editor resolution for the config scripts (update-env, update-license,
+# configure-*). CHEESE no longer depends on `nano` being installed: we honour the
+# user's own $VISUAL/$EDITOR, otherwise use whatever editor IS installed (asking
+# which one when several are available), and fall back to a clear "edit this file
+# yourself" message instead of failing on a missing nano.
+#
+# Usage:  source "$(dirname "$(readlink -f "$0")")/_editor"
+#         open_in_editor "$HOME/.config/cheese/cheese-env-file.conf"
+
+# Editors tried, in preference order, when the user hasn't set $VISUAL/$EDITOR.
+# `vi` is present on virtually every Unix host, so this list almost always
+# resolves even on a minimal machine.
+_EDITOR_CANDIDATES="nano vim vi micro emacs"
+
+# _cmd_exists CMDLINE → true if the first word of CMDLINE is on PATH. Handles
+# editors configured with arguments, e.g. EDITOR="code --wait".
+_cmd_exists() { command -v "${1%% *}" >/dev/null 2>&1; }
+
+# resolve_editor → print the editor command to run (stdout), or return 1 if none
+# is available. All prompts/menus go to stderr so callers can capture the result
+# with $(resolve_editor). Honours $VISUAL then $EDITOR (only if their program is
+# actually installed); otherwise offers the installed candidates, letting the user
+# pick on an interactive terminal.
+resolve_editor() {
+  local e choice list=() i
+
+  if [ -n "${VISUAL:-}" ] && _cmd_exists "$VISUAL"; then printf '%s\n' "$VISUAL"; return 0; fi
+  if [ -n "${EDITOR:-}" ] && _cmd_exists "$EDITOR"; then printf '%s\n' "$EDITOR"; return 0; fi
+
+  for e in $_EDITOR_CANDIDATES; do
+    _cmd_exists "$e" && list+=("$e")
+  done
+  [ "${#list[@]}" -eq 0 ] && return 1
+
+  # Single choice, or non-interactive input: just take the first available.
+  if [ "${#list[@]}" -eq 1 ] || [ ! -t 0 ]; then
+    printf '%s\n' "${list[0]}"; return 0
+  fi
+
+  # Interactive with several installed: let the user choose (default = first).
+  {
+    echo "\$EDITOR is not set. Installed editors:"
+    for i in "${!list[@]}"; do echo "  [$((i+1))] ${list[$i]}"; done
+    echo "(Tip: set \$EDITOR in your shell profile to skip this prompt.)"
+  } >&2
+  read -rp "Choose [1-${#list[@]}, default 1]: " choice
+  case "$choice" in ''|*[!0-9]*) choice=1 ;; esac
+  { [ "$choice" -ge 1 ] && [ "$choice" -le "${#list[@]}" ]; } 2>/dev/null || choice=1
+  printf '%s\n' "${list[$((choice-1))]}"
+}
+
+# open_in_editor FILE — open FILE in the resolved editor. If no editor is found,
+# explain how to proceed manually and return non-zero (callers already run inside
+# interactive `cheese configure-*` flows, so a clear message beats a hard crash).
+open_in_editor() {
+  local file="$1" ed
+  ed="$(resolve_editor)" || {
+    {
+      echo "No text editor found (looked at \$VISUAL, \$EDITOR and: ${_EDITOR_CANDIDATES})."
+      echo "Set \$EDITOR to your preferred editor and re-run, or edit the file directly:"
+      echo "  $file"
+    } >&2
+    return 1
+  }
+  # Word-splitting is intentional so editors with arguments (e.g. "code --wait") work.
+  # shellcheck disable=SC2086
+  $ed "$file"
+}

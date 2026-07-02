@@ -1,3 +1,4 @@
 #!/bin/bash
+source "$(dirname "$(readlink -f "$0")")/_editor"
 
-nano ${HOME}/.config/cheese/cheese-env-file.conf
+open_in_editor "${HOME}/.config/cheese/cheese-env-file.conf"
