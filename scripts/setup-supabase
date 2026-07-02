@@ -8,6 +8,7 @@
 
 set -e
 source "$(dirname "$(readlink -f "$0")")/_supabase-common"
+source "$(dirname "$(readlink -f "$0")")/_editor"
 
 CONF="${HOME}/.config/cheese/cheese-env-file.conf"
 TEMPLATE="${REPO_FOLDER}/config/supabase.env.template"
@@ -26,7 +27,7 @@ if [ ! -f "$SUPABASE_ENV_FILE" ]; then
   # perimeter, fall back to the direct gateway origin (on-box/localhost testing).
   ip="$(grep -E '^IP=' "$CONF" 2>/dev/null | head -1 | cut -d= -f2-)"; ip="${ip:-localhost}"
   nginx_on="$(grep -E '^NGINX=' "$CONF" 2>/dev/null | head -1 | cut -d= -f2-)"
-  gwport="$(grep -E '^SUPABASE_GATEWAY_PORT=' "$SUPABASE_ENV_FILE" | head -1 | cut -d= -f2-)"; gwport="${gwport:-8000}"
+  gwport="$(grep -E '^SUPABASE_GATEWAY_PORT=' "$SUPABASE_ENV_FILE" | head -1 | cut -d= -f2-)"; gwport="${gwport:-8010}"
   if [ "$nginx_on" = "true" ]; then
     default_pub_url="https://${ip}/supabase"
   else
@@ -42,8 +43,11 @@ PY
   echo "  ► Edit $SUPABASE_ENV_FILE now and set CHEESE_AUTH_ALLOWED_DOMAINS"
   echo "    (comma-separated email domains allowed to register), and confirm"
   echo "    SUPABASE_PUBLIC_URL is reachable from users' browsers."
-  read -rp "  Press ENTER to open it in nano (or Ctrl-C to edit manually later)..." _ || true
-  ${EDITOR:-nano} "$SUPABASE_ENV_FILE"
+  read -rp "  Press ENTER to open it in your editor (or Ctrl-C to edit manually later)..." _ || true
+  # open_in_editor resolves $VISUAL/$EDITOR or an installed editor; if none is
+  # found it prints the path to edit manually — don't abort setup over that,
+  # the domain list can be fixed with an edit + re-run.
+  open_in_editor "$SUPABASE_ENV_FILE" || echo "  (edit it manually, then re-run: cheese setup-supabase)"
 fi
 
 # Fill any __GENERATED__ secret placeholders (kept stable across re-runs).
@@ -84,7 +88,7 @@ printf '%s:%s\n' "$dash_user" "$(openssl passwd -apr1 "$dash_pw")" > "${SUPABASE
 echo "Pulling Supabase images (this can take a while the first time)..."
 supabase_compose pull
 echo "Starting Supabase..."
-clear_stray_cheese_containers
+clear_stray_cheese_containers "$SUPABASE_COMPOSE_FILE" cheese-supabase
 supabase_compose up -d
 
 # ── 4. Apply roles → CHEESE schema → on-prem overlay ──────────────────────────
@@ -96,20 +100,34 @@ sed "s/__POSTGRES_PASSWORD__/${pgpw}/g" "${SQL_SRC}/00-roles.sql.template" | psq
 
 wait_auth_ready
 
-echo "Applying CHEESE schema (idempotent: ignores 'already exists' on re-run)..."
-# The base schema isn't guarded with IF NOT EXISTS; on a re-run it will no-op
-# with 'already exists' notices, which are harmless. Use ON_ERROR_STOP off here.
-docker exec -i -e PGPASSWORD="$pgpw" supabase-db \
-  psql -U postgres -d postgres < "${SQL_SRC}/01-cheese-schema.sql" || true
+echo "Applying CHEESE schema..."
+# The base schema isn't guarded with IF NOT EXISTS, so don't blind-apply with
+# errors suppressed (that would also swallow REAL failures and leave a
+# half-created schema that only breaks later, at per-user-isolation time).
+# Instead: skip when the sentinel table is already there, otherwise apply
+# strictly — ON_ERROR_STOP inside one transaction (-1), so a failure rolls the
+# whole schema back and the sentinel check stays accurate for the re-run.
+if psql_db -tAc "SELECT to_regclass('public.profiles') IS NOT NULL" </dev/null | grep -q t; then
+  echo "  CHEESE schema already present — skipping."
+else
+  psql_db -1 < "${SQL_SRC}/01-cheese-schema.sql"
+  psql_db -tAc "SELECT to_regclass('public.profiles') IS NOT NULL" </dev/null | grep -q t \
+    || { echo "CHEESE schema did not apply cleanly (public.profiles missing) — see errors above." >&2; exit 1; }
+fi
 
 echo "Applying on-prem overlay (premium default + domain restriction)..."
 # Build a SQL array literal from CHEESE_AUTH_ALLOWED_DOMAINS.
 domains_sql="$(python3 - "$(sb_env CHEESE_AUTH_ALLOWED_DOMAINS)" <<'PY'
-import sys
+import re, sys
 doms = [d.strip().lower().lstrip("@") for d in sys.argv[1].split(",") if d.strip()]
 if not doms:
     sys.stderr.write("CHEESE_AUTH_ALLOWED_DOMAINS is empty — refusing to allow all domains.\n"); sys.exit(1)
-print("ARRAY[" + ",".join("'" + d.replace("'", "''") + "'" for d in doms) + "]")
+# Strict charset: a hostname can only contain these. This also keeps the value
+# safe for the sed substitution below (no /, &, \ can reach it).
+bad = [d for d in doms if not re.fullmatch(r"[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?", d)]
+if bad:
+    sys.stderr.write(f"CHEESE_AUTH_ALLOWED_DOMAINS contains invalid domain(s): {', '.join(bad)}\n"); sys.exit(1)
+print("ARRAY[" + ",".join("'" + d + "'" for d in doms) + "]")
 PY
 )"
 sed "s/__ALLOWED_DOMAINS_SQL__/${domains_sql}/g" "${SQL_SRC}/02-onprem-overlay.sql.template" | psql_db
@@ -127,15 +145,10 @@ anon="$(sb_env ANON_KEY)"; service="$(sb_env SERVICE_ROLE_KEY)"
 # time, so accounts need the auth-enabled image (published per channel as
 # <channel>-auth, e.g. develop-auth / latest-auth). Pin the UI to that variant via
 # CHEESE_UI_IMAGE_TAG (the compose ui image and `cheese update-images` both honor
-# it); the rest of the stack stays on the plain channel tag. Derive the channel the
-# same way _compose-env does: an explicit CHEESE_IMAGE_TAG wins, else main→latest,
-# any other branch→develop, non-git→latest.
-ui_channel="${CHEESE_IMAGE_TAG:-}"
-if [ -z "$ui_channel" ]; then
-  _b="$(git -C "${REPO_FOLDER:-.}" rev-parse --abbrev-ref HEAD 2>/dev/null || true)"
-  case "$_b" in main|"") ui_channel="latest" ;; *) ui_channel="develop" ;; esac
-fi
-ui_auth_tag="${ui_channel}-auth"
+# it); the rest of the stack stays on the plain channel tag. The channel is
+# CHEESE_IMAGE_TAG, already resolved and exported by _compose-env (sourced via
+# _supabase-common) — one derivation, no drift.
+ui_auth_tag="${CHEESE_IMAGE_TAG}-auth"
 
 python3 - "$CONF" \
   "ENABLE_AUTH=true" \
