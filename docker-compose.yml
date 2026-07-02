@@ -158,8 +158,13 @@ services:
   # service aliases (always set; if a service isn't running, the UI's optional-
   # service proxy returns 503 cleanly and the feature is hidden).
   # The UI needs no /data mount and no license — only cap_drop + no-new-privileges + UID.
+  # The UI has feature-flag build VARIANTS (flags are inlined at Vite build time),
+  # published per channel with a tag suffix: <channel> (base) and <channel>-auth
+  # (login/registration + Supabase accounts). CHEESE_UI_IMAGE_TAG selects the
+  # variant independently of the other images, defaulting to the plain channel tag;
+  # `cheese setup-supabase` sets it to <channel>-auth so accounts work.
   ui:
-    image: cheese.azurecr.io/on-prem/cheese-search-ui/${CHEESE_CUSTOMER}:${CHEESE_IMAGE_TAG:-latest}
+    image: cheese.azurecr.io/on-prem/cheese-search-ui/${CHEESE_CUSTOMER}:${CHEESE_UI_IMAGE_TAG:-${CHEESE_IMAGE_TAG:-latest}}
     container_name: cheese-ui
     <<: *hardening
     environment:

@@ -23,10 +23,14 @@ fi
 echo "Image channel: pulling '${CHEESE_IMAGE_TAG}' tag for product images (database/orchestrator/search-ui/alignment-service)."
 
 # image_tag IMAGE → the tag to pull for that image. Branch-tagged product images
-# follow the channel; everything else is :latest.
+# follow the channel; everything else is :latest. cheese-search-ui additionally
+# honors CHEESE_UI_IMAGE_TAG (a feature-flag variant like <channel>-auth, set by
+# `cheese setup-supabase`), falling back to the plain channel tag — so a stack
+# wired for accounts pulls the auth UI variant while the rest track the channel.
 image_tag() {
   case "$1" in
-    cheese-database|cheese-orchestrator|cheese-search-ui|cheese-alignment-service) echo "$CHEESE_IMAGE_TAG" ;;
+    cheese-search-ui) echo "${CHEESE_UI_IMAGE_TAG:-$CHEESE_IMAGE_TAG}" ;;
+    cheese-database|cheese-orchestrator|cheese-alignment-service) echo "$CHEESE_IMAGE_TAG" ;;
     *) echo "latest" ;;
   esac
 }
