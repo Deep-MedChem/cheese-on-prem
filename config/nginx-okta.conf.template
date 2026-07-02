@@ -9,20 +9,28 @@ http {
     proxy_buffers 8 32k;
     proxy_busy_buffers_size 64k;
 
+  # Upstreams use the stable compose container names on cheese-network.
   upstream frontend {
-    server main_cheese_ui:3001;   # <–– using the container name here
+    server cheese-ui:3001;
   }
 
   upstream backend {
-    server main_cheese_api:8001;   # <–– using the container name here
+    server cheese-api:8001;
   }
 
   upstream fileserver {
-    server main_cheese_jobs_file_server:8000;   # <–– using the container name here
+    server cheese-file-server:8000;
   }
 
   upstream oauth2-proxy {
-    server cheese-oauth2-proxy:4180;   # <–– using the container name here
+    server cheese-oauth2-proxy:4180;
+  }
+
+  # Self-hosted Supabase gateway (accounts; started by `cheese setup-supabase`).
+  # Reached only over cheese-network — its host port stays loopback-bound, so the
+  # perimeter below is the ONLY off-box path to Supabase.
+  upstream supabase {
+    server supabase-gateway:8000;
   }
 
   server {
@@ -128,6 +136,29 @@ http {
       proxy_set_header X-Forwarded-Proto $scheme;
     }
 
-    
+    # Self-hosted Supabase (accounts): browsers reach it ONLY through this path —
+    # the gateway's host port is loopback-bound. Set SUPABASE_PUBLIC_URL to
+    # https://<your-host>/supabase (setup-supabase defaults this when NGINX=true);
+    # supabase-js then calls /supabase/auth/v1/* and /supabase/rest/v1/*. The
+    # trailing slash on proxy_pass strips the /supabase/ prefix so the gateway
+    # sees its expected /auth/v1 + /rest/v1 routes (Studio at its root, still
+    # behind its own basic auth). Kept behind the same IdP perimeter as the UI:
+    # the browser's supabase-js XHRs are same-origin, so they carry the oauth2
+    # session cookie.
+    location /supabase/ {
+      auth_request /oauth2/auth;
+
+      error_page 401 = /oauth2/sign_in;
+
+      auth_request_set $user   $upstream_http_x_forwarded_user;
+      auth_request_set $email  $upstream_http_x_forwarded_email;
+
+      proxy_pass http://supabase/;
+      proxy_set_header Host $host;
+      proxy_set_header X-Real-IP $remote_addr;
+      proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+      proxy_set_header X-Forwarded-Proto $scheme;
+    }
+
   }
 }

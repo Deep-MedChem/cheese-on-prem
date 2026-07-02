@@ -1,0 +1,102 @@
+#!/bin/bash
+# Sourced by setup-supabase / start-supabase / stop-supabase. Locates the slim
+# Supabase compose file, exposes a compose command bound to its OWN project
+# (cheese-supabase) + env-file, and provides secret/JWT generation and a psql
+# helper. The Supabase stack is a separate compose project from the main CHEESE
+# stack but shares the external cheese-network, so the two never collide on
+# container names yet can resolve each other by service alias.
+
+# Reuse the main helper for REPO_FOLDER discovery + the cheese-network guard.
+source "$(dirname "$(readlink -f "$0")")/_compose-env"
+
+SUPABASE_COMPOSE_FILE="${REPO_FOLDER}/docker-compose.supabase.yml"
+SUPABASE_ENV_FILE="${HOME}/.config/cheese/supabase.env"
+SUPABASE_CONFIG_DIR="${HOME}/.config/cheese/supabase"
+
+if [ ! -f "$SUPABASE_COMPOSE_FILE" ]; then
+  echo "docker-compose.supabase.yml not found at $SUPABASE_COMPOSE_FILE" >&2
+  exit 1
+fi
+
+# Compose bound to the supabase project + its env-file (only available once
+# setup-supabase has written it). Callers that run before the env exists must
+# not use this.
+supabase_compose() {
+  docker compose -p cheese-supabase -f "$SUPABASE_COMPOSE_FILE" --env-file "$SUPABASE_ENV_FILE" "$@"
+}
+
+# 32-byte url-safe secret (good for POSTGRES_PASSWORD / JWT_SECRET / dashboard pw).
+gen_secret() {
+  openssl rand -base64 36 | tr -d '\n/+=' | cut -c1-40
+}
+
+# Require python3 once, for HS256 JWT signing. Ubuntu 24 ships it.
+require_python() {
+  if ! command -v python3 >/dev/null 2>&1; then
+    echo "python3 is required to generate Supabase API keys. Install it: sudo apt-get install -y python3" >&2
+    exit 1
+  fi
+}
+
+# gen_jwt SECRET ROLE → a long-lived HS256 JWT carrying {role, iss:supabase}.
+# PostgREST validates this with the same secret and SET ROLEs to `role`, which
+# is exactly how the anon key (role=anon) and service key (role=service_role)
+# work. 10-year expiry so on-prem keys don't silently lapse.
+gen_jwt() {
+  require_python
+  python3 - "$1" "$2" <<'PY'
+import hmac, hashlib, base64, json, time, sys
+def b64(b): return base64.urlsafe_b64encode(b).rstrip(b'=')
+secret, role = sys.argv[1], sys.argv[2]
+now = int(time.time())
+header  = b64(json.dumps({"alg": "HS256", "typ": "JWT"}, separators=(',', ':')).encode())
+payload = b64(json.dumps({"role": role, "iss": "supabase", "iat": now,
+                          "exp": now + 10*365*24*3600}, separators=(',', ':')).encode())
+signing = header + b'.' + payload
+sig = b64(hmac.new(secret.encode(), signing, hashlib.sha256).digest())
+sys.stdout.write((signing + b'.' + sig).decode())
+PY
+}
+
+# Read a value out of supabase.env (after it's been rendered).
+sb_env() {
+  grep -E "^$1=" "$SUPABASE_ENV_FILE" | head -1 | cut -d= -f2-
+}
+
+# Pipe SQL (stdin) into the supabase-db container as the postgres superuser.
+# ON_ERROR_STOP so a failed statement aborts the whole apply.
+psql_db() {
+  local pw; pw="$(sb_env POSTGRES_PASSWORD)"
+  docker exec -i -e PGPASSWORD="$pw" supabase-db \
+    psql -v ON_ERROR_STOP=1 -U postgres -d postgres "$@"
+}
+
+# Block until Postgres answers.
+wait_db_ready() {
+  echo "Waiting for supabase-db to accept connections..."
+  for _ in $(seq 1 60); do
+    if docker exec supabase-db pg_isready -U postgres -d postgres >/dev/null 2>&1; then
+      echo "supabase-db is ready."
+      return 0
+    fi
+    sleep 2
+  done
+  echo "supabase-db did not become ready in time." >&2
+  return 1
+}
+
+# Block until GoTrue has finished its own auth-schema migrations (so the
+# on-prem overlay's trigger on auth.users can attach).
+wait_auth_ready() {
+  echo "Waiting for supabase-auth (GoTrue) to initialize the auth schema..."
+  for _ in $(seq 1 60); do
+    if docker exec supabase-db psql -U postgres -d postgres -tAc \
+         "SELECT to_regclass('auth.users') IS NOT NULL" 2>/dev/null | grep -q t; then
+      echo "auth schema is ready."
+      return 0
+    fi
+    sleep 2
+  done
+  echo "auth.users did not appear in time — check 'docker logs supabase-auth'." >&2
+  return 1
+}
