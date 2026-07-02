@@ -17,6 +17,7 @@ show_help() {
   echo "  update-images                Update CHEESE Docker Images"
   echo "  configure-nginx              Configure the HTTPS reverse proxy (optional, for SSO)"
   echo "  configure-oauth2             Configure OAuth2 sign-in (optional, for SSO)"
+  echo "  setup-supabase               Set up self-hosted Supabase: user accounts + per-user spaces"
   echo
   echo "--- Running CHEESE --- "
   echo "  start                        Run CHEESE"
@@ -25,6 +26,8 @@ show_help() {
   echo "  start-app                    Start CHEESE UI"
   echo "  start-inference              Start CHEESE electrostatics inference service (optional)"
   echo "  start-alignment              Start CHEESE conformer alignment service (optional)"
+  echo "  start-supabase               Start self-hosted Supabase (auth)"
+  echo "  stop-supabase                Stop self-hosted Supabase (--wipe to delete user data)"
   echo "  stop-servers                 Stop CHEESE backend"
   echo "  stop-app                     Stop CHEESE UI"
   echo
@@ -97,6 +100,21 @@ while [[ $# -gt 0 ]]; do
       configure-oauth2 $@
       exit 0
       ;;
+    setup-supabase)
+      shift 1
+      setup-supabase $@
+      exit 0
+      ;;
+    start-supabase)
+      shift 1
+      start-supabase $@
+      exit 0
+      ;;
+    stop-supabase)
+      shift 1
+      stop-supabase $@
+      exit 0
+      ;;
     update-env)
       shift 1
       update-env $@
@@ -162,6 +180,13 @@ while [[ $# -gt 0 ]]; do
             ;;
         esac
       done
+      # If self-hosted Supabase has been set up, bring it up before the core so
+      # the orchestrator/UI find it on the network at boot (accounts + per-user
+      # spaces). Skipped silently when auth isn't configured.
+      if [ -f "${HOME}/.config/cheese/supabase.env" ]; then
+        start-supabase || echo "(Supabase failed to start; accounts/login will be unavailable)"
+      fi
+
       # Core first: db + API (blocks until the API is healthy), then the UI — so
       # the UI is usable as soon as the core is up. The UI only depends_on `api`
       # (compose: condition service_healthy), not on the optional services below.

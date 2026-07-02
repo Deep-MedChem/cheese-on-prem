@@ -1,0 +1,172 @@
+# Slim self-hosted Supabase for CHEESE on-prem auth + per-user spaces.
+#
+# Brought up by `cheese setup-supabase` / `cheese start-supabase` as its OWN
+# compose project ("cheese-supabase") on the shared external `cheese-network`,
+# so the main stack's orchestrator/UI reach it by service name and a name
+# conflict with the main project is impossible.
+#
+# Only the pieces CHEESE actually uses are here: Postgres (the user store + RLS),
+# GoTrue (email/password auth), PostgREST (the REST API the browser writes
+# per-user rows through, RLS-scoped), postgres-meta + Studio (admin UI), and a
+# tiny nginx gateway that presents ONE origin (SUPABASE_PUBLIC_URL) routing
+# /auth/v1 → GoTrue and /rest/v1 → PostgREST. No realtime/storage/functions/
+# analytics/vector — add the official services later if ever needed.
+#
+# All config comes from ~/.config/cheese/supabase.env (see config/supabase.env.template).
+
+services:
+  # ── Postgres: the identity + application store (auth.users, profiles, RLS) ───
+  # supabase/postgres ships the anon/authenticated/service_role roles + auth
+  # bootstrap that GoTrue and PostgREST depend on — don't swap for plain postgres.
+  db:
+    image: ${SUPABASE_DB_IMAGE}
+    container_name: supabase-db
+    environment:
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: postgres
+      JWT_SECRET: ${JWT_SECRET}
+      JWT_EXP: ${JWT_EXPIRY:-3600}
+    volumes:
+      - supabase-db-data:/var/lib/postgresql/data
+    networks:
+      cheese-network:
+        aliases: [supabase-db]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 30s
+    restart: unless-stopped
+
+  # ── GoTrue: email/password sign-up & sign-in, issues HS256 JWTs ──────────────
+  auth:
+    image: ${SUPABASE_AUTH_IMAGE}
+    container_name: supabase-auth
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      GOTRUE_API_HOST: 0.0.0.0
+      GOTRUE_API_PORT: "9999"
+      API_EXTERNAL_URL: ${SUPABASE_PUBLIC_URL}
+      GOTRUE_DB_DRIVER: postgres
+      # Connect as the superuser so GoTrue can run its own auth-schema migrations
+      # without depending on per-role passwords matching across images.
+      GOTRUE_DB_DATABASE_URL: postgres://postgres:${POSTGRES_PASSWORD}@supabase-db:5432/postgres
+      GOTRUE_SITE_URL: ${SUPABASE_PUBLIC_URL}
+      GOTRUE_URI_ALLOW_LIST: "*"
+      # JWTs: shared secret + the issuer/audience the orchestrator & PostgREST expect.
+      GOTRUE_JWT_SECRET: ${JWT_SECRET}
+      GOTRUE_JWT_EXP: ${JWT_EXPIRY:-3600}
+      GOTRUE_JWT_AUD: authenticated
+      GOTRUE_JWT_DEFAULT_GROUP_NAME: authenticated
+      GOTRUE_JWT_ISSUER: ${SUPABASE_PUBLIC_URL}/auth/v1
+      # Email signup on; the allowed-domain check is enforced by a DB trigger
+      # (config/supabase/sql/02-onprem-overlay.sql), not GoTrue, so it covers
+      # every signup path. Autoconfirm because on-prem usually has no SMTP.
+      GOTRUE_DISABLE_SIGNUP: ${GOTRUE_DISABLE_SIGNUP:-false}
+      GOTRUE_EXTERNAL_EMAIL_ENABLED: "true"
+      GOTRUE_MAILER_AUTOCONFIRM: ${GOTRUE_MAILER_AUTOCONFIRM:-true}
+    networks:
+      cheese-network:
+        aliases: [supabase-auth]
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:9999/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+    restart: unless-stopped
+
+  # ── PostgREST: the REST API the browser writes per-user rows through ─────────
+  # Validates the user's JWT with JWT_SECRET and switches to the JWT's `role`, so
+  # the RLS policies (auth.uid() = user_id) isolate each user's data.
+  rest:
+    image: ${SUPABASE_REST_IMAGE}
+    container_name: supabase-rest
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      PGRST_DB_URI: postgres://authenticator:${POSTGRES_PASSWORD}@supabase-db:5432/postgres
+      PGRST_DB_SCHEMAS: public
+      PGRST_DB_ANON_ROLE: anon
+      PGRST_JWT_SECRET: ${JWT_SECRET}
+      PGRST_DB_USE_LEGACY_GUCS: "false"
+      PGRST_APP_SETTINGS_JWT_SECRET: ${JWT_SECRET}
+    networks:
+      cheese-network:
+        aliases: [supabase-rest]
+    restart: unless-stopped
+
+  # ── postgres-meta + Studio: the admin dashboard (manage/inspect users) ───────
+  meta:
+    image: ${SUPABASE_META_IMAGE}
+    container_name: supabase-meta
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      PG_META_PORT: "8080"
+      PG_META_DB_HOST: supabase-db
+      PG_META_DB_PORT: "5432"
+      PG_META_DB_NAME: postgres
+      PG_META_DB_USER: postgres
+      PG_META_DB_PASSWORD: ${POSTGRES_PASSWORD}
+    networks:
+      cheese-network:
+        aliases: [supabase-meta]
+    restart: unless-stopped
+
+  studio:
+    image: ${SUPABASE_STUDIO_IMAGE}
+    container_name: supabase-studio
+    depends_on:
+      - meta
+    environment:
+      STUDIO_PG_META_URL: http://supabase-meta:8080
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      DEFAULT_ORGANIZATION_NAME: CHEESE
+      DEFAULT_PROJECT_NAME: cheese-onprem
+      SUPABASE_URL: http://supabase-gateway:8000
+      SUPABASE_PUBLIC_URL: ${SUPABASE_PUBLIC_URL}
+      SUPABASE_ANON_KEY: ${ANON_KEY}
+      SUPABASE_SERVICE_KEY: ${SERVICE_ROLE_KEY}
+      AUTH_JWT_SECRET: ${JWT_SECRET}
+    networks:
+      cheese-network:
+        aliases: [supabase-studio]
+    restart: unless-stopped
+
+  # ── Gateway: single public origin → GoTrue + PostgREST; Studio behind basic auth
+  gateway:
+    image: ${SUPABASE_GATEWAY_IMAGE}
+    container_name: supabase-gateway
+    depends_on:
+      - auth
+      - rest
+      - studio
+    volumes:
+      - ${HOME}/.config/cheese/supabase/gateway.conf:/etc/nginx/conf.d/default.conf:ro
+      - ${HOME}/.config/cheese/supabase/gateway.htpasswd:/etc/nginx/.htpasswd:ro
+    ports:
+      # Bind the controlled interface like the rest of the stack (least-privilege
+      # default: loopback). With the nginx SSO perimeter (`NGINX=true`), browsers
+      # reach Supabase via https://<host>/supabase/ through nginx over
+      # cheese-network — this host port then only serves on-box access (Studio,
+      # debugging). Set BIND_ADDR to a NIC only if browsers must hit the gateway
+      # directly without the perimeter.
+      - "${BIND_ADDR:-127.0.0.1}:${SUPABASE_GATEWAY_PORT:-8000}:8000"
+    networks:
+      cheese-network:
+        aliases: [supabase-gateway]
+    restart: unless-stopped
+
+volumes:
+  supabase-db-data:
+
+networks:
+  cheese-network:
+    name: cheese-network
+    external: true

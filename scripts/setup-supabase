@@ -1,0 +1,183 @@
+#!/bin/bash
+# One-shot: pull + run a slim self-hosted Supabase, load the CHEESE schema
+# (accounts + per-user spaces via RLS), restrict signup to approved email
+# domains, and wire the main stack to use it (ENABLE_AUTH=true). Idempotent:
+# re-running keeps existing secrets and just re-applies config/schema.
+#
+# Usage: cheese setup-supabase
+
+set -e
+source "$(dirname "$(readlink -f "$0")")/_supabase-common"
+
+CONF="${HOME}/.config/cheese/cheese-env-file.conf"
+TEMPLATE="${REPO_FOLDER}/config/supabase.env.template"
+SQL_SRC="${REPO_FOLDER}/config/supabase/sql"
+
+mkdir -p "$SUPABASE_CONFIG_DIR"
+
+# ── 1. supabase.env: create from template on first run, then fill secrets ─────
+if [ ! -f "$SUPABASE_ENV_FILE" ]; then
+  cp "$TEMPLATE" "$SUPABASE_ENV_FILE"
+  echo "Created $SUPABASE_ENV_FILE from template."
+
+  # Default the browser-facing URL. With the nginx SSO perimeter (NGINX=true),
+  # browsers reach Supabase through nginx at https://<host>/supabase — the
+  # gateway's own host port is loopback-bound and never exposed. Without the
+  # perimeter, fall back to the direct gateway origin (on-box/localhost testing).
+  ip="$(grep -E '^IP=' "$CONF" 2>/dev/null | head -1 | cut -d= -f2-)"; ip="${ip:-localhost}"
+  nginx_on="$(grep -E '^NGINX=' "$CONF" 2>/dev/null | head -1 | cut -d= -f2-)"
+  gwport="$(grep -E '^SUPABASE_GATEWAY_PORT=' "$SUPABASE_ENV_FILE" | head -1 | cut -d= -f2-)"; gwport="${gwport:-8000}"
+  if [ "$nginx_on" = "true" ]; then
+    default_pub_url="https://${ip}/supabase"
+  else
+    default_pub_url="http://${ip}:${gwport}"
+  fi
+  python3 - "$SUPABASE_ENV_FILE" "$default_pub_url" <<'PY'
+import sys
+f, url = sys.argv[1], sys.argv[2]
+s = open(f).read().replace("SUPABASE_PUBLIC_URL=__GENERATED__", f"SUPABASE_PUBLIC_URL={url}")
+open(f, "w").write(s)
+PY
+  echo
+  echo "  ► Edit $SUPABASE_ENV_FILE now and set CHEESE_AUTH_ALLOWED_DOMAINS"
+  echo "    (comma-separated email domains allowed to register), and confirm"
+  echo "    SUPABASE_PUBLIC_URL is reachable from users' browsers."
+  read -rp "  Press ENTER to open it in nano (or Ctrl-C to edit manually later)..." _ || true
+  ${EDITOR:-nano} "$SUPABASE_ENV_FILE"
+fi
+
+# Fill any __GENERATED__ secret placeholders (kept stable across re-runs).
+fill_secret() {  # fill_secret KEY VALUE
+  python3 - "$SUPABASE_ENV_FILE" "$1" "$2" <<'PY'
+import sys
+f, key, val = sys.argv[1], sys.argv[2], sys.argv[3]
+out = []
+for line in open(f):
+    if line.startswith(f"{key}=") and line.rstrip("\n").endswith("__GENERATED__"):
+        out.append(f"{key}={val}\n")
+    else:
+        out.append(line)
+open(f, "w").write("".join(out))
+PY
+}
+
+current="$(sb_env JWT_SECRET)"
+if [ "$current" = "__GENERATED__" ]; then
+  jwt_secret="$(gen_secret)$(gen_secret)"   # ~64 chars, well over the 32 min
+  fill_secret JWT_SECRET "$jwt_secret"
+else
+  jwt_secret="$current"
+fi
+
+[ "$(sb_env POSTGRES_PASSWORD)" = "__GENERATED__" ] && fill_secret POSTGRES_PASSWORD "$(gen_secret)"
+[ "$(sb_env DASHBOARD_PASSWORD)" = "__GENERATED__" ] && fill_secret DASHBOARD_PASSWORD "$(gen_secret)"
+# anon/service keys are derived from JWT_SECRET, so (re)generate whenever they're placeholders.
+[ "$(sb_env ANON_KEY)" = "__GENERATED__" ]         && fill_secret ANON_KEY "$(gen_jwt "$jwt_secret" anon)"
+[ "$(sb_env SERVICE_ROLE_KEY)" = "__GENERATED__" ] && fill_secret SERVICE_ROLE_KEY "$(gen_jwt "$jwt_secret" service_role)"
+
+# ── 2. Render gateway config + Studio basic-auth file ─────────────────────────
+cp "${REPO_FOLDER}/config/supabase/gateway.conf.template" "${SUPABASE_CONFIG_DIR}/gateway.conf"
+dash_user="$(sb_env DASHBOARD_USERNAME)"; dash_pw="$(sb_env DASHBOARD_PASSWORD)"
+printf '%s:%s\n' "$dash_user" "$(openssl passwd -apr1 "$dash_pw")" > "${SUPABASE_CONFIG_DIR}/gateway.htpasswd"
+
+# ── 3. Pull + start the Supabase stack ────────────────────────────────────────
+echo "Pulling Supabase images (this can take a while the first time)..."
+supabase_compose pull
+echo "Starting Supabase..."
+clear_stray_cheese_containers
+supabase_compose up -d
+
+# ── 4. Apply roles → CHEESE schema → on-prem overlay ──────────────────────────
+wait_db_ready
+
+echo "Applying role bootstrap..."
+pgpw="$(sb_env POSTGRES_PASSWORD)"
+sed "s/__POSTGRES_PASSWORD__/${pgpw}/g" "${SQL_SRC}/00-roles.sql.template" | psql_db
+
+wait_auth_ready
+
+echo "Applying CHEESE schema (idempotent: ignores 'already exists' on re-run)..."
+# The base schema isn't guarded with IF NOT EXISTS; on a re-run it will no-op
+# with 'already exists' notices, which are harmless. Use ON_ERROR_STOP off here.
+docker exec -i -e PGPASSWORD="$pgpw" supabase-db \
+  psql -U postgres -d postgres < "${SQL_SRC}/01-cheese-schema.sql" || true
+
+echo "Applying on-prem overlay (premium default + domain restriction)..."
+# Build a SQL array literal from CHEESE_AUTH_ALLOWED_DOMAINS.
+domains_sql="$(python3 - "$(sb_env CHEESE_AUTH_ALLOWED_DOMAINS)" <<'PY'
+import sys
+doms = [d.strip().lower().lstrip("@") for d in sys.argv[1].split(",") if d.strip()]
+if not doms:
+    sys.stderr.write("CHEESE_AUTH_ALLOWED_DOMAINS is empty — refusing to allow all domains.\n"); sys.exit(1)
+print("ARRAY[" + ",".join("'" + d.replace("'", "''") + "'" for d in doms) + "]")
+PY
+)"
+sed "s/__ALLOWED_DOMAINS_SQL__/${domains_sql}/g" "${SQL_SRC}/02-onprem-overlay.sql.template" | psql_db
+
+# PostgREST connected before the roles/schema existed — restart so it picks up
+# the authenticator role and reloads its schema cache.
+echo "Restarting PostgREST to load the schema..."
+supabase_compose restart rest >/dev/null
+
+# ── 5. Wire the main CHEESE stack to use this Supabase ────────────────────────
+pub_url="$(sb_env SUPABASE_PUBLIC_URL)"
+anon="$(sb_env ANON_KEY)"; service="$(sb_env SERVICE_ROLE_KEY)"
+
+# Select the auth UI image variant. The UI's feature flags are inlined at build
+# time, so accounts need the auth-enabled image (published per channel as
+# <channel>-auth, e.g. develop-auth / latest-auth). Pin the UI to that variant via
+# CHEESE_UI_IMAGE_TAG (the compose ui image and `cheese update-images` both honor
+# it); the rest of the stack stays on the plain channel tag. Derive the channel the
+# same way _compose-env does: an explicit CHEESE_IMAGE_TAG wins, else main→latest,
+# any other branch→develop, non-git→latest.
+ui_channel="${CHEESE_IMAGE_TAG:-}"
+if [ -z "$ui_channel" ]; then
+  _b="$(git -C "${REPO_FOLDER:-.}" rev-parse --abbrev-ref HEAD 2>/dev/null || true)"
+  case "$_b" in main|"") ui_channel="latest" ;; *) ui_channel="develop" ;; esac
+fi
+ui_auth_tag="${ui_channel}-auth"
+
+python3 - "$CONF" \
+  "ENABLE_AUTH=true" \
+  "ENABLE_SUPABASE=true" \
+  "ENABLE_STRIPE=false" \
+  "ENABLE_TRACKING=true" \
+  "CHEESE_UI_IMAGE_TAG=${ui_auth_tag}" \
+  "SUPABASE_URL=http://supabase-gateway:8000" \
+  "SUPABASE_PUBLIC_URL=${pub_url}" \
+  "SUPABASE_ANON_KEY=${anon}" \
+  "SUPABASE_SERVICE_ROLE_KEY=${service}" \
+  "SUPABASE_JWT_ISSUER=${pub_url}/auth/v1" <<'PY'
+import sys
+conf = sys.argv[1]; kvs = [a.split("=", 1) for a in sys.argv[2:]]
+lines = open(conf).read().splitlines(keepends=True) if __import__("os").path.exists(conf) else []
+def upsert(lines, key, val):
+    out, done = [], False
+    for ln in lines:
+        stripped = ln.lstrip("#").strip()
+        if stripped.startswith(key + "=") and not done:
+            out.append(f"{key}={val}\n"); done = True
+        else:
+            out.append(ln)
+    if not done:
+        if out and not out[-1].endswith("\n"): out[-1] += "\n"
+        out.append(f"{key}={val}\n")
+    return out
+for k, v in kvs:
+    lines = upsert(lines, k, v)
+open(conf, "w").write("".join(lines))
+PY
+
+echo
+echo "✅ Supabase is up and the CHEESE stack is wired for accounts."
+echo "   Studio (admin):   ${pub_url}/   (login: ${dash_user} / value in supabase.env)"
+echo "   Allowed signup domains: $(sb_env CHEESE_AUTH_ALLOWED_DOMAINS)"
+echo
+echo "   Pull the auth UI image variant and restart so the stack picks up accounts:"
+echo "       cheese update-images        # pulls cheese-search-ui:${ui_auth_tag}"
+echo "       cheese stop && cheese start"
+echo
+echo "   NOTE: the login UI is inlined at build time, so accounts need the"
+echo "   auth-enabled image — now selected automatically (CHEESE_UI_IMAGE_TAG=${ui_auth_tag})."
+echo "   The browser gets the self-hosted Supabase URL + anon key at runtime from"
+echo "   SUPABASE_PUBLIC_URL/SUPABASE_ANON_KEY (see docs/supabase-auth-setup.md)."
