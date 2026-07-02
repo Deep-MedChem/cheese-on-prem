@@ -29,6 +29,9 @@ http {
   # Self-hosted Supabase gateway (accounts; started by `cheese setup-supabase`).
   # Reached only over cheese-network — its host port stays loopback-bound, so the
   # perimeter below is the ONLY off-box path to Supabase.
+  # KEEP IN SYNC: this upstream and the `location /supabase/` block are
+  # duplicated verbatim in nginx-okta.conf.template (nginx has no includes here —
+  # the conf is mounted as one file). Change both together.
   upstream supabase {
     server supabase-gateway:8000;
   }

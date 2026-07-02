@@ -31,6 +31,12 @@ CHEESE_DB_PASSWORD=XXX
 #   specific NIC, or 0.0.0.0 for all interfaces, ONLY if users must reach the stack
 #   directly without the nginx/oauth2 SSO proxy (NGINX=true) in front of it.
 # BIND_ADDR=127.0.0.1
+#
+# SUPABASE_ENABLED — off-switch for the optional accounts stack (default true).
+#   `cheese start` auto-starts Supabase whenever ~/.config/cheese/supabase.env
+#   exists; set false to skip that while keeping the accounts config for later.
+#   Also run `cheese stop-supabase` once to stop an already-running instance.
+# SUPABASE_ENABLED=false
 
 
 # Images pulled by `cheese update-images`. Drop entries you don't need.

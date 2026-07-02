@@ -14,6 +14,15 @@
 #
 # All config comes from ~/.config/cheese/supabase.env (see config/supabase.env.template).
 
+# Same drop-everything baseline as the main stack (docker-compose.yml): no
+# capabilities, no privilege escalation. Services that genuinely need a few
+# caps add them back explicitly below (db for postgres init, gateway for nginx
+# worker setup) — everything else runs with none.
+x-hardening: &hardening
+  cap_drop: ["ALL"]
+  security_opt:
+    - "no-new-privileges:true"
+
 services:
   # ── Postgres: the identity + application store (auth.users, profiles, RLS) ───
   # supabase/postgres ships the anon/authenticated/service_role roles + auth
@@ -21,6 +30,10 @@ services:
   db:
     image: ${SUPABASE_DB_IMAGE}
     container_name: supabase-db
+    <<: *hardening
+    # postgres's entrypoint inits/chowns the data dir and drops to the postgres
+    # user — the minimal cap set for that, nothing else.
+    cap_add: ["CHOWN", "DAC_OVERRIDE", "FOWNER", "SETGID", "SETUID"]
     environment:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
       POSTGRES_DB: postgres
@@ -43,6 +56,7 @@ services:
   auth:
     image: ${SUPABASE_AUTH_IMAGE}
     container_name: supabase-auth
+    <<: *hardening
     depends_on:
       db:
         condition: service_healthy
@@ -85,6 +99,7 @@ services:
   rest:
     image: ${SUPABASE_REST_IMAGE}
     container_name: supabase-rest
+    <<: *hardening
     depends_on:
       db:
         condition: service_healthy
@@ -104,6 +119,7 @@ services:
   meta:
     image: ${SUPABASE_META_IMAGE}
     container_name: supabase-meta
+    <<: *hardening
     depends_on:
       db:
         condition: service_healthy
@@ -122,6 +138,7 @@ services:
   studio:
     image: ${SUPABASE_STUDIO_IMAGE}
     container_name: supabase-studio
+    <<: *hardening
     depends_on:
       - meta
     environment:
@@ -143,6 +160,11 @@ services:
   gateway:
     image: ${SUPABASE_GATEWAY_IMAGE}
     container_name: supabase-gateway
+    <<: *hardening
+    # nginx:alpine master needs these to set up and drop its workers to the
+    # nginx user (same set as the main stack's nginx, minus NET_BIND_SERVICE —
+    # the gateway listens on 8000, not 80/443).
+    cap_add: ["CHOWN", "SETGID", "SETUID"]
     depends_on:
       - auth
       - rest
@@ -157,7 +179,12 @@ services:
       # cheese-network — this host port then only serves on-box access (Studio,
       # debugging). Set BIND_ADDR to a NIC only if browsers must hit the gateway
       # directly without the perimeter.
-      - "${BIND_ADDR:-127.0.0.1}:${SUPABASE_GATEWAY_PORT:-8000}:8000"
+      # Host default is 8010, NOT 8000: the jobs file-server publishes 8000 on
+      # the same interface and Supabase starts first, so an 8000/8000 default
+      # would silently push the file-server off its port (start-supabase also
+      # preflights this). The CONTAINER port stays 8000 (in-network callers use
+      # supabase-gateway:8000).
+      - "${BIND_ADDR:-127.0.0.1}:${SUPABASE_GATEWAY_PORT:-8010}:8000"
     networks:
       cheese-network:
         aliases: [supabase-gateway]

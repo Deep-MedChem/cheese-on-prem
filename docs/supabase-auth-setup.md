@@ -78,7 +78,7 @@ cheese stop && cheese start
 docker compose -p cheese-supabase ps
 
 # Gateway listens on loopback only (no new off-box exposure):
-ss -ltn 'sport = :8000'
+ss -ltn 'sport = :8010'
 
 # Registration policy: sign up with an email outside your allow-list → rejected.
 # Isolation: create two accounts, do something in each → each sees only its
@@ -97,7 +97,7 @@ two values in the config, both managed by `setup-supabase`:
 | Variable | Used by | Value |
 |---|---|---|
 | `SUPABASE_URL` | CHEESE services, in-network | `http://supabase-gateway:8000` |
-| `SUPABASE_PUBLIC_URL` | users' browsers | `https://<your-host>/supabase` with SSO, else `http://<host>:8000` |
+| `SUPABASE_PUBLIC_URL` | users' browsers | `https://<your-host>/supabase` with SSO, else `http://<host>:8010` |
 
 The UI hands the public URL + anon key to the browser at runtime, so the same
 UI image works if you later change the public origin (just re-run
@@ -130,10 +130,11 @@ docker logs supabase-auth --tail 50           # signup/login debugging
   everyone out (they just log in again).
 - **Reset a user's password:** from Studio (no SMTP → no self-service reset;
   add SMTP env to `supabase-auth` later if you want it).
-- **Disable accounts:** move `supabase.env` aside (e.g.
-  `mv supabase.env supabase.env.off`) and restart — `cheese start` only starts
-  Supabase when that file exists. Move it back to re-enable; users and data are
-  untouched.
+- **Disable accounts:** set `SUPABASE_ENABLED=false` in
+  `~/.config/cheese/cheese-env-file.conf` and run `cheese stop-supabase` —
+  `cheese start` then skips Supabase while your accounts config stays in place.
+  Set it back to `true` (or remove the line) to re-enable. Deleting/moving
+  `supabase.env` also works; users and data are untouched either way.
 - **Backup:** snapshot the `cheese-supabase_supabase-db-data` volume (standard
   `docker run --rm -v ...:/data ... tar` or your volume-backup tooling).
 

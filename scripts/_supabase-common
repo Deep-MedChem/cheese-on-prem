@@ -86,11 +86,15 @@ wait_db_ready() {
 }
 
 # Block until GoTrue has finished its own auth-schema migrations (so the
-# on-prem overlay's trigger on auth.users can attach).
+# on-prem overlay's trigger on auth.users can attach). Pass PGPASSWORD like
+# every other psql call here — if the image's pg_hba ever requires password
+# auth on this path, an unauthenticated probe would fail silently for 60
+# retries and time out with a misleading "auth.users did not appear".
 wait_auth_ready() {
   echo "Waiting for supabase-auth (GoTrue) to initialize the auth schema..."
+  local pw; pw="$(sb_env POSTGRES_PASSWORD)"
   for _ in $(seq 1 60); do
-    if docker exec supabase-db psql -U postgres -d postgres -tAc \
+    if docker exec -e PGPASSWORD="$pw" supabase-db psql -U postgres -d postgres -tAc \
          "SELECT to_regclass('auth.users') IS NOT NULL" 2>/dev/null | grep -q t; then
       echo "auth schema is ready."
       return 0

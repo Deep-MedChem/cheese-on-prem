@@ -11,7 +11,21 @@ if [ ! -f "$SUPABASE_ENV_FILE" ]; then
   exit 1
 fi
 
+# Preflight the gateway's host port. Unlike the main stack we do NOT auto-bump
+# to the next free port: SUPABASE_PUBLIC_URL (baked into supabase.env and handed
+# to browsers) can embed this port, so silently relocating the gateway would
+# break logins in a way that's miserable to debug. Fail loudly instead.
+gwport="$(sb_env SUPABASE_GATEWAY_PORT)"; gwport="${gwport:-8010}"
+if ! docker ps --filter "name=^supabase-gateway$" --format '{{.Names}}' | grep -q .; then
+  if port_in_use "$gwport"; then
+    echo "Port ${gwport} is already in use, so the Supabase gateway cannot start." >&2
+    echo "Free it, or change SUPABASE_GATEWAY_PORT in ${SUPABASE_ENV_FILE}" >&2
+    echo "(and update SUPABASE_PUBLIC_URL there if it embeds the port), then retry." >&2
+    exit 1
+  fi
+fi
+
 echo "Starting Supabase..."
-clear_stray_cheese_containers
+clear_stray_cheese_containers "$SUPABASE_COMPOSE_FILE" cheese-supabase
 supabase_compose up -d
-echo "Supabase is up. Gateway/Studio on :$(sb_env SUPABASE_GATEWAY_PORT)."
+echo "Supabase is up. Gateway/Studio on :${gwport}."
