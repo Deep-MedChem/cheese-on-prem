@@ -4,6 +4,8 @@ env/*.build.env
 *.local
 charts/*/values-secrets.yaml
 charts/*/values-onprem.yaml
+kind/cluster.local.yaml
+kind-up.local.sh
 !*.example
 
 # License files — keyed to the host hardware, never commit.

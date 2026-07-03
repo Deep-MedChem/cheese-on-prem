@@ -2,7 +2,13 @@
 {{- /*
 Renders the cheese_database config.yaml from .Values.database.config + .databases.
 Consumed by cheese_database/cheese_core.py at /data/{CONFIG_FILE}.
+
+Each DB's on-disk location = <databasesRoot>/<output_directory>. Set the root
+ONCE in database.databasesRoot; per-DB output_directory is then just the folder
+name. An absolute output_directory (leading "/") ignores the root, and an empty
+root falls back to output_directory verbatim (back-compat).
 */ -}}
+{{- $dbRoot := trimSuffix "/" (default "" .Values.database.databasesRoot) -}}
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -22,7 +28,9 @@ data:
     OUTPUT_DIRECTORIES:
       {{- range $name, $db := .Values.database.databases }}
       {{- if $db.enabled }}
-      {{ $name }}: {{ $db.output_directory | quote }}
+      {{- $dir := $db.output_directory }}
+      {{- if and $dbRoot (not (hasPrefix "/" $dir)) }}{{ $dir = printf "%s/%s" $dbRoot $dir }}{{ end }}
+      {{ $name }}: {{ $dir | quote }}
       {{- end }}
       {{- end }}
     INDEX_TYPES:

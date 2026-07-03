@@ -52,6 +52,10 @@ spec:
           {{- if $role.fileServer }}
           {{- $served := printf "%s/%s" (trimSuffix "/" $root.Values.data.mountPath) (trimPrefix "/" $db.env.jobs_data_path) }}
           command: ["bash", "-c", {{ printf "mkdir -p %s && exec python3 -m http.server %v --directory %s" $served $role.port $served | quote }}]
+          {{- else if $role.mainFn }}
+          {{- /* Cythonized modules with no __main__ code object (executors) must be
+                 launched via their main() entrypoint, not `python -m`. */}}
+          command: ["python", "-c", {{ printf "from %s import main; main()" $role.command | quote }}]
           {{- else }}
           command: ["python", "-um", {{ $role.command | quote }}]
           {{- end }}
@@ -78,6 +82,12 @@ spec:
               value: {{ $db.env.jobs_file_server_url | quote }}
             - name: CHEESE_LICENSE_FILE
               value: {{ $db.secret.cheeseLicenseFile | quote }}
+            {{- /* Visualization is a separate offline product (custom-DB setup /
+                   indexing / clustering), not part of the serving cluster. The
+                   engine loads viz models unless VISUALIZATION is explicitly
+                   "false", so pin it off here — not a tunable role knob. */}}
+            - name: VISUALIZATION
+              value: "false"
             - name: PRODUCTION
               valueFrom:
                 secretKeyRef:
