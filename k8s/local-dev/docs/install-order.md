@@ -14,8 +14,9 @@ skip ahead. For data placement on the PVC, see
 [`pvc-data-runbook.md`](../../docs/pvc-data-runbook.md).
 
 All paths are relative to the `k8s/` directory. Run every command from inside
-it unless noted otherwise; the kind/test tooling (Makefile, kind config, build
-scripts) lives in `local-dev/`, hence the `make -C local-dev` form.
+it unless noted otherwise; the kind/test tooling (kind config, build scripts)
+lives in `local-dev/`, hence the `local-dev/scripts/…` form. The scripts are
+cwd-independent.
 
 There is one Helm chart (`charts/cheese`); a single `helm install` brings up
 the whole stack. To skip a component, set its `<component>.enabled: false` in
@@ -37,7 +38,7 @@ calls that hit SynthonGPT are affected.
 
 ```bash
 kind create cluster --config local-dev/kind/cluster.yaml
-make -C local-dev install-ingress-controller
+local-dev/scripts/install-ingress-controller.sh
 ```
 
 This labels the kind node `ingress-ready=true`, installs ingress-nginx, and
@@ -101,11 +102,11 @@ cp local-dev/env/cheese-search-ui.build.env.example local-dev/env/cheese-search-
 $EDITOR local-dev/env/cheese-search-ui.build.env       # fill in SUPABASE_URL / SUPABASE_ANON_KEY
 
 # Build + load all four local:dev images:
-make -C local-dev build-source-images
-make -C local-dev load-images
+local-dev/scripts/build-source-images.sh
+local-dev/scripts/load-kind-images.sh
 ```
 
-`make -C local-dev build-source-images` calls `docker manifest inspect` against the ACR
+`build-source-images.sh` calls `docker manifest inspect` against the ACR
 base image before building orchestrator/database, since their
 `Dockerfile-on-prem` does `FROM cheese.azurecr.io/...:base`. If you haven't
 run `docker login cheese.azurecr.io` it bails early with a clear error
@@ -117,8 +118,8 @@ auth — the preflight only runs when orchestrator or database is in the
 Subset a single component when iterating:
 
 ```bash
-BUILD="cheese-orchestrator" make -C local-dev build-source-images
-LOAD="cheese-orchestrator-local" make -C local-dev load-images
+BUILD="cheese-orchestrator" local-dev/scripts/build-source-images.sh
+LOAD="cheese-orchestrator-local" local-dev/scripts/load-kind-images.sh
 ```
 
 The kubelet on kind cannot reach your local docker daemon — every image
@@ -201,8 +202,8 @@ Rebuild + reload the affected image, then bounce the deployment directly —
 `helm upgrade` is only needed for value changes.
 
 ```bash
-BUILD="cheese-orchestrator" make -C local-dev build-source-images
-LOAD="cheese-orchestrator-local" make -C local-dev load-images
+BUILD="cheese-orchestrator" local-dev/scripts/build-source-images.sh
+LOAD="cheese-orchestrator-local" local-dev/scripts/load-kind-images.sh
 kubectl -n cheese rollout restart deploy/cheese-orchestrator
 ```
 

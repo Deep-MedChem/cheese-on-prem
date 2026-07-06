@@ -5,8 +5,11 @@ on a developer laptop running kind. It is a *record of what worked*, not a
 template — for the canonical playbook see [`install-order.md`](./install-order.md)
 and for PVC contents [`pvc-data-runbook.md`](../../docs/pvc-data-runbook.md).
 
-> Historical note: paths in this log predate the repo reorg — the Makefile,
-> `scripts/` and `kind/` referenced below now live under `k8s/local-dev/`.
+> Historical note: paths in this log predate the repo reorg — `scripts/` and
+> `kind/` referenced below now live under `k8s/local-dev/`, and the Makefile
+> has since been removed (`make install-ingress-controller` is now
+> `local-dev/scripts/install-ingress-controller.sh`; the other targets were
+> wrappers around the same-named scripts).
 
 The session is annotated with the gotchas we hit so the next person doesn't
 have to re-discover them.

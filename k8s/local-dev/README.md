@@ -12,7 +12,7 @@ development, source-image iteration, and pre-release smoke tests.
 
 | Path | What it is |
 |---|---|
-| `Makefile` | `install-ingress-controller`, `build-source-images`, `load-images` |
+| `scripts/install-ingress-controller.sh` | label the kind node + install ingress-nginx + wait for rollout |
 | `scripts/build-source-images.sh` | rebuild `<svc>-local:dev` images from the upstream source repos |
 | `scripts/load-kind-images.sh` | sideload those images into the kind node (`kind load docker-image`) |
 | `kind/cluster.yaml` | single-node kind cluster, host ports 80/443 mapped to the ingress |
@@ -22,14 +22,15 @@ development, source-image iteration, and pre-release smoke tests.
 | `cheese-api-demo.ipynb` | notebook driving the search API for smoke tests |
 | `*.local.sh`, `kind/cluster.local.yaml` | machine-specific bring-up scripts — gitignored, never committed |
 
-All `make` / script invocations below run from **this directory**.
+All script invocations below run from **this directory** (the scripts
+themselves are cwd-independent).
 
 ## Quick start
 
 ```bash
 # 1. Cluster + ingress controller
 kind create cluster --config kind/cluster.yaml
-make install-ingress-controller
+./scripts/install-ingress-controller.sh
 
 # 2–4. Data staging, images, secrets, helm install — follow the main
 #      quick start in ../README.md (run its commands from k8s/).
@@ -49,12 +50,12 @@ directly.
 cp env/cheese-search-ui.build.env.example env/cheese-search-ui.build.env
 $EDITOR env/cheese-search-ui.build.env    # SUPABASE_URL / SUPABASE_ANON_KEY etc.
 
-make build-source-images                  # docker build from ../../../<repo>
-make load-images                          # kind cannot see your docker daemon — sideload
+./scripts/build-source-images.sh          # docker build from ../../../<repo>
+./scripts/load-kind-images.sh             # kind cannot see your docker daemon — sideload
 
 # Iterate on a single component:
-BUILD="cheese-orchestrator" make build-source-images
-LOAD="cheese-orchestrator-local" make load-images
+BUILD="cheese-orchestrator" ./scripts/build-source-images.sh
+LOAD="cheese-orchestrator-local" ./scripts/load-kind-images.sh
 kubectl -n cheese rollout restart deploy/cheese-orchestrator
 ```
 
