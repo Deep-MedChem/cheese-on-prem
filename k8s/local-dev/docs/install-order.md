@@ -1,18 +1,21 @@
-# Playbook — install order
+# Playbook — install order (local kind test setup)
 
 > **⚠️ Updated flow (chart v0.3.0).** The install is now driven by a single
 > `values.yaml` + `deployment.target` (no `values-onprem.yaml`/`values-headless.yaml`
 > overlays), and the chart now creates the PV/PVC itself (no manual
-> `kubectl apply -f manifests/base/persistent-volume*`). See **[../README.md](../README.md)**
+> `kubectl apply -f manifests/base/persistent-volume*`). See **[../../README.md](../../README.md)**
 > for the current quick-start and profiles; the data-staging and license steps
 > below remain accurate.
 
-End-to-end install of the on-prem prototype on a fresh kind cluster. Steps run
-top to bottom; do not skip ahead. For data placement on the PVC, see
-[`pvc-data-runbook.md`](./pvc-data-runbook.md).
+End-to-end install of the on-prem prototype on a fresh **local kind cluster**
+(the internal test setup — for a real deployment follow
+[../../README.md](../../README.md) instead). Steps run top to bottom; do not
+skip ahead. For data placement on the PVC, see
+[`pvc-data-runbook.md`](../../docs/pvc-data-runbook.md).
 
-All paths are relative to the `cheese-k8s/` directory. Run every command from
-inside it unless noted otherwise.
+All paths are relative to the `k8s/` directory. Run every command from inside
+it unless noted otherwise; the kind/test tooling (Makefile, kind config, build
+scripts) lives in `local-dev/`, hence the `make -C local-dev` form.
 
 There is one Helm chart (`charts/cheese`); a single `helm install` brings up
 the whole stack. To skip a component, set its `<component>.enabled: false` in
@@ -26,15 +29,15 @@ calls that hit SynthonGPT are affected.
 - `kind` ≥ 0.20
 - `kubectl` ≥ 1.28
 - `helm` ≥ 3.14 (also works on v4)
-- The four upstream repos cloned as siblings of `cheese-k8s/` — i.e. at
-  `../cheese-orchestrator`, `../cheese-database`, `../cheese-search-ui`,
-  `../synthongpt-prod` when viewed from inside `cheese-k8s/`.
+- The four upstream repos cloned as siblings of the `cheese-on-prem` checkout —
+  `cheese-orchestrator`, `cheese-database`, `cheese-search-ui`,
+  `synthongpt-prod` (override with `SOURCES_ROOT` if elsewhere).
 
 ## 1. Cluster + ingress controller
 
 ```bash
-kind create cluster --config kind/cluster.yaml
-make install-ingress-controller
+kind create cluster --config local-dev/kind/cluster.yaml
+make -C local-dev install-ingress-controller
 ```
 
 This labels the kind node `ingress-ready=true`, installs ingress-nginx, and
@@ -63,7 +66,7 @@ kubectl apply -f manifests/base/image-pull-secret.yaml
 ## 3. Stage data on the PVC
 
 Required before any data-plane pod starts. Follow
-[`pvc-data-runbook.md`](./pvc-data-runbook.md) sections 1–3:
+[`pvc-data-runbook.md`](../../docs/pvc-data-runbook.md) sections 1–3:
 
 - license file at `/data/cheese_license_file.json`
 - per-database directories under `/data/<db_name>/`
@@ -93,16 +96,16 @@ Alternative — rebuild from source. Flip `image.source: local` in
 # Only search-ui needs a build-env file — its Vite bundle bakes in the
 # Supabase URL/key and feature flags at build time. The three Python
 # backends have nothing tenant-specific to bake in; their docker build
-# paths are hardcoded in scripts/build-source-images.sh.
-cp env/cheese-search-ui.build.env.example env/cheese-search-ui.build.env
-$EDITOR env/cheese-search-ui.build.env       # fill in SUPABASE_URL / SUPABASE_ANON_KEY
+# paths are hardcoded in local-dev/scripts/build-source-images.sh.
+cp local-dev/env/cheese-search-ui.build.env.example local-dev/env/cheese-search-ui.build.env
+$EDITOR local-dev/env/cheese-search-ui.build.env       # fill in SUPABASE_URL / SUPABASE_ANON_KEY
 
 # Build + load all four local:dev images:
-make build-source-images
-make load-images
+make -C local-dev build-source-images
+make -C local-dev load-images
 ```
 
-`make build-source-images` calls `docker manifest inspect` against the ACR
+`make -C local-dev build-source-images` calls `docker manifest inspect` against the ACR
 base image before building orchestrator/database, since their
 `Dockerfile-on-prem` does `FROM cheese.azurecr.io/...:base`. If you haven't
 run `docker login cheese.azurecr.io` it bails early with a clear error
@@ -114,8 +117,8 @@ auth — the preflight only runs when orchestrator or database is in the
 Subset a single component when iterating:
 
 ```bash
-BUILD="cheese-orchestrator" make build-source-images
-LOAD="cheese-orchestrator-local" make load-images
+BUILD="cheese-orchestrator" make -C local-dev build-source-images
+LOAD="cheese-orchestrator-local" make -C local-dev load-images
 ```
 
 The kubelet on kind cannot reach your local docker daemon — every image
@@ -168,7 +171,7 @@ helm install cheese charts/cheese \
 ```
 
 The orchestrator stays reachable at `http://cheese-api.localtest.me`. See
-[`headless-variant.md`](./headless-variant.md) for the full diff, verification
+[`headless-variant.md`](../../docs/headless-variant.md) for the full diff, verification
 steps, and the "no ingress at all" option.
 
 ## 6. Verification
@@ -198,8 +201,8 @@ Rebuild + reload the affected image, then bounce the deployment directly —
 `helm upgrade` is only needed for value changes.
 
 ```bash
-BUILD="cheese-orchestrator" make build-source-images
-LOAD="cheese-orchestrator-local" make load-images
+BUILD="cheese-orchestrator" make -C local-dev build-source-images
+LOAD="cheese-orchestrator-local" make -C local-dev load-images
 kubectl -n cheese rollout restart deploy/cheese-orchestrator
 ```
 

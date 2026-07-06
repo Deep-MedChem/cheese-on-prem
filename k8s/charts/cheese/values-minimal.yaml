@@ -53,7 +53,7 @@ database:
     # Licensing mode. NOTE: on kind the licence is validated against the
     # kind-control-plane container's DMI (product_name="kind"), NOT this host, so
     # this licence will NOT validate. Regenerate a node licence (see
-    # k8s/docs/kind-bringup-log.md step 4) or set `production: "OUR_SECRET"`.
+    # k8s/local-dev/docs/kind-bringup-log.md step 4) or set `production: "OUR_SECRET"`.
     # NOTE: THIS WILL BE CHANGED IN THE NEAR FUTURE TO A PROPER SYSTEM!
     cheeseLicenseFile: "/home/katja/.config/cheese/cheese_license_file.json"
     production: ""

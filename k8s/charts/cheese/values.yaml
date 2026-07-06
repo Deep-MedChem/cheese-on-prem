@@ -415,7 +415,7 @@ searchUi:
 
   # Rendered into ConfigMap `cheese-search-ui-config`, consumed via envFrom.
   # Feature gates (ENABLE_AUTH, etc.) are baked into the Vite bundle at build
-  # time — see cheese-k8s/env/build.env.example — so they live outside the chart.
+  # time — see k8s/local-dev/env/cheese-search-ui.build.env.example — so they live outside the chart.
   config:
     LOCAL: "False"                         # "True" only for dev; production serving = "False"
     NODE_ENV: "production"

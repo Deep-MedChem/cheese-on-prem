@@ -3,7 +3,10 @@
 This is the log of the steps we ran end-to-end to bring up the `cheese` chart
 on a developer laptop running kind. It is a *record of what worked*, not a
 template — for the canonical playbook see [`install-order.md`](./install-order.md)
-and for PVC contents [`pvc-data-runbook.md`](./pvc-data-runbook.md).
+and for PVC contents [`pvc-data-runbook.md`](../../docs/pvc-data-runbook.md).
+
+> Historical note: paths in this log predate the repo reorg — the Makefile,
+> `scripts/` and `kind/` referenced below now live under `k8s/local-dev/`.
 
 The session is annotated with the gotchas we hit so the next person doesn't
 have to re-discover them.

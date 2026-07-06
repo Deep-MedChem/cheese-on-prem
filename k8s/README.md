@@ -41,41 +41,42 @@ accepts `secret.existingSecret: <name>`:
 - **Leave it empty** → the chart renders the Secret inline from your values
   (self-contained / local path). See `values-secrets.yaml.example`.
 
-## Quick start — local (kind)
+## Quick start
 
-Prerequisites: Docker, `kind` ≥ 0.20, `kubectl` ≥ 1.28, `helm` ≥ 3.14.
+Prerequisites: a Kubernetes cluster (≥ 1.28) with an ingress controller,
+`kubectl`, `helm` ≥ 3.14. All commands run from this `k8s/` directory.
+
+> **No cluster yet / just testing?** [`local-dev/`](local-dev/README.md) holds
+> the internal kind test harness (throwaway cluster config, source-image
+> build/sideload tooling). Nothing in it is needed for a real deployment.
 
 ```bash
-# 1. Cluster + ingress controller
-kind create cluster --config kind/cluster.yaml
-make install-ingress-controller
-
-# 2. Stage data on /data (license file, per-database dirs, SynthonGPT tree),
+# 1. Stage data on /data (license file, per-database dirs, SynthonGPT tree),
 #    all chowned 2112:0. The chart creates the PV + PVC for you — no manual
-#    kubectl apply. Layout + kind staging commands: docs/pvc-data-runbook.md.
+#    kubectl apply. Layout + staging commands: docs/pvc-data-runbook.md.
 
-# 3. Images.
-#    Default (image.source: acr) — apply the ACR pull secret; kubelet pulls
-#    cheese.azurecr.io/on-prem/<svc>/cheese-customer:latest at install:
+# 2. Images — apply the registry pull secret; kubelet pulls
+#    cheese.azurecr.io/on-prem/<svc>/cheese-customer:latest at install
+#    (image.source: acr, the default):
 cp manifests/base/image-pull-secret.example.yaml manifests/base/image-pull-secret.yaml
-$EDITOR manifests/base/image-pull-secret.yaml      # fill in real ACR creds
+$EDITOR manifests/base/image-pull-secret.yaml      # fill in real registry creds
 kubectl create namespace cheese
 kubectl apply -f manifests/base/image-pull-secret.yaml
-#    Alternative — image.source: local for components you rebuild from source:
-#      make build-source-images && make load-images
 
-# 4. Fill in secrets and install with the local profile
+# 3. Fill in secrets and install with your profile
 cp charts/cheese/values-secrets.yaml.example charts/cheese/values-secrets.yaml
 $EDITOR charts/cheese/values-secrets.yaml
 helm install cheese charts/cheese -n cheese --create-namespace \
   -f charts/cheese/values-secrets.yaml \
   -f local-profile.yaml          # see "Profiles" below (or use --set flags)
 
-# 5. Wait for rollouts (SynthonGPT loads checkpoints — give it ~10m)
+# 4. Wait for rollouts (SynthonGPT loads checkpoints — give it ~10m)
 kubectl -n cheese get pods
 ```
 
-UI → `http://cheese-ui.localtest.me`, orchestrator → `http://cheese-api.localtest.me`.
+With the local profile: UI → `http://cheese-ui.localtest.me`, orchestrator →
+`http://cheese-api.localtest.me` (both resolve to `127.0.0.1` — swap in your
+real hostnames via the ingress values for anything non-local).
 
 ## Profiles
 
@@ -140,25 +141,27 @@ You get `cheese-database` + `cheese-synthongpt` + `cheese-orchestrator` behind t
 
 ## Generate license
 
-The license is keyed to the host hardware running the database container — on kind
-that's the `kind-control-plane` container, so keygen runs as a pod:
+The license is keyed to the host hardware of the node running the database
+container, so keygen runs as a pod on that node:
 
 ```bash
 kubectl run -n cheese cheese-license-keygen --rm -it --restart=Never \
-  --image=cheese-database-local:dev --image-pull-policy=IfNotPresent \
+  --image=cheese.azurecr.io/on-prem/cheese-database/cheese-customer:latest \
+  --overrides='{"spec":{"imagePullSecrets":[{"name":"cheese-acr-pull"}]}}' \
   --command -- python -c 'from generate_license_ID import main; main()'
 ```
 
-Send the key to support, then drop the returned JSON onto `/data`:
+Send the key to support, then drop the returned JSON onto `/data` on the host:
 
 ```bash
-docker cp cheese_license_file.json kind-control-plane:/data/cheese_license_file.json
-docker exec kind-control-plane chown 2112:0 /data/cheese_license_file.json
+cp cheese_license_file.json /data/cheese_license_file.json
+chown 2112:0 /data/cheese_license_file.json
 ```
 
 Set `database.secret.cheeseLicenseFile` and `orchestrator.secret.cheeseLicenseFile`
-to that filename (they must match — one shared PVC). On a real node, drop the
-`docker exec`/`docker cp` prefixes.
+to that filename (they must match — one shared PVC). On kind the node is itself a
+container and fakes the hardware identity — see
+[`local-dev/README.md`](local-dev/README.md) for the extra steps.
 
 ## Verify the chart (no cluster)
 
@@ -175,8 +178,8 @@ helm template cheese charts/cheese --set orchestrator.secret.existingSecret=my-s
 ## Repo layout
 
 ```
-cheese-k8s/
-├── charts/cheese/
+k8s/
+├── charts/cheese/                  # ← the deliverable: everything a deployment needs
 │   ├── Chart.yaml
 │   ├── values.yaml                 # the one source of truth (all components + deployment.target)
 │   ├── values-secrets.yaml.example # inline secrets / existingSecret contract
@@ -187,11 +190,12 @@ cheese-k8s/
 │       ├── database-* orchestrator-* synthongpt-* search-ui-*
 │       ├── ketcher-* inference-* alignment-*
 │       └── supabase/   # db / auth / rest / meta / studio / gateway / sql-configmap / init-job
-├── docs/                           # install-order, pvc-data-runbook, architecture, kind-bringup-log
-├── env/cheese-search-ui.build.env.example   # Vite build args baked into the UI bundle
-├── kind/cluster.yaml
+├── docs/                           # pvc-data-runbook, architecture, headless-variant
 ├── manifests/base/                 # namespace.yaml, image-pull-secret.example.yaml
-└── scripts/  Makefile              # build-source-images, load-images, install-ingress-controller
+└── local-dev/                      # internal kind test harness — NOT needed to deploy
+    ├── Makefile  scripts/  kind/   # build-source-images, load-images, ingress-controller
+    ├── env/                        # UI source-build Vite args
+    └── docs/                       # install-order (kind playbook), kind-bringup-log
 ```
 
 ## Conventions
@@ -210,6 +214,6 @@ cheese-k8s/
 helm uninstall cheese -n cheese
 kubectl -n cheese delete pvc -l app.kubernetes.io/name=cheese
 kubectl delete pv cheese-data-pv
-docker exec kind-control-plane rm -rf /data    # destroys on-disk data (kind only)
-kind delete cluster
+# The data itself lives on the node at /data — remove it there only if you
+# really mean to destroy it. (kind clusters: see local-dev/README.md.)
 ```

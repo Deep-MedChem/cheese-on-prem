@@ -22,8 +22,11 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REPO_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
-PROJECT_ROOT="$(cd "${REPO_DIR}/.." && pwd)"
+LOCAL_DEV_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
+# Upstream source repos are expected as siblings of the cheese-on-prem checkout
+# (…/cheese-orchestrator, …/cheese-database, …/cheese-search-ui, …/synthongpt-prod).
+# Override with SOURCES_ROOT if yours live elsewhere.
+SOURCES_ROOT="${SOURCES_ROOT:-$(cd "${LOCAL_DEV_DIR}/../../.." && pwd)}"
 
 BUILD="${BUILD:-cheese-orchestrator cheese-database cheese-synthongpt cheese-search-ui}"
 
@@ -80,7 +83,7 @@ load_env() {
 }
 
 build_search_ui() (
-  load_env "${REPO_DIR}/env/cheese-search-ui.build.env"
+  load_env "${LOCAL_DEV_DIR}/env/cheese-search-ui.build.env"
 
   : "${IMAGE_NAME:=cheese-search-ui-local}"
   : "${IMAGE_TAG:=dev}"
@@ -102,7 +105,7 @@ build_search_ui() (
   echo "==> Building ${IMAGE_NAME}:${IMAGE_TAG}"
   docker build \
     -t "${IMAGE_NAME}:${IMAGE_TAG}" \
-    -f "${PROJECT_ROOT}/cheese-search-ui/Dockerfile" \
+    -f "${SOURCES_ROOT}/cheese-search-ui/Dockerfile" \
     --build-arg LOCAL="${LOCAL}" \
     --build-arg CDN_BASE_URL="${CDN_BASE_URL}" \
     --build-arg CDN_ENABLED="${CDN_ENABLED}" \
@@ -113,7 +116,7 @@ build_search_ui() (
     --build-arg ENABLE_TRACKING="${ENABLE_TRACKING}" \
     --build-arg ENABLE_STRIPE="${ENABLE_STRIPE}" \
     --build-arg ENABLE_NOTIFICATIONS="${ENABLE_NOTIFICATIONS}" \
-    "${PROJECT_ROOT}/cheese-search-ui"
+    "${SOURCES_ROOT}/cheese-search-ui"
 )
 
 build_backend() (
@@ -121,12 +124,12 @@ build_backend() (
   local context dockerfile
   case "${svc}" in
     cheese-orchestrator|cheese-database)
-      context="${PROJECT_ROOT}/${svc}"
+      context="${SOURCES_ROOT}/${svc}"
       dockerfile="${context}/Dockerfile-on-prem"
       ;;
     cheese-synthongpt)
       # Upstream repo and Dockerfile don't follow the on-prem naming convention.
-      context="${PROJECT_ROOT}/synthongpt-prod"
+      context="${SOURCES_ROOT}/synthongpt-prod"
       dockerfile="${context}/Dockerfile"
       ;;
   esac

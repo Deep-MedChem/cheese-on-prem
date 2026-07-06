@@ -1,11 +1,11 @@
 # Local env and secrets — examples (.example) are tracked; real ones aren't.
-env/*.build.env
+local-dev/env/*.build.env
 *.env
 *.local
+*.local.sh
 charts/*/values-secrets.yaml
 charts/*/values-onprem.yaml
-kind/cluster.local.yaml
-kind-up.local.sh
+local-dev/kind/cluster.local.yaml
 !*.example
 
 # License files — keyed to the host hardware, never commit.
