@@ -39,6 +39,21 @@ else
   export CHEESE_IMAGE_TAG
 fi
 
+# ── Container registry (ACR → ECR migration, 2026-07) ────────────────────────
+# Explicit CHEESE_REGISTRY (cheese-env-file.conf) wins; otherwise the presence
+# of an AWS access key selects the new ECR registry and its absence keeps the
+# legacy ACR, so existing installs are unaffected until they receive AWS keys.
+# Exported so docker-compose.yml image interpolation matches what
+# `cheese update-images` pulled.
+if [ -z "${CHEESE_REGISTRY:-}" ]; then
+  if [ -n "${CHEESE_AWS_ACCESS_KEY_ID:-}" ]; then
+    CHEESE_REGISTRY="815935788477.dkr.ecr.us-east-1.amazonaws.com"
+  else
+    CHEESE_REGISTRY="cheese.azurecr.io"
+  fi
+fi
+export CHEESE_REGISTRY
+
 # Load the human-readable port map (config/ports.env) so its values feed both
 # docker-compose interpolation and ensure_all_free_ports below. A value already
 # present in the environment wins (so `API_HOST_PORT=9999 cheese start` and the

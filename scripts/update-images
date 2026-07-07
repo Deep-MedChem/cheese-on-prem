@@ -3,7 +3,18 @@
 set -e
 
 echo Downloading CHEESE images...
-REGISTRY="cheese.azurecr.io"
+# Registry resolution (2026-07 AWS migration): CHEESE_REGISTRY in
+# cheese-env-file.conf wins; otherwise the presence of an AWS access key selects
+# the new ECR registry, and installs without one keep using the legacy ACR —
+# existing customers are not broken by a script update alone.
+if [ -z "${CHEESE_REGISTRY:-}" ]; then
+  if [ -n "${CHEESE_AWS_ACCESS_KEY_ID:-}" ]; then
+    CHEESE_REGISTRY="815935788477.dkr.ecr.us-east-1.amazonaws.com"
+  else
+    CHEESE_REGISTRY="cheese.azurecr.io"
+  fi
+fi
+REGISTRY="$CHEESE_REGISTRY"
 REPO_NAME="${REGISTRY}/on-prem"
 
 # ── Image channel (develop vs main) ───────────────────────────────────────────
@@ -39,7 +50,24 @@ image_tag() {
 # (`docker login ... cheese.azurecr.io/on-prem`) returned UNAUTHORIZED from ACR;
 # pulls only kept working because earlier installs had cached creds for the
 # bare host. Also use --password-stdin to avoid the insecure-CLI-password warning.
-if [ "$CHEESE_CUSTOMER" = 'test' ] ; then
+if [[ "$REGISTRY" == *.amazonaws.com ]]; then
+  # ECR: the docker password is a short-lived token minted from the customer's
+  # pull-only IAM access key (CHEESE_AWS_ACCESS_KEY_ID/CHEESE_AWS_SECRET_ACCESS_KEY
+  # in cheese-env-file.conf — provided by DeepMedChem, replaces CHEESE_PASSWORD).
+  # `aws` runs inside the official public aws-cli container so customers don't
+  # need the AWS CLI installed — docker is already a requirement.
+  if [ -z "${CHEESE_AWS_ACCESS_KEY_ID:-}" ] || [ -z "${CHEESE_AWS_SECRET_ACCESS_KEY:-}" ]; then
+    echo "ERROR: registry $REGISTRY needs CHEESE_AWS_ACCESS_KEY_ID and CHEESE_AWS_SECRET_ACCESS_KEY"
+    echo "in ~/.config/cheese/cheese-env-file.conf. Ask the DeepMedChem team for your keys."
+    exit 1
+  fi
+  docker run --rm \
+    -e AWS_ACCESS_KEY_ID="$CHEESE_AWS_ACCESS_KEY_ID" \
+    -e AWS_SECRET_ACCESS_KEY="$CHEESE_AWS_SECRET_ACCESS_KEY" \
+    public.ecr.aws/aws-cli/aws-cli ecr get-login-password \
+    --region "${CHEESE_AWS_REGION:-us-east-1}" \
+    | docker login -u AWS --password-stdin "$REGISTRY"
+elif [ "$CHEESE_CUSTOMER" = 'test' ] ; then
   echo "$CHEESE_PASSWORD" | docker login -u admin --password-stdin "$REGISTRY"
 else
   echo "$CHEESE_PASSWORD" | docker login -u "$CHEESE_CUSTOMER" --password-stdin "$REGISTRY"

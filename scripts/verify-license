@@ -1,6 +1,7 @@
 # !/bin/bash
 
-FULL_IMAGE_NAME="cheese.azurecr.io/on-prem/cheese-orchestrator/$CHEESE_CUSTOMER"
+# CHEESE_REGISTRY is resolved and exported by cheese-env.sh (dispatcher).
+FULL_IMAGE_NAME="${CHEESE_REGISTRY:-cheese.azurecr.io}/on-prem/cheese-orchestrator/$CHEESE_CUSTOMER"
 
 CONFIG_FILE="${HOME}/.config/cheese/cheese-env-file.conf"
 
