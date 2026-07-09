@@ -22,14 +22,19 @@ fi
 if [[ "$remove_images" == "y" || "$remove_images" == "Y" ]]; then
     echo "Removing Docker images..."
 
-    REPO_NAME="cheese.azurecr.io"
+    # Clean up images from BOTH registries, regardless of which one the
+    # current config points at — a host migrated from ACR to ECR still holds
+    # the old ACR-tagged images.
+    REPO_NAME="cheese.azurecr.io 815935788477.dkr.ecr.us-east-1.amazonaws.com"
 
-    # Find image IDs whose repository starts with the registry prefix.
+    # Find image IDs whose repository starts with a registry prefix.
     # NOTE: `docker images "$REPO_NAME"` matches only an *exact* repository
     # name, so it never matches nested paths like
     # cheese.azurecr.io/on-prem/.../cheese-customer. List all and filter.
     image_ids=$(docker images --format '{{.ID}} {{.Repository}}' \
-        | awk -v prefix="$REPO_NAME/" 'index($2, prefix) == 1 { print $1 }' \
+        | awk -v prefixes="$REPO_NAME" '
+            BEGIN { n = split(prefixes, p, " ") }
+            { for (i = 1; i <= n; i++) if (index($2, p[i] "/") == 1) { print $1; next } }' \
         | sort -u)
 
     if [[ -z "$image_ids" ]]; then

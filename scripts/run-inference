@@ -150,7 +150,8 @@ fi
 
 DEST=$(convert_to_absolute_path $dest)
 
-INFERENCE_IMAGE="cheese.azurecr.io/on-prem/cheese-inference/$CHEESE_CUSTOMER"
+# CHEESE_REGISTRY is resolved and exported by cheese-env.sh (dispatcher).
+INFERENCE_IMAGE="${CHEESE_REGISTRY:-815935788477.dkr.ecr.us-east-1.amazonaws.com}/on-prem/cheese-inference/$CHEESE_CUSTOMER"
 
 OUTPUT_DIRECTORY="/data/${DEST}"
 NEW_OUTPUT_DIRECTORY="${DEST}"

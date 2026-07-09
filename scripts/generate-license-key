@@ -24,7 +24,8 @@ while [[ $# -gt 0 ]]; do
 done
 
 
-FULL_IMAGE_NAME="cheese.azurecr.io/on-prem/cheese-database/$CHEESE_CUSTOMER"
+# CHEESE_REGISTRY is resolved and exported by cheese-env.sh (dispatcher).
+FULL_IMAGE_NAME="${CHEESE_REGISTRY:-815935788477.dkr.ecr.us-east-1.amazonaws.com}/on-prem/cheese-database/$CHEESE_CUSTOMER"
 
 set -e
 

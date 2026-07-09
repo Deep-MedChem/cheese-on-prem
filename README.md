@@ -29,9 +29,9 @@ bash install-cheese.sh
 ``` 
 in the repo's directory. Follow the prompts. Then re-log in to the shell (or run `source ~/.bashrc`) and check if the installation completed by running `cheese`
 
-3. Contact us to provide you with a `CHEESE_PASSWORD` to be able to download CHEESE docker images.
+3. Contact us to provide you with registry credentials (`CHEESE_AWS_ACCESS_KEY_ID` + `CHEESE_AWS_SECRET_ACCESS_KEY`) to be able to download CHEESE docker images. (The legacy `CHEESE_PASSWORD` no longer works — the old Azure registry has been retired.)
 
-4. Run `cheese update-env` and insert the `CHEESE_PASSWORD` in the config file
+4. Run `cheese update-env` and insert the credentials in the config file
 
 5. Run `cheese update-images` to be able to download the docker images. _This step will take a while!_
 
