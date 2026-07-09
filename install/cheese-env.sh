@@ -27,16 +27,9 @@ export_env_vars ${HOME}/.config/cheese/cheese-env-file.conf
 
 # ── Container registry (ACR → ECR migration, 2026-07) ────────────────────────
 # Central resolution, exported for every `cheese` subcommand and for
-# docker-compose interpolation: an explicit CHEESE_REGISTRY in the conf wins;
-# otherwise the presence of an AWS access key selects the new ECR registry and
-# its absence keeps the legacy ACR — installs without AWS keys are unaffected.
-# (update-images and _compose-env repeat this fallback so they also work when
-# invoked standalone, outside the dispatcher.)
-if [ -z "${CHEESE_REGISTRY:-}" ]; then
-  if [ -n "${CHEESE_AWS_ACCESS_KEY_ID:-}" ]; then
-    CHEESE_REGISTRY="815935788477.dkr.ecr.us-east-1.amazonaws.com"
-  else
-    CHEESE_REGISTRY="cheese.azurecr.io"
-  fi
-fi
-export CHEESE_REGISTRY
+# docker-compose interpolation. AWS ECR is the only registry — the legacy Azure
+# ACR (cheese.azurecr.io) account is retired. An explicit CHEESE_REGISTRY in
+# the conf still overrides (e.g. a future mirror). (update-images and
+# _compose-env repeat this default so they also work when invoked standalone,
+# outside the dispatcher.)
+export CHEESE_REGISTRY="${CHEESE_REGISTRY:-815935788477.dkr.ecr.us-east-1.amazonaws.com}"

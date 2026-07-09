@@ -3,13 +3,14 @@ CHEESE_CUSTOMER=cheese-customer
 # Thank you for installing CHEESE.
 # Please, reach out to the DeepMedChem team for the following:
 
-# 1. Container registry credentials — AWS access keys (current registry).
-# Setting these makes all cheese commands use the AWS registry automatically;
-# leaving them unset keeps the legacy Azure registry + CHEESE_PASSWORD below.
+# 1. Container registry credentials — an AWS access key from the DeepMedChem
+# team. The key's only right is assuming the pull-only role below; image pulls
+# run through that role.
 CHEESE_AWS_ACCESS_KEY_ID=XXX
 CHEESE_AWS_SECRET_ACCESS_KEY=XXX
-# Legacy Azure registry password — only needed if you have no AWS keys yet.
-CHEESE_PASSWORD=XXX
+# Optional overrides — the defaults are correct for the DeepMedChem registry:
+# CHEESE_AWS_REGION=us-east-1
+# CHEESE_AWS_ROLE_ARN=arn:aws:iam::815935788477:role/cheese-onprem-pull
 # 2. Database SFTP server + password for `cheese configure-dbs` / `cheese download-dbs`.
 # Both are required to download databases.
 DB_SERVER=XXX
