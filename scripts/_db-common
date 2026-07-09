@@ -41,8 +41,8 @@ db_remote() {
 }
 
 # The SFTP password is its own setting (CHEESE_DB_PASSWORD) — deliberately NOT a
-# fallback to CHEESE_PASSWORD, which is the image-registry password and would
-# just produce a confusing "ssh: unable to authenticate" failure. Obscured for
+# fallback to any registry credential (images use AWS keys, see update-images),
+# which would just produce a confusing "ssh: unable to authenticate" failure. Obscured for
 # rclone and cached so we only shell out to rclone obscure once.
 _db_obscured_pass=""
 db_obscured_pass() {
@@ -77,7 +77,7 @@ db_ping() {
   echo "$hint" >&2
   echo "Fix it by running:  cheese update-env" >&2
   echo "(DB_SERVER and CHEESE_DB_PASSWORD are provided by the DeepMedChem team;" >&2
-  echo "CHEESE_DB_PASSWORD is separate from the image-registry password CHEESE_PASSWORD)." >&2
+  echo "CHEESE_DB_PASSWORD is separate from the image-registry AWS keys)." >&2
   # One concise line of the underlying rclone error, for debugging.
   local detail
   detail=$(printf '%s\n' "$out" | grep -iE 'CRITICAL|ERROR|Failed|unable|refused|no such host|timeout' | head -1)

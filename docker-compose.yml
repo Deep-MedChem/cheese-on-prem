@@ -27,7 +27,7 @@
 #      `--profile sso`, nginx is the only service meant to face the network.
 
 x-cheese-db-image: &cheese-db-image
-  image: cheese.azurecr.io/on-prem/cheese-database/${CHEESE_CUSTOMER}:${CHEESE_IMAGE_TAG:-latest}
+  image: ${CHEESE_REGISTRY:-815935788477.dkr.ecr.us-east-1.amazonaws.com}/on-prem/cheese-database/${CHEESE_CUSTOMER}:${CHEESE_IMAGE_TAG:-latest}
 
 # Drop-everything baseline applied to every cheese-* service.
 x-hardening: &hardening
@@ -117,7 +117,7 @@ services:
 
   # ── cheese-orchestrator: the public CHEESE API ────────────────────────────────
   api:
-    image: cheese.azurecr.io/on-prem/cheese-orchestrator/${CHEESE_CUSTOMER}:${CHEESE_IMAGE_TAG:-latest}
+    image: ${CHEESE_REGISTRY:-815935788477.dkr.ecr.us-east-1.amazonaws.com}/on-prem/cheese-orchestrator/${CHEESE_CUSTOMER}:${CHEESE_IMAGE_TAG:-latest}
     container_name: cheese-api
     <<: [*hardening, *cheese-data-mounts]
     env_file:
@@ -164,7 +164,7 @@ services:
   # variant independently of the other images, defaulting to the plain channel tag;
   # `cheese setup-supabase` sets it to <channel>-auth so accounts work.
   ui:
-    image: cheese.azurecr.io/on-prem/cheese-search-ui/${CHEESE_CUSTOMER}:${CHEESE_UI_IMAGE_TAG:-${CHEESE_IMAGE_TAG:-latest}}
+    image: ${CHEESE_REGISTRY:-815935788477.dkr.ecr.us-east-1.amazonaws.com}/on-prem/cheese-search-ui/${CHEESE_CUSTOMER}:${CHEESE_UI_IMAGE_TAG:-${CHEESE_IMAGE_TAG:-latest}}
     container_name: cheese-ui
     <<: *hardening
     environment:
@@ -207,7 +207,7 @@ services:
   # Registered on cheese-network under the alias 'cheese-inference' (which is the
   # hardcoded default in the UI's server.ts, so no extra config needed).
   inference:
-    image: cheese.azurecr.io/on-prem/cheese-electrostatics-inference/${CHEESE_CUSTOMER}:latest
+    image: ${CHEESE_REGISTRY:-815935788477.dkr.ecr.us-east-1.amazonaws.com}/on-prem/cheese-electrostatics-inference/${CHEESE_CUSTOMER}:latest
     container_name: cheese-inference
     cap_drop: ["ALL"]
     security_opt:
@@ -243,7 +243,7 @@ services:
   # (develop→:develop, main→:latest), so it follows ${CHEESE_IMAGE_TAG:-latest}.
   # (inference, by contrast, has no per-branch on-prem build and stays :latest.)
   alignment:
-    image: cheese.azurecr.io/on-prem/cheese-alignment-service/${CHEESE_CUSTOMER}:${CHEESE_IMAGE_TAG:-latest}
+    image: ${CHEESE_REGISTRY:-815935788477.dkr.ecr.us-east-1.amazonaws.com}/on-prem/cheese-alignment-service/${CHEESE_CUSTOMER}:${CHEESE_IMAGE_TAG:-latest}
     container_name: cheese-alignment
     <<: [*hardening, *cheese-data-mounts]
     env_file:
@@ -273,7 +273,7 @@ services:
   # via KETCHER_ORIGIN (see the ui service). No depends_on: like inference/alignment
   # it's optional; if it's down the editor just fails to load, nothing else breaks.
   ketcher:
-    image: cheese.azurecr.io/on-prem/ketcher/${CHEESE_CUSTOMER}:latest
+    image: ${CHEESE_REGISTRY:-815935788477.dkr.ecr.us-east-1.amazonaws.com}/on-prem/ketcher/${CHEESE_CUSTOMER}:latest
     container_name: cheese-ketcher
     cap_drop: ["ALL"]
     security_opt:
