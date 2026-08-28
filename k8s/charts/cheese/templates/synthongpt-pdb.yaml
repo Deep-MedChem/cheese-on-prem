@@ -1,0 +1,13 @@
+{{- if and .Values.synthongpt.enabled .Values.synthongpt.podDisruptionBudget.enabled (gt (int .Values.synthongpt.replicaCount) 1) -}}
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: cheese-synthongpt
+  labels:
+    {{- include "cheese.componentLabels" (list . "synthongpt") | nindent 4 }}
+spec:
+  {{- toYaml .Values.synthongpt.podDisruptionBudget.spec | nindent 2 }}
+  selector:
+    matchLabels:
+      {{- include "cheese.componentSelectorLabels" (list . "synthongpt") | nindent 6 }}
+{{- end }}

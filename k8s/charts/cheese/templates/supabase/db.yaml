@@ -1,0 +1,100 @@
+{{- if .Values.supabase.enabled -}}
+{{- $s := .Values.supabase -}}
+{{- $sec := include "cheese.supabaseSecretName" . -}}
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: supabase-db
+  labels:
+    {{- include "cheese.componentLabels" (list . "supabase-db") | nindent 4 }}
+spec:
+  serviceName: supabase-db
+  replicas: 1
+  selector:
+    matchLabels:
+      {{- include "cheese.componentSelectorLabels" (list . "supabase-db") | nindent 6 }}
+  template:
+    metadata:
+      {{- with $s.podAnnotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      labels:
+        {{- include "cheese.componentSelectorLabels" (list . "supabase-db") | nindent 8 }}
+    spec:
+      securityContext:
+        {{- toYaml $s.securityContext | nindent 8 }}
+      containers:
+        - name: db
+          image: "{{ $s.images.db.repository }}:{{ $s.images.db.tag }}"
+          imagePullPolicy: {{ $s.imagePullPolicy }}
+          ports:
+            - name: pg
+              containerPort: 5432
+              protocol: TCP
+          env:
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $sec }}
+                  key: postgresPassword
+            - name: POSTGRES_DB
+              value: postgres
+            - name: JWT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $sec }}
+                  key: jwtSecret
+            - name: JWT_EXP
+              value: {{ $s.jwtExpiry | quote }}
+          readinessProbe:
+            exec:
+              command: ["pg_isready", "-U", "postgres", "-d", "postgres"]
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          livenessProbe:
+            exec:
+              command: ["pg_isready", "-U", "postgres", "-d", "postgres"]
+            initialDelaySeconds: 30
+            periodSeconds: 20
+          resources:
+            {{- toYaml $s.db.resources | nindent 12 }}
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/postgresql/data
+      {{- with $s.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with $s.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        {{- with $s.db.storageClassName }}
+        storageClassName: {{ . | quote }}
+        {{- end }}
+        resources:
+          requests:
+            storage: {{ $s.db.storageSize }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: supabase-db
+  labels:
+    {{- include "cheese.componentLabels" (list . "supabase-db") | nindent 4 }}
+spec:
+  type: ClusterIP
+  ports:
+    - port: 5432
+      targetPort: pg
+      protocol: TCP
+      name: pg
+  selector:
+    {{- include "cheese.componentSelectorLabels" (list . "supabase-db") | nindent 4 }}
+{{- end }}

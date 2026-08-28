@@ -1,0 +1,98 @@
+{{- if .Values.synthongpt.enabled -}}
+{{- $root := . -}}
+{{- $sg := .Values.synthongpt -}}
+{{- $dataRoot := printf "%s/%s" (trimSuffix "/" $root.Values.data.mountPath) (trimPrefix "/" $sg.dataRootSubdir) -}}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: cheese-synthongpt
+  labels:
+    {{- include "cheese.componentLabels" (list $root "synthongpt") | nindent 4 }}
+spec:
+  {{- if not $sg.autoscaling.enabled }}
+  replicas: {{ $sg.replicaCount }}
+  {{- end }}
+  selector:
+    matchLabels:
+      {{- include "cheese.componentSelectorLabels" (list $root "synthongpt") | nindent 6 }}
+  template:
+    metadata:
+      {{- with $sg.podAnnotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      labels:
+        {{- include "cheese.componentSelectorLabels" (list $root "synthongpt") | nindent 8 }}
+    spec:
+      {{- include "cheese.imagePullSecrets" $sg.image | nindent 6 }}
+      securityContext:
+        {{- toYaml $sg.podSecurityContext | nindent 8 }}
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: {{ $root.Values.data.pvcName }}
+      containers:
+        - name: synthongpt
+          securityContext:
+            {{- toYaml $sg.securityContext | nindent 12 }}
+          image: {{ include "cheese.image" $sg.image | quote }}
+          imagePullPolicy: {{ include "cheese.imagePullPolicy" $sg.image }}
+          {{- /* Image ENTRYPOINT is `python synthon_api.py`; SYNTHONGPT_DATA_ROOT
+                 seeds the defaults for --checkpoint, --synthon-index, etc. */}}
+          args:
+            - "--host"
+            - "0.0.0.0"
+            - "--port"
+            - {{ $sg.containerPort | quote }}
+            - "--device"
+            - {{ $sg.runtime.device | quote }}
+            - "--seed"
+            - {{ $sg.runtime.seed | quote }}
+            {{- with $sg.runtime.extraArgs }}
+            {{- range . }}
+            - {{ . | quote }}
+            {{- end }}
+            {{- end }}
+          ports:
+            - name: http
+              containerPort: {{ $sg.containerPort }}
+              protocol: TCP
+          env:
+            - name: SYNTHONGPT_DATA_ROOT
+              value: {{ $dataRoot | quote }}
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 60
+            periodSeconds: 30
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 30
+            periodSeconds: 15
+          lifecycle:
+            preStop:
+              exec:
+                command: ["/bin/sh", "-c", "sleep 10"]
+          resources:
+            {{- toYaml $sg.resources | nindent 12 }}
+          volumeMounts:
+            - name: data
+              mountPath: {{ $root.Values.data.mountPath | quote }}
+      {{- with $sg.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with $sg.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      affinity:
+      {{- if $sg.affinity }}
+        {{- $sg.affinity | toYaml | nindent 8 }}
+      {{- else }}
+        {{- include "cheese.affinityPreset" (list $root "synthongpt" $sg) | nindent 8 }}
+      {{- end }}
+{{- end }}

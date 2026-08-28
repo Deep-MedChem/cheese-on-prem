@@ -1,0 +1,30 @@
+{{- if .Values.database.enabled -}}
+{{- /*
+One Service per role with both .port set and .service.enabled = true.
+Resource name: cheese-database-<roleName>.
+*/ -}}
+{{- $root := . -}}
+{{- $db := .Values.database -}}
+{{- range $roleName, $role := $db.roles -}}
+{{- if and $role.enabled $role.port (and $role.service $role.service.enabled) }}
+{{- $component := printf "database-%s" $roleName -}}
+{{- $resourceName := printf "cheese-database-%s" $roleName }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $resourceName }}
+  labels:
+    {{- include "cheese.componentLabels" (list $root $component) | nindent 4 }}
+spec:
+  type: {{ $role.service.type | default $db.service.type }}
+  ports:
+    - port: {{ $role.service.port | default $db.service.port }}
+      targetPort: http
+      protocol: TCP
+      name: http
+  selector:
+    {{- include "cheese.componentSelectorLabels" (list $root $component) | nindent 4 }}
+{{- end }}
+{{- end }}
+{{- end }}
