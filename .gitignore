@@ -1,2 +1,35 @@
 out
-model_key-private.pem
+deprecated/embeddings-gpu/out
+
+# ── Secrets ──────────────────────────────────────────────────────────────────
+# This repository is PUBLIC. Nothing that authenticates anything may be
+# committed. These patterns are a safety net, not a licence to keep secrets in
+# the working tree — the real home for them is ~/.config/cheese (mode 600),
+# which is outside the repo entirely.
+#
+# Note the deliberate absence of a blanket `*.env`: config/ports.env is tracked
+# and required, and shadowing it would be worse than the risk this catches.
+
+# Generated env files. `cheese-env` in particular is what install-cheese.sh and
+# `cheese update-env` produce — it holds the registry and database credentials.
+cheese-env
+cheese-env*.conf
+cheese-env-file.conf
+.env
+.env.*
+*.local.env
+
+# Credential files written by the cheese CLI, if anyone points them at the repo.
+aws-credentials.conf
+license-agent.env
+supabase.env
+cheese_license_file.json
+
+# Keys and certificates. The *.template files the installer copies are tracked
+# and unaffected — these patterns only match real, generated material.
+*.pem
+*.key
+*.crt
+*.p12
+*.pfx
+id_rsa*
