@@ -6,15 +6,93 @@ stack from one `helm install`. Every component is toggled with a top-level
 files. The environment (storage class + ingress class) is selected with
 `deployment.target`.
 
+## Basic setup <kbd>👤 start here</kbd>
+
+The recommended deployment is two components: **`cheese-database`** (the search
+engine) and **`cheese-orchestrator`** (the API you call). Together they are a
+complete, working CHEESE — everything else in this chart is optional and off by
+default, so a plain `helm install` gives you exactly this.
+
+You supply three things. The chart supplies the rest.
+
+```mermaid
+flowchart TB
+    subgraph provide["🔧 What you supply"]
+        direction LR
+        VOL["<b>Storage</b><br/>a PersistentVolume<br/>sized for the databases<br/>you choose"]
+        PULL["<b>Registry credential</b><br/>a Secret holding the<br/>access key we issue you"]
+        LIC["<b>Licence key</b><br/>a Secret holding the<br/>DMCH-… key we issue you"]
+    end
+
+    subgraph ns["☸️ Your cluster, namespace: cheese"]
+        direction TB
+        PVC[("cheese-data-pvc<br/>mounted at /data<br/>databases + licence file")]
+        DB["<b>cheese-database</b><br/>search engine<br/>REQUIRED"]
+        ORCH["<b>cheese-orchestrator</b><br/>the API<br/>REQUIRED"]
+        AGENT["licence agent<br/>renews daily"]
+    end
+
+    USERS["your users<br/>or your platform"]
+
+    VOL ==> PVC
+    PULL -. "kubelet pulls the images" .-> DB
+    PULL -.-> ORCH
+    LIC ==> AGENT
+    AGENT -- "writes the licence file" --> PVC
+    PVC -- "reads databases + licence" --> DB
+    ORCH -- "queries" --> DB
+    USERS -- "HTTPS via ingress" --> ORCH
+```
+
+### The three things you supply
+
+| | What | Where it goes | Notes |
+|---|---|---|---|
+| 💾 | **Storage** | a PersistentVolume the chart binds as `cheese-data-pvc` at `/data` | Holds the databases *and* the licence file. Size it for the databases you pick — they run from under 1 GB to 1.3 TB each. Stage the contents owned by `2112:0`. Layout and staging commands: [docs/pvc-data-runbook.md](docs/pvc-data-runbook.md). |
+| 🔑 | **Registry credential** | a Secret the kubelet uses to pull the images | One access key from DeepMedChem. It is read-only and its only right is pulling what you are licensed for. |
+| 📄 | **Licence key** | a Secret the licence agent reads | A `DMCH-…` key. The agent exchanges it for a 30-day licence file, writes that to `/data`, and renews it daily — so the licence covers the whole cluster and nodes can come and go. |
+
+### Licensing on Kubernetes is v1 only
+
+CHEESE has two licensing schemes. On Kubernetes only one of them applies:
+
+- **v1 — "call home"** (what you use): the agent renews a 30-day file daily and
+  the licence authorises **the whole installation**, however many nodes it spans.
+- **v0 — "air-gapped"**: a long-lived file bound to **one physical machine's
+  hardware id**. It cannot work on a cluster whose nodes change, so it is offered
+  only for single-host Docker Compose installs.
+
+> **⚠️ Status, so nobody is misled.** Two pieces of this are still being
+> finished: the licence agent is **not yet a template in this chart** (it is
+> deployed separately for now), and **no released product image verifies a v1
+> licence yet** — that port is open work in the four gated repos. Until it lands,
+> a v1 key is issued but not enforced, and a v1 licence *file* handed to a current
+> image will be rejected by its v0 verifier with a misleading
+> "signature does not match". Talk to us before wiring licensing into a partner
+> cluster.
+
+### Install it
+
+```bash
+helm install cheese charts/cheese -n cheese --create-namespace \
+  -f charts/cheese/values-secrets.yaml
+```
+
+No `--set *.enabled` flags needed — database and orchestrator are the defaults.
+Add components later by turning them on (see [Profiles](#profiles)). Full
+step-by-step, including the secrets, is in [Quick start](#quick-start) below.
+
+---
+
 ## Components
 
 | Component | Key | Default | Notes |
 |---|---|---|---|
-| Database (app / jobs-db / jobs-exec / download-exec / **file-server**) | `database.enabled` | on | search engine + result file server, all off one image |
-| Orchestrator | `orchestrator.enabled` | on | the API the UI calls |
-| Search UI | `searchUi.enabled` | on | public frontend |
-| SynthonGPT | `synthongpt.enabled` | on | synthon model server |
-| **Ketcher** | `ketcher.enabled` | on | self-hosted molecule editor (UI iframes it) |
+| **Database** (app / jobs-db / jobs-exec / download-exec / **file-server**) | `database.enabled` | **on, required** | search engine + result file server, all off one image |
+| **Orchestrator** | `orchestrator.enabled` | **on, required** | the API you call |
+| Search UI | `searchUi.enabled` | off | public frontend |
+| SynthonGPT | `synthongpt.enabled` | off | synthon model server |
+| **Ketcher** | `ketcher.enabled` | off | self-hosted molecule editor (UI iframes it) |
 | **Inference** | `inference.enabled` | off | electrostatics; UI degrades gracefully if absent |
 | **Alignment** | `alignment.enabled` | off | conformer alignment, license-gated |
 | **Supabase** | `supabase.enabled` | off | in-cluster auth + per-user spaces (test profile) |
