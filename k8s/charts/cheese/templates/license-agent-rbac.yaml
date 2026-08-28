@@ -1,0 +1,110 @@
+{{- if .Values.licenseAgent.enabled -}}
+{{- /*
+Identity + API permission for the licence agent.
+
+The agent's ONLY cluster permission is reading the `kube-system` Namespace
+object, because its UID is the installation fingerprint it registers with the
+licensing server (see licensing/agent/agent.py: get_fingerprint()). It reads no
+secrets, no pods, no other namespace.
+
+licenseAgent.rbac.scope picks how that single permission is granted:
+
+  namespace (default) — a Role + RoleBinding IN kube-system. A namespaced
+      RoleBinding does authorise `get` on the Namespace object of its own
+      namespace: the API server records namespace="kube-system" for
+      GET /api/v1/namespaces/kube-system, so RBAC resolves it namespaced.
+      Verified on k8s v1.35: this grants 200 on kube-system and 403 on
+      `list namespaces`, on any other namespace, and on pods/secrets inside
+      kube-system. Least privilege — the grant cannot leak outside kube-system.
+
+  cluster — a ClusterRole + ClusterRoleBinding restricted with
+      resourceNames: [kube-system]. Equivalent in effect; use it when your
+      cluster policy forbids creating objects in kube-system (or a controller
+      prunes them). Still no `list`: resourceNames do not apply to list/watch,
+      so list is simply not granted.
+
+Set licenseAgent.rbac.create=false to wire both yourself; then set
+licenseAgent.serviceAccount.create=false and .name to your ServiceAccount.
+*/ -}}
+{{- $la := .Values.licenseAgent -}}
+{{- $saName := include "cheese.licenseAgentServiceAccountName" . -}}
+{{- /* The Role/ClusterRole live OUTSIDE the release namespace, so their names are
+       release-prefixed: two releases in one cluster must not collide. */ -}}
+{{- $rbacName := printf "%s-license-agent-fingerprint" .Release.Name -}}
+{{- if not (has $la.rbac.scope (list "namespace" "cluster")) -}}
+{{- fail (printf "licenseAgent.rbac.scope %q is not supported (use 'namespace' or 'cluster')" $la.rbac.scope) -}}
+{{- end -}}
+{{- if $la.serviceAccount.create }}
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ $saName }}
+  labels:
+    {{- include "cheese.componentLabels" (list . "license-agent") | nindent 4 }}
+  {{- with $la.serviceAccount.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+{{- end }}
+{{- if $la.rbac.create }}
+{{- if eq $la.rbac.scope "namespace" }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ $rbacName }}
+  namespace: kube-system
+  labels:
+    {{- include "cheese.componentLabels" (list . "license-agent") | nindent 4 }}
+rules:
+  - apiGroups: [""]
+    resources: ["namespaces"]
+    resourceNames: ["kube-system"]
+    verbs: ["get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ $rbacName }}
+  namespace: kube-system
+  labels:
+    {{- include "cheese.componentLabels" (list . "license-agent") | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ $rbacName }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ $saName }}
+    namespace: {{ .Release.Namespace }}
+{{- else }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ $rbacName }}
+  labels:
+    {{- include "cheese.componentLabels" (list . "license-agent") | nindent 4 }}
+rules:
+  - apiGroups: [""]
+    resources: ["namespaces"]
+    resourceNames: ["kube-system"]
+    verbs: ["get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ $rbacName }}
+  labels:
+    {{- include "cheese.componentLabels" (list . "license-agent") | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ $rbacName }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ $saName }}
+    namespace: {{ .Release.Namespace }}
+{{- end }}
+{{- end }}
+{{- end }}

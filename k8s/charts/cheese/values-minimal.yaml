@@ -71,3 +71,41 @@ orchestrator:
           paths:
             - path: /
               pathType: Prefix
+
+# ===========================================================================
+# licence agent — v1 ("call home") licensing. Mirrors values.yaml; only the
+# site-specific values live here. See values.yaml for the full key set, the
+# v0-vs-v1 explanation and the ⚠️ status note (no released product image
+# verifies a v1 licence yet), and k8s/docs/licensing-v1-agent.md for the model.
+# ===========================================================================
+licenseAgent:
+  # OFF here on purpose: this profile still uses the hand-placed v0 licence
+  # file above. Flip to true only together with the two cheeseLicenseFile
+  # values, which must then point back at a plain PVC-relative filename
+  # (e.g. "cheese_license_file.json") — the agent writes there, and the
+  # absolute host paths used above are a v0-only local hack.
+  enabled: false
+
+  # Site value: the licence key issued for THIS installation. Prefer
+  # secret.existingSecret and keep the key out of any values file.
+  # A DMCH-PTN-… value is a partner token, NOT a licence key.
+  secret:
+    existingSecret: ""                     # e.g. cheese-license-key, created with kubectl/Vault/ESO
+    licenseKey: ""                         # DMCH-…
+
+  # Machine-specific: the agent image is not published to any registry yet, so
+  # on kind it must be side-loaded (`kind load docker-image cheese-license-agent:dev`).
+  image:
+    source: local
+    local:
+      repository: cheese-license-agent
+      tag: dev
+      pullPolicy: Never                    # side-loaded into the kind node; never pull
+
+  # NOTE, and this is the good news versus v0: on kind the v1 fingerprint is the
+  # kind cluster's own kube-system namespace UID, which is a perfectly valid
+  # fingerprint. Unlike the v0 DMI licence (which the kind node fakes as
+  # product_name="kind"), nothing here needs a per-node workaround.
+  rbac:
+    create: true
+    scope: namespace                       # Role in kube-system — least privilege
