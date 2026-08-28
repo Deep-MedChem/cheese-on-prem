@@ -3,8 +3,8 @@
 # ONE values.yaml drives everything. Every component is toggled with a
 # top-level `.enabled` key. Defaults give the MINIMAL headless profile —
 # cheese-database + cheese-orchestrator only, auth off, local-source images;
-# everything else (searchUi, ketcher, synthongpt, inference, alignment,
-# supabase, oauth2Proxy) is opt-in. Site-required parameters live in
+# everything else (licenseAgent, searchUi, ketcher, synthongpt, inference,
+# alignment, supabase, oauth2Proxy) is opt-in. Site-required parameters live in
 # values-minimal.yaml. Resource names are hardcoded
 # (`cheese-database-app`, `cheese-orchestrator`, `cheese-search-ui`,
 # `cheese-ketcher`, `cheese-inference`, `cheese-alignment-app`, …) so the
@@ -43,6 +43,143 @@ deployment:
 data:
   pvcName: cheese-data-pvc
   mountPath: /data
+
+# ===========================================================================
+# licence agent — v1 ("call home") licensing. NON-CORE, OFF by default.
+#
+# What it does: exchanges the DMCH-… licence key for a signed 30-day licence
+# file and rewrites it daily onto the shared /data PVC, at exactly the path the
+# product containers read (database/orchestrator/alignment
+# `secret.cheeseLicenseFile`). Without it the chart still works — you place a
+# licence file on the PVC by hand, which is the v0 path.
+#
+#   v1 = this agent. Server-issued file, 30-day TTL, renewed daily. The
+#        fingerprint is the CLUSTER's kube-system namespace UID, so ONE licence
+#        authorises the whole installation and nodes may come and go.
+#   v0 = long-lived offline RSA file bound to ONE machine's DMI hardware id.
+#        Docker Compose / single host only; unusable on a cluster.
+#   (Older notes call the agent "v2". That numbering is wrong.)
+#
+# ⚠️ STATUS: no released product image verifies a v1 licence yet — the verifier
+# ports are still open PRs (cheese-database #155, cheese-orchestrator #179,
+# cheese-inference #7, conformer-alignment-api #10). This plumbing lands AHEAD
+# of enforcement: a v1 file handed to a current image is rejected by its v0
+# verifier as "signature does not match". See k8s/docs/licensing-v1-agent.md.
+# ===========================================================================
+licenseAgent:
+  enabled: false
+
+  image:
+    # ⚠️ NOT PUBLISHED ANYWHERE YET. The agent image is built from the private
+    # dmch-licensing repo (`docker build -f licensing/agent/Dockerfile -t
+    # cheese-license-agent:dev .`) and side-loaded. The `acr` block below is a
+    # placeholder path, not a pullable reference — do not expect it to resolve.
+    source: local                          # local | acr
+    local:
+      repository: cheese-license-agent
+      tag: dev
+      pullPolicy: IfNotPresent
+    acr:
+      repository: cheese.azurecr.io/on-prem/cheese-license-agent/cheese-customer
+      tag: latest
+      pullPolicy: IfNotPresent
+      pullSecret: cheese-acr-pull
+
+  # Licensing server base URL (DeepMedChem-hosted).
+  serverUrl: "https://licensing.deepmedchem.com"
+
+  secret:
+    existingSecret: ""                     # if set, reference this pre-created Secret (key: licenseKey) and render NO inline Secret
+    # The licence key issued to this INSTALLATION. A DMCH-PTN-… value is a
+    # PARTNER TOKEN, not a licence key — it mints keys for end-customers via
+    # /partner/v1/licenses and is rejected here (401 partner_token_not_a_license_key).
+    # The chart fails the render if it sees one.
+    licenseKey: ""                         # DMCH-…
+
+  # Where the agent WRITES the licence file, relative to data.mountPath.
+  # "" → inherit database.secret.cheeseLicenseFile (else orchestrator's), so the
+  # writer and the readers cannot drift apart. Only set this if you deliberately
+  # want a different path — then set the readers' cheeseLicenseFile to match.
+  licenseFile: ""
+
+  # Agent bookkeeping (activation id + fingerprint), same PVC, relative to
+  # data.mountPath. Survives restarts so the install keeps its activation slot.
+  statePath: ".cheese-license-agent.json"
+
+  # Health endpoint (readiness only): 200 when a fresh licence is on disk, 503
+  # while activating / renewing / unreachable. 0 disables the server entirely.
+  healthPort: 8080
+
+  # Optional reporting/diagnostics.
+  appVersion: ""                           # CHEESE_APP_VERSION, reported at activation
+  usageCountersPath: ""                    # JSON file of usage counters to report, relative to data.mountPath
+
+  # ESCAPE HATCH — leave empty in a cluster. In a pod the fingerprint is the
+  # kube-system namespace UID; this forces a value instead (tests / off-cluster).
+  # Setting it wrong burns an activation slot on a fingerprint you cannot reuse.
+  fingerprintOverride: ""
+
+  serviceAccount:
+    create: true
+    name: ""                               # "" → cheese-license-agent
+    annotations: {}
+
+  # The agent's ONLY cluster permission: `get` the kube-system Namespace object,
+  # whose UID is the installation fingerprint. It reads no secrets, no pods, and
+  # no other namespace.
+  #   namespace (default) — Role + RoleBinding IN kube-system. Least privilege:
+  #       verified to grant 200 on kube-system and 403 on `list namespaces`, on
+  #       every other namespace, and on pods/secrets inside kube-system.
+  #   cluster — ClusterRole + ClusterRoleBinding narrowed with
+  #       resourceNames: [kube-system]. Same effect; use it when cluster policy
+  #       forbids creating objects in kube-system.
+  # create: false → you wire the Role/Binding yourself (also set
+  # serviceAccount.create: false and serviceAccount.name).
+  rbac:
+    create: true
+    scope: namespace                       # namespace | cluster
+
+  # The chart's /data PVC is ROOT-OWNED (docs/pvc-data-runbook.md), so an agent
+  # running as 2112 could not create or atomically replace a file there. Rather
+  # than run the agent as root (which the earlier hand-rolled manifests did, and
+  # which is not an acceptable shipped default), a root initContainer prepares
+  # ONLY the licence file's own directory, non-recursively:
+  #     mkdir -p <dir>; chgrp 0 <dir>; chmod g+rwxs <dir>
+  # That matches the chart's 2112:0 convention: the agent (2112:0) can write,
+  # setgid keeps new files in group 0, and the product containers (also 2112:0)
+  # can read. It uses the agent's own image — no extra image to pull — with
+  # capabilities reduced to CHOWN, FOWNER, DAC_OVERRIDE.
+  #
+  # Why not podSecurityContext.fsGroup: it is ignored on hostPath PVs (the
+  # `local` target) and on NFS/EFS, and where it IS honoured it recursively
+  # chowns the whole volume on every pod start — a non-starter for a multi-TB
+  # /data. Set enabled: false if you pre-chown the directory out of band.
+  prepareDataDir:
+    enabled: true
+    resources:
+      requests: { cpu: "10m", memory: 16Mi }
+      limits:   { cpu: "100m", memory: 64Mi }
+
+  resources:
+    requests: { cpu: "10m",  memory: 32Mi  }
+    limits:   { cpu: "200m", memory: 128Mi }
+
+  podAnnotations: {}
+  podSecurityContext: {}
+  securityContext:
+    capabilities:
+      drop: [ALL]
+    allowPrivilegeEscalation: false
+    readOnlyRootFilesystem: true           # verified: the agent writes only under /data
+    runAsNonRoot: true
+    runAsUser: 2112                        # same identity as the product containers
+    runAsGroup: 0                          # the chart's 2112:0 convention on /data
+
+  nodeSelector: {}
+  tolerations: []
+  # No podAntiAffinityPreset: this is a single-replica, Recreate-strategy
+  # singleton (one writer of the licence file), so spreading it is meaningless.
+  affinity: {}
 
 # ===========================================================================
 # cheese-database

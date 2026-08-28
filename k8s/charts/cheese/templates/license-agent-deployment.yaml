@@ -1,0 +1,169 @@
+{{- if .Values.licenseAgent.enabled -}}
+{{- /*
+Licence agent (v1 "call home" licensing).
+
+Exchanges the customer's DMCH-… licence key for a signed 30-day licence file and
+rewrites it daily onto the shared /data PVC, at exactly the path the product
+containers read (CHEESE_LICENSE_FILE). One replica, Recreate: it is the single
+writer of that file.
+
+The installation fingerprint is the kube-system Namespace UID, so ONE licence
+covers the whole cluster and nodes may come and go — see license-agent-rbac.yaml
+for the permission that makes that read possible, and k8s/docs/licensing-v1-agent.md
+for the licensing model and its current (pre-enforcement) status.
+
+The CHEESE_* variable names are the product's client-side contract and are
+deliberately NOT renamed to DMCH_LICENSING_* (that rename applies to the server).
+*/ -}}
+{{- $root := . -}}
+{{- $la := .Values.licenseAgent -}}
+{{- $laSecret := include "cheese.licenseAgentSecretName" . -}}
+{{- $licPath := include "cheese.licenseFileAbsPath" . -}}
+{{- $statePath := printf "%s/%s" (trimSuffix "/" .Values.data.mountPath) (trimPrefix "/" $la.statePath) -}}
+{{- $dirs := list (dir $licPath) (dir $statePath) | uniq -}}
+{{- /* Guards: each of these otherwise surfaces as an opaque crash-loop or a 401. */ -}}
+{{- if not $la.serverUrl -}}
+{{- fail "licenseAgent.enabled=true requires licenseAgent.serverUrl (the licensing server base URL)" -}}
+{{- end -}}
+{{- if not $la.secret.existingSecret -}}
+{{- if not $la.secret.licenseKey -}}
+{{- fail "licenseAgent.enabled=true requires either licenseAgent.secret.existingSecret or licenseAgent.secret.licenseKey" -}}
+{{- end -}}
+{{- if hasPrefix "DMCH-PTN-" $la.secret.licenseKey -}}
+{{- fail "licenseAgent.secret.licenseKey looks like a DMCH-PTN-… partner token. A partner token is NOT a licence key: it issues keys for end-customers via /partner/v1/licenses. Using it here fails with 401 partner_token_not_a_license_key." -}}
+{{- end -}}
+{{- end -}}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: cheese-license-agent
+  labels:
+    {{- include "cheese.componentLabels" (list $root "license-agent") | nindent 4 }}
+spec:
+  {{- /* Single writer of the licence file: never scale, never roll two at once. */}}
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      {{- include "cheese.componentSelectorLabels" (list $root "license-agent") | nindent 6 }}
+  template:
+    metadata:
+      {{- with $la.podAnnotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      labels:
+        {{- include "cheese.componentSelectorLabels" (list $root "license-agent") | nindent 8 }}
+    spec:
+      {{- include "cheese.imagePullSecrets" $la.image | nindent 6 }}
+      serviceAccountName: {{ include "cheese.licenseAgentServiceAccountName" $root }}
+      {{- /* The projected SA token IS the fingerprint source — must stay mounted. */}}
+      automountServiceAccountToken: true
+      securityContext:
+        {{- toYaml $la.podSecurityContext | nindent 8 }}
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: {{ $root.Values.data.pvcName }}
+      {{- if $la.prepareDataDir.enabled }}
+      {{- /* The PVC root is root-owned (see docs/pvc-data-runbook.md), so the agent
+             could not create/replace a file there as 2112. This runs as root ONCE
+             per pod start, non-recursively, on the licence file's directory only:
+             group 0 + group-write + setgid, matching the chart's 2112:0 convention.
+             Never a recursive chown of /data — that would be a multi-TB no-go. */}}
+      initContainers:
+        - name: prepare-license-dir
+          image: {{ include "cheese.image" $la.image | quote }}
+          imagePullPolicy: {{ include "cheese.imagePullPolicy" $la.image }}
+          securityContext:
+            runAsUser: 0
+            runAsNonRoot: false
+            capabilities:
+              drop: [ALL]
+              {{- /* chgrp needs CHOWN, chmod needs FOWNER, and mkdir inside a
+                     directory root does not own needs DAC_OVERRIDE. Nothing else. */}}
+              add: [CHOWN, FOWNER, DAC_OVERRIDE]
+            allowPrivilegeEscalation: false
+          command: ["sh", "-c"]
+          args:
+            - |
+              set -eu
+              for d in {{ range $dirs }}{{ . | quote }} {{ end }}; do
+                mkdir -p "$d"
+                chgrp 0 "$d"
+                chmod g+rwxs "$d"
+                ls -ld "$d"
+              done
+          resources:
+            {{- toYaml $la.prepareDataDir.resources | nindent 12 }}
+          volumeMounts:
+            - name: data
+              mountPath: {{ $root.Values.data.mountPath | quote }}
+      {{- end }}
+      containers:
+        - name: agent
+          securityContext:
+            {{- toYaml $la.securityContext | nindent 12 }}
+          image: {{ include "cheese.image" $la.image | quote }}
+          imagePullPolicy: {{ include "cheese.imagePullPolicy" $la.image }}
+          env:
+            - name: CHEESE_LICENSING_URL
+              value: {{ $la.serverUrl | quote }}
+            - name: CHEESE_LICENSE_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $laSecret }}
+                  key: licenseKey
+            - name: CHEESE_LICENSE_FILE_PATH
+              value: {{ $licPath | quote }}
+            - name: CHEESE_AGENT_STATE_PATH
+              value: {{ $statePath | quote }}
+            - name: CHEESE_AGENT_HEALTH_PORT
+              value: {{ $la.healthPort | quote }}
+            {{- with $la.appVersion }}
+            - name: CHEESE_APP_VERSION
+              value: {{ . | quote }}
+            {{- end }}
+            {{- with $la.usageCountersPath }}
+            - name: CHEESE_USAGE_COUNTERS_PATH
+              value: {{ printf "%s/%s" (trimSuffix "/" $root.Values.data.mountPath) (trimPrefix "/" .) | quote }}
+            {{- end }}
+            {{- with $la.fingerprintOverride }}
+            - name: CHEESE_FINGERPRINT_OVERRIDE
+              value: {{ . | quote }}
+            {{- end }}
+          {{- if $la.healthPort }}
+          ports:
+            - name: health
+              containerPort: {{ $la.healthPort }}
+              protocol: TCP
+          {{- /* Readiness only. A livenessProbe here would be actively harmful: the
+                 endpoint reports 503 while the licensing server is unreachable, and
+                 restarting the agent during an outage throws away the in-memory
+                 backoff instead of riding out the ~29 days of grace. */}}
+          readinessProbe:
+            httpGet:
+              path: /
+              port: health
+            initialDelaySeconds: 5
+            periodSeconds: 30
+          {{- end }}
+          resources:
+            {{- toYaml $la.resources | nindent 12 }}
+          volumeMounts:
+            - name: data
+              mountPath: {{ $root.Values.data.mountPath | quote }}
+      {{- with $la.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with $la.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with $la.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+{{- end }}
