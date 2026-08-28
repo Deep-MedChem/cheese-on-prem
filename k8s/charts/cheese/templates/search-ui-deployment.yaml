@@ -24,15 +24,15 @@ spec:
       labels:
         {{- include "cheese.componentSelectorLabels" (list $root "search-ui") | nindent 8 }}
     spec:
-      {{- include "cheese.imagePullSecrets" $ui.image | nindent 6 }}
+      {{- include "cheese.imagePullSecrets" (list $ $ui.image) | nindent 6 }}
       securityContext:
         {{- toYaml $ui.podSecurityContext | nindent 8 }}
       containers:
         - name: search-ui
           securityContext:
             {{- toYaml $ui.securityContext | nindent 12 }}
-          image: {{ include "cheese.image" $ui.image | quote }}
-          imagePullPolicy: {{ include "cheese.imagePullPolicy" $ui.image }}
+          image: {{ include "cheese.image" (list $ $ui.image) | quote }}
+          imagePullPolicy: {{ include "cheese.imagePullPolicy" (list $ $ui.image) }}
           ports:
             - name: http
               containerPort: {{ $ui.containerPort }}

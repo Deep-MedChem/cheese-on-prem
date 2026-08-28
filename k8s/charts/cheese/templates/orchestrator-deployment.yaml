@@ -30,7 +30,7 @@ spec:
       labels:
         {{- include "cheese.componentSelectorLabels" (list $root "orchestrator") | nindent 8 }}
     spec:
-      {{- include "cheese.imagePullSecrets" $oc.image | nindent 6 }}
+      {{- include "cheese.imagePullSecrets" (list $ $oc.image) | nindent 6 }}
       securityContext:
         {{- toYaml $oc.podSecurityContext | nindent 8 }}
       volumes:
@@ -46,8 +46,8 @@ spec:
         - name: orchestrator
           securityContext:
             {{- toYaml $oc.securityContext | nindent 12 }}
-          image: {{ include "cheese.image" $oc.image | quote }}
-          imagePullPolicy: {{ include "cheese.imagePullPolicy" $oc.image }}
+          image: {{ include "cheese.image" (list $ $oc.image) | quote }}
+          imagePullPolicy: {{ include "cheese.imagePullPolicy" (list $ $oc.image) }}
           ports:
             - name: http
               containerPort: {{ $oc.containerPort }}

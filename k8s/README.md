@@ -21,6 +21,73 @@ files. The environment (storage class + ingress class) is selected with
 | **oauth2-proxy** | `oauth2Proxy.enabled` | off | SSO stub (alternate to Supabase) |
 | **Licence agent** | `licenseAgent.enabled` | off | v1 licensing: renews the licence file onto `/data` daily ([docs](docs/licensing-agent.md)) |
 
+## Images
+
+Every component picks its registry with `image.source`:
+
+| `source` | Where the image comes from |
+|---|---|
+| `local` | already on the node — kind / local-dev only (`local-dev/README.md`) |
+| `ecr` | DeepMedChem's registry, per customer |
+| `acr` | **RETIRED.** The Azure account was shut down in July 2026. Rendering fails with a message telling you to use `ecr`, rather than leaving you with an unexplainable `ImagePullBackOff`. |
+
+Licensed images are published per customer as
+`<registry>/on-prem/<image>/<customer>:<tag>`. Set the customer slug **once** and
+every component composes its own path:
+
+```yaml
+onprem:
+  customer: your-slug          # issued by DeepMedChem with your access key
+  imageTag: develop            # or `latest`; a component's ecr.tag overrides it
+
+database:
+  image:
+    source: ecr
+orchestrator:
+  image:
+    source: ecr
+```
+
+which renders, for `customer: testpartner`:
+
+```
+815935788477.dkr.ecr.us-east-1.amazonaws.com/on-prem/cheese-database/testpartner:develop
+815935788477.dkr.ecr.us-east-1.amazonaws.com/on-prem/cheese-orchestrator/testpartner:develop
+```
+
+Pin one component to a different build with its own `ecr.tag` — useful for
+testing a single image without moving the shared channel tag:
+
+```yaml
+orchestrator:
+  image:
+    source: ecr
+    ecr:
+      tag: develop-v1lic
+```
+
+Rendering fails with an explicit message if `onprem.customer` is empty while any
+component uses `source: ecr`, so a half-built image reference can never reach the
+cluster.
+
+### ⚠️ The pull Secret expires every 12 hours
+
+`onprem.pullSecret` (default `cheese-ecr-pull`) names the Secret the kubelet
+pulls with. **An ECR docker-login token is only valid for 12 hours.** A Secret
+created once from `aws ecr get-login-password` therefore works today and fails
+the next time a pod is rescheduled — with an `ImagePullBackOff` that looks
+nothing like an expiry. The chart does not refresh it for you. Pick one:
+
+- **On EKS** — give the node role ECR pull permission and let the built-in
+  credential provider handle it. No Secret, nothing to expire. Best option.
+- **Anywhere else** — refresh the Secret on a schedule (a CronJob running
+  `aws ecr get-login-password` and recreating it, or External Secrets Operator
+  pointed at the token).
+
+The chart is unaware of which you chose; it only consumes the Secret by name.
+
+---
+
 ## Deployment target
 
 `deployment.target` selects storage + ingress class (see `templates/_platform.tpl`):
