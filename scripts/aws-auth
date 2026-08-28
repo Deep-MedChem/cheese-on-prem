@@ -1,0 +1,319 @@
+#!/bin/bash
+# One-time AWS credential setup for CHEESE on-prem.
+#
+# DeepMedChem issues each customer a single AWS access key. That one key is all
+# the authentication this stack needs: it pulls the container images AND
+# downloads the indexed databases. The key itself carries no permissions — its
+# only right is to assume a read-only role — so the worst case if it leaks is
+# that someone else can download the images and databases you are licensed for.
+#
+# This command asks for the key once, checks that it actually works, and stores
+# it in a file only your user can read. Re-run it to rotate a key, to point at a
+# different file, or just to re-check that access still works.
+set -e
+source "$(dirname "$(readlink -f "$0")")/_db-common"
+
+# Default location. --file (or CHEESE_AWS_CREDENTIALS_FILE) overrides it; the
+# chosen path is recorded in cheese-env-file.conf so every later `cheese`
+# command finds it without being told again.
+DEFAULT_CRED_FILE="${HOME}/.config/cheese/aws-credentials.conf"
+ENV_FILE="${HOME}/.config/cheese/cheese-env-file.conf"
+# Secret name the Helm chart references as its AWS existingSecret. Keys are the
+# standard AWS_* names so a pod can consume the whole thing with envFrom.
+DEFAULT_SECRET_NAME="cheese-aws-credentials"
+
+show_help() {
+  echo "Usage: cheese aws-auth [options]"
+  echo
+  echo "Stores the AWS access key issued to you by DeepMedChem. Needed once,"
+  echo "before 'cheese update-images' and 'cheese download-dbs'."
+  echo
+  echo "Where it stores the key depends on how you run CHEESE:"
+  echo "  --target file        A file on this host, for the docker-compose stack."
+  echo "                       (default)"
+  echo "  --target k8s         A Kubernetes Secret, for a Helm-chart install. Run"
+  echo "                       this from wherever you use kubectl; the file target"
+  echo "                       is meaningless in-cluster because nothing mounts it."
+  echo "  --target print       Print the Secret manifest to stdout and store"
+  echo "                       nothing — for GitOps / SealedSecrets / Vault flows."
+  echo
+  echo "Options:"
+  echo "  --file PATH          Where to store the credentials (--target file)"
+  echo "                       (default: $DEFAULT_CRED_FILE)"
+  echo "  --namespace NS       Kubernetes namespace (--target k8s/print)"
+  echo "  --secret-name NAME   Secret name (default: $DEFAULT_SECRET_NAME)"
+  echo "                       Pass it to the chart as the AWS existingSecret."
+  echo "  --stdin              Read the key from stdin instead of prompting:"
+  echo "                       two lines, access key ID then secret access key"
+  echo "  --role-arn ARN       Role to assume (default: $DB_ROLE_ARN)"
+  echo "  --region REGION      AWS region (default: $DB_REGION)"
+  echo "  --check              Only verify the stored key; change nothing"
+  echo "  --no-verify          Store the key without testing it"
+  echo "  -h, --help           Show this help message"
+  exit 1
+}
+
+cred_file="${CHEESE_AWS_CREDENTIALS_FILE:-$DEFAULT_CRED_FILE}"
+target=file
+secret_name="$DEFAULT_SECRET_NAME"
+namespace=""
+use_stdin=false
+check_only=false
+verify=true
+role_arn="$DB_ROLE_ARN"
+region="$DB_REGION"
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --file)      [ -z "$2" ] && { echo "--file needs a path."; exit 1; }; cred_file="$2"; shift 2 ;;
+    --target)
+      case "$2" in
+        file|k8s|print) target="$2" ;;
+        *) echo "--target must be one of: file, k8s, print"; exit 1 ;;
+      esac; shift 2 ;;
+    --namespace|-n) [ -z "$2" ] && { echo "--namespace needs a value."; exit 1; }; namespace="$2"; shift 2 ;;
+    --secret-name)  [ -z "$2" ] && { echo "--secret-name needs a value."; exit 1; }; secret_name="$2"; shift 2 ;;
+    --role-arn)  [ -z "$2" ] && { echo "--role-arn needs a value."; exit 1; }; role_arn="$2"; shift 2 ;;
+    --region)    [ -z "$2" ] && { echo "--region needs a value."; exit 1; }; region="$2"; shift 2 ;;
+    --stdin)     use_stdin=true; shift ;;
+    --check)     check_only=true; shift ;;
+    --no-verify) verify=false; shift ;;
+    -h|--help)   show_help ;;
+    *) echo "Unknown option: $1"; show_help ;;
+  esac
+done
+
+# Relative paths would resolve against wherever the operator happened to be
+# standing, and this path gets recorded for later runs, so pin it now.
+case "$cred_file" in /*) : ;; *) cred_file="$(pwd)/$cred_file" ;; esac
+
+# --target print exists to be piped (into kubectl, kubeseal, or a repo), so the
+# manifest must be the ONLY thing on stdout. Park the real stdout on fd 3 and
+# send everything else to stderr; the manifest is written to fd 3 explicitly.
+exec 3>&1
+[ "$target" = "print" ] && exec 1>&2
+
+mask() { local v="$1"; [ ${#v} -le 4 ] && { printf '****'; return; }; printf '****%s' "${v: -4}"; }
+
+# Read an existing file's values without exporting anything else that might be
+# in it — this may be the shared env file rather than a dedicated one.
+read_stored() {
+  [ -f "$cred_file" ] || return 1
+  stored_key=$(grep -m1 '^CHEESE_AWS_ACCESS_KEY_ID=' "$cred_file" 2>/dev/null | cut -d= -f2-)
+  stored_secret=$(grep -m1 '^CHEESE_AWS_SECRET_ACCESS_KEY=' "$cred_file" 2>/dev/null | cut -d= -f2-)
+  [ -n "$stored_key" ] && [ -n "$stored_secret" ]
+}
+
+# Verification is the whole point of doing this as a command rather than a
+# README instruction: it separates "key typed wrong" from "key not entitled to
+# CHEESE" from "this host has no route to AWS", which are three different
+# support conversations. db_ping (in _db-common) already classifies them.
+verify_creds() {
+  if ! db_have_runner; then
+    echo "Cannot verify the key: this host has neither the aws CLI nor docker." >&2
+    echo "Install either one, or re-run with --no-verify to store it untested." >&2
+    return 1
+  fi
+  export CHEESE_AWS_ACCESS_KEY_ID="$1"
+  export CHEESE_AWS_SECRET_ACCESS_KEY="$2"
+  export CHEESE_AWS_ROLE_ARN="$role_arn"
+  export CHEESE_AWS_REGION="$region"
+  DB_ROLE_ARN="$role_arn"
+  DB_REGION="$region"
+  db_ping
+}
+
+# ── --check: verify what's already stored, change nothing ─────────────────────
+if [ "$check_only" = true ]; then
+  if ! read_stored; then
+    echo "No credentials found in $cred_file."
+    echo "Run 'cheese aws-auth' to set them up."
+    exit 1
+  fi
+  echo "Stored access key: $(mask "$stored_key")  ($cred_file)"
+  if verify_creds "$stored_key" "$stored_secret"; then
+    echo "Your key works and can read the CHEESE databases and images."
+    exit 0
+  fi
+  exit 1
+fi
+
+# ── Collect the key ───────────────────────────────────────────────────────────
+echo "CHEESE on-prem AWS access setup"
+echo
+echo "DeepMedChem issued you an AWS access key (an ID starting with 'AKIA' and a"
+echo "secret). The same key pulls the container images and downloads the"
+echo "databases — there is no separate database password."
+echo
+
+if read_stored; then
+  echo "A key is already stored in $cred_file: $(mask "$stored_key")"
+  if [ -t 0 ]; then
+    read -r -p "Replace it? [y/N] " ans
+    case "${ans:-N}" in
+      [Yy]*) : ;;
+      *) echo "Keeping the existing key. Use 'cheese aws-auth --check' to test it."; exit 0 ;;
+    esac
+  else
+    echo "Replacing it (non-interactive)."
+  fi
+  echo
+fi
+
+if [ "$use_stdin" = true ]; then
+  IFS= read -r key_id || true
+  IFS= read -r secret || true
+else
+  if [ ! -t 0 ]; then
+    echo "ERROR: no terminal to prompt on. Use --stdin and pipe two lines" >&2
+    echo "(access key ID, then secret access key)." >&2
+    exit 1
+  fi
+  read -r -p "Access key ID: " key_id
+  # -s so the secret is never echoed to the screen, and never lands in shell
+  # history the way a command-line argument would.
+  read -r -s -p "Secret access key: " secret; echo
+fi
+
+key_id="${key_id//[[:space:]]/}"
+secret="${secret//[[:space:]]/}"
+
+if [ -z "$key_id" ] || [ -z "$secret" ]; then
+  echo "ERROR: both the access key ID and the secret are required." >&2
+  exit 1
+fi
+# Cheap shape check — catches the common paste mistakes (swapped fields, a
+# truncated copy) before spending a round-trip to AWS on them.
+case "$key_id" in
+  AKIA*|ASIA*) : ;;
+  *) echo "WARNING: an access key ID normally starts with AKIA. Continuing anyway." ;;
+esac
+[ ${#secret} -lt 20 ] && echo "WARNING: that secret looks too short — check for a truncated paste."
+
+# ── Verify before writing ─────────────────────────────────────────────────────
+# Storing an unverified key just moves the failure to the next command, where
+# it's harder to attribute, so test first and only persist what works.
+if [ "$verify" = true ]; then
+  echo
+  if ! verify_creds "$key_id" "$secret"; then
+    echo >&2
+    echo "The key was NOT stored. Fix the problem above and re-run 'cheese aws-auth'." >&2
+    echo "(Use --no-verify to store it anyway, e.g. if this host has no network yet.)" >&2
+    exit 1
+  fi
+fi
+
+# ── Store it, wherever this install actually reads credentials from ──────────
+
+# Emit the Secret manifest. stringData (not data) keeps it readable and avoids a
+# base64 step that is easy to get wrong by hand; Kubernetes encodes it on apply.
+secret_manifest() {
+  echo "apiVersion: v1"
+  echo "kind: Secret"
+  echo "metadata:"
+  echo "  name: ${secret_name}"
+  [ -n "$namespace" ] && echo "  namespace: ${namespace}"
+  echo "  labels:"
+  echo "    app.kubernetes.io/name: cheese"
+  echo "    app.kubernetes.io/component: aws-credentials"
+  echo "type: Opaque"
+  echo "stringData:"
+  echo "  AWS_ACCESS_KEY_ID: ${key_id}"
+  echo "  AWS_SECRET_ACCESS_KEY: ${secret}"
+  echo "  AWS_REGION: ${region}"
+  echo "  AWS_ROLE_ARN: ${role_arn}"
+}
+
+case "$target" in
+
+  file)
+    mkdir -p "$(dirname "$cred_file")"
+    chmod 700 "$(dirname "$cred_file")" 2>/dev/null || true
+    # umask before creating the temp file so the secret is never briefly readable
+    # by other users, and write-then-rename so a crash can't leave a half-file.
+    old_umask=$(umask); umask 077
+    tmp="$(mktemp "$(dirname "$cred_file")/.aws-credentials.XXXXXX")"
+    {
+      echo "# CHEESE on-prem AWS credentials — written by 'cheese aws-auth'."
+      echo "# Keep this file private. Anyone holding this key can download the"
+      echo "# images and databases you are licensed for."
+      echo "# Re-run 'cheese aws-auth' to replace the key, or --check to test it."
+      echo "CHEESE_AWS_ACCESS_KEY_ID=$key_id"
+      echo "CHEESE_AWS_SECRET_ACCESS_KEY=$secret"
+      echo "CHEESE_AWS_REGION=$region"
+      echo "CHEESE_AWS_ROLE_ARN=$role_arn"
+    } > "$tmp"
+    chmod 600 "$tmp"
+    mv "$tmp" "$cred_file"
+    umask "$old_umask"
+
+    echo
+    echo "Stored $(mask "$key_id") in $cred_file (readable only by $(id -un))."
+
+    # Record a non-default location so cheese-env.sh loads it on every later run.
+    # The default path is loaded unconditionally, so writing the line then would
+    # be noise the customer has to reason about.
+    if [ "$cred_file" != "$DEFAULT_CRED_FILE" ] && [ -f "$ENV_FILE" ]; then
+      if grep -q '^CHEESE_AWS_CREDENTIALS_FILE=' "$ENV_FILE" 2>/dev/null; then
+        tmp2="$(mktemp)"
+        grep -v '^CHEESE_AWS_CREDENTIALS_FILE=' "$ENV_FILE" > "$tmp2"
+        printf 'CHEESE_AWS_CREDENTIALS_FILE=%s\n' "$cred_file" >> "$tmp2"
+        cat "$tmp2" > "$ENV_FILE"; rm -f "$tmp2"
+      else
+        printf 'CHEESE_AWS_CREDENTIALS_FILE=%s\n' "$cred_file" >> "$ENV_FILE"
+      fi
+      echo "Recorded its location in $(basename "$ENV_FILE")."
+    fi
+
+    echo
+    echo "Next steps:"
+    echo "  cheese update-images                     # pull the CHEESE images"
+    echo "  cheese configure-dbs                     # choose which databases you want"
+    echo "  cheese download-dbs --dest <folder>      # download them"
+    ;;
+
+  k8s)
+    if ! command -v kubectl >/dev/null 2>&1; then
+      echo "ERROR: kubectl is not on PATH — run this from wherever you administer" >&2
+      echo "the cluster, or use '--target print' and apply the manifest yourself." >&2
+      exit 1
+    fi
+    # Default to the namespace the current context already points at rather than
+    # inventing one: guessing wrong creates the Secret where nothing reads it.
+    if [ -z "$namespace" ]; then
+      namespace="$(kubectl config view --minify -o jsonpath='{..namespace}' 2>/dev/null || true)"
+      [ -z "$namespace" ] && namespace=default
+      echo "Using namespace '$namespace' (from your current kubectl context)."
+    fi
+    ctx="$(kubectl config current-context 2>/dev/null || echo '?')"
+    echo "Applying Secret '$secret_name' to namespace '$namespace' of context '$ctx'."
+    # Apply, so re-running rotates the key in place instead of failing on a
+    # secret that already exists.
+    if ! secret_manifest | kubectl apply -n "$namespace" -f - ; then
+      echo "ERROR: could not apply the Secret. Check your kubectl context and RBAC," >&2
+      echo "or use '--target print' to hand the manifest to your own pipeline." >&2
+      exit 1
+    fi
+    echo
+    echo "Stored $(mask "$key_id") as Secret $namespace/$secret_name."
+    echo
+    echo "Next steps — point the chart at it and let it pull and populate:"
+    echo "  helm upgrade --install cheese ./k8s/charts/cheese -n $namespace \\"
+    echo "    --set aws.existingSecret=$secret_name"
+    echo
+    echo "NOTE: the Secret is only the credential. Getting images and databases"
+    echo "into the cluster also needs the ECR pull path and a database-sync Job —"
+    echo "see docs/database-configuration.md."
+    ;;
+
+  print)
+    # fd 3 is the real stdout (see above): everything informational was diverted
+    # to stderr, so this is clean enough to pipe into kubeseal, a repo, or
+    # kubectl apply -f -.
+    secret_manifest >&3
+    ;;
+esac
+
+# Be explicit rather than inheriting the status of whatever the last branch's
+# final command happened to be.
+exit 0

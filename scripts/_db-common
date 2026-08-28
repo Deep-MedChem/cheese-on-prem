@@ -1,127 +1,288 @@
 #!/bin/bash
 # Shared helpers for the database scripts (configure-dbs, download-dbs).
 #
-# The indexed databases live on a locked-down, SFTP-only server (chrooted,
-# ForceCommand internal-sftp — no shell, so rsync/ssh-exec are impossible). We
-# talk to it with rclone's sftp backend, which gives resumable, incremental,
-# parallel transfers over plain SFTP. rclone runs from its official Docker image
-# (Docker is already a hard dependency of the stack), so nothing extra is
-# installed on the host.
+# The indexed databases are served from a private AWS S3 bucket — the SAME bucket
+# the hosted CHEESE reads, so on-prem gets byte-identical data with no separate
+# staging step. Objects are laid out as one plain folder per database at the
+# bucket root (clustered or in_memory index dirs), exactly the on-disk structure
+# the engine expects, so there is no archive/extraction step.
+#
+# Auth reuses the credentials already issued for image pulls (see update-images):
+# the customer's access key can do exactly one thing — assume the pull-only role
+# CHEESE_AWS_ROLE_ARN — whose policy grants read on the database prefixes. So a
+# customer needs NO extra secret to download databases. `aws` runs inside the
+# official public aws-cli container, so nothing new is installed on the host
+# (docker is already a hard requirement of the stack).
 #
 # Exported / provided to callers:
-#   DB_SERVER, DB_SFTP_USER, DB_REMOTE_PATH, RCLONE_IMAGE, DB_CONFIG
-#   db_remote [subpath]      → prints the rclone remote spec (:sftp:...)
-#   rclone_sftp <args...>    → runs rclone in Docker against the SFTP server
-#                              (extra `docker run` opts via the RCLONE_DOCKER_OPTS array)
+#   DB_BUCKET, DB_REGION, DB_ROLE_ARN, AWSCLI_IMAGE, DB_CONFIG, DB_CATALOG
+#   db_s3_uri [db]        → prints s3://<bucket>/[<db>/]
+#   aws_db <args...>      → runs the aws CLI in Docker with the pull role assumed
+#                           (extra `docker run` opts via the AWS_DOCKER_OPTS array)
+#   db_ping               → verifies credentials, role assumption and bucket read
+#   list_db_dirs          → database folder names, one per line
+#   db_catalog_size <db>  → human-readable size from the catalog ("" if unknown)
+#   db_exists <db>        → is the folder readable in the bucket?
 
-# ── Server ────────────────────────────────────────────────────────────────────
-# No default on purpose: this is a public repo, so the database host is NOT
-# committed here. DeepMedChem provides the address on request; set it as
-# DB_SERVER in ~/.config/cheese/cheese-env-file.conf (exported by cheese-env.sh)
-# or in the environment.
-DB_SERVER="${DB_SERVER:-}"
-DB_SFTP_USER="${CHEESE_CUSTOMER:-cheese-customer}"
-# Directory on the server that holds the database folders. Empty = the SFTP
-# landing directory (where a login lands), which is where the DBs are exposed.
-# Override by exporting DB_REMOTE_PATH if the layout ever changes.
-DB_REMOTE_PATH="${DB_REMOTE_PATH:-}"
+# ── Source bucket ─────────────────────────────────────────────────────────────
+# The live CHEESE database bucket. Overridable for testing or if delivery ever
+# moves, but the default is the real one — unlike the retired SFTP server there
+# is nothing secret about the bucket name; access is entirely IAM-gated.
+DB_BUCKET="${CHEESE_DB_BUCKET:-cheese-dev-s3pilot-815935788477}"
+DB_REGION="${CHEESE_AWS_REGION:-us-east-1}"
+DB_ROLE_ARN="${CHEESE_AWS_ROLE_ARN:-arn:aws:iam::815935788477:role/cheese-onprem-pull}"
 
-# rclone image (Docker Hub). Override RCLONE_IMAGE to pin a version or point at
-# an internal mirror.
-RCLONE_IMAGE="${RCLONE_IMAGE:-rclone/rclone:latest}"
+# Official AWS CLI image. Override to pin a version or use an internal mirror.
+AWSCLI_IMAGE="${AWSCLI_IMAGE:-public.ecr.aws/aws-cli/aws-cli}"
 
 # Where the database selection lives.
 DB_CONFIG="${DB_CONFIG:-${HOME}/.config/cheese/databases.conf}"
 
-# Build an rclone remote spec, optionally for a sub-path under DB_REMOTE_PATH.
-db_remote() {
-  local sub="$1" p="$DB_REMOTE_PATH"
-  [ -n "$sub" ] && p="${p:+$p/}$sub"
-  printf ':sftp:%s' "$p"
-}
-
-# The SFTP password is its own setting (CHEESE_DB_PASSWORD) — deliberately NOT a
-# fallback to any registry credential (images use AWS keys, see update-images),
-# which would just produce a confusing "ssh: unable to authenticate" failure. Obscured for
-# rclone and cached so we only shell out to rclone obscure once.
-_db_obscured_pass=""
-db_obscured_pass() {
-  [ -n "$_db_obscured_pass" ] && { printf '%s' "$_db_obscured_pass"; return 0; }
-  _db_obscured_pass=$(docker run --rm "$RCLONE_IMAGE" obscure "$CHEESE_DB_PASSWORD") || return 1
-  printf '%s' "$_db_obscured_pass"
-}
-
-# Connectivity check: actually connect to the server with the configured
-# credentials (a cheap top-level listing) and fail fast if it doesn't work.
-# Timeouts/retries are bounded so a bad host or password fails in seconds instead
-# of rclone's ~30s+ default backoff. The rclone error is captured and classified
-# so the message points at the likely culprit — a rejected login → password, a
-# host/DNS/timeout error → server address.
-db_ping() {
-  echo "Checking connection to ${DB_SFTP_USER}@${DB_SERVER}..."
-  local out rc
-  out=$(rclone_sftp lsd "$(db_remote)" \
-          --contimeout 10s --timeout 20s --low-level-retries 1 --retries 1 2>&1)
-  rc=$?
-  [ "$rc" -eq 0 ] && { echo "Connected."; return 0; }
-
-  local hint
-  if printf '%s' "$out" | grep -qiE 'unable to authenticate|permission denied|auth.*fail|handshake failed'; then
-    hint="The server refused the login — CHEESE_DB_PASSWORD is likely wrong."
-  elif printf '%s' "$out" | grep -qiE 'no such host|name or service not known|connection refused|no route to host|i/o timeout|timed out|dial tcp|missing address|connection reset'; then
-    hint="Could not reach the host — DB_SERVER is likely wrong or unreachable."
-  else
-    hint="Connection to the database server failed."
+# ── Credentials file fallback ────────────────────────────────────────────────
+# Normally cheese-env.sh has already exported the access key by the time a
+# subcommand runs. But these scripts are also runnable directly (and `aws-auth`
+# is deliberately usable on a machine that has no CHEESE install at all), so load
+# the dedicated credentials file here when the key isn't already in the
+# environment. Same precedence as everywhere else: environment wins over file.
+if [ -z "${CHEESE_AWS_ACCESS_KEY_ID:-}" ]; then
+  _db_cred_file="${CHEESE_AWS_CREDENTIALS_FILE:-${HOME}/.config/cheese/aws-credentials.conf}"
+  if [ -f "$_db_cred_file" ]; then
+    while IFS= read -r _db_line; do
+      # Skip blanks and comments — an empty `export` would dump the whole
+      # environment, and a commented line would export a nonsense name.
+      [[ -z "$_db_line" || "$_db_line" =~ ^[[:space:]]*# ]] && continue
+      export "$_db_line"
+    done < "$_db_cred_file"
+    unset _db_line
   fi
+  unset _db_cred_file
+fi
+# Re-resolve the two settings the credentials file may carry, now that it's loaded.
+DB_REGION="${CHEESE_AWS_REGION:-us-east-1}"
+DB_ROLE_ARN="${CHEESE_AWS_ROLE_ARN:-arn:aws:iam::815935788477:role/cheese-onprem-pull}"
 
-  echo "$hint" >&2
-  echo "Fix it by running:  cheese update-env" >&2
-  echo "(DB_SERVER and CHEESE_DB_PASSWORD are provided by the DeepMedChem team;" >&2
-  echo "CHEESE_DB_PASSWORD is separate from the image-registry AWS keys)." >&2
-  # One concise line of the underlying rclone error, for debugging.
-  local detail
-  detail=$(printf '%s\n' "$out" | grep -iE 'CRITICAL|ERROR|Failed|unable|refused|no such host|timeout' | head -1)
-  [ -n "$detail" ] && echo "  (rclone: ${detail})" >&2
+# Shipped catalog of available databases (folder|bytes|objects). The pull policy
+# deliberately does NOT permit listing the bucket root — that would expose
+# unrelated internal prefixes — so the catalog is what `configure-dbs` enumerates.
+# Every entry is verified against the bucket at configure time, so a stale
+# catalog surfaces as a warning rather than a silent gap.
+DB_CATALOG="${DB_CATALOG:-$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../config/databases.catalog}"
+
+# Build an s3:// URI for the bucket, optionally for one database folder.
+db_s3_uri() {
+  local db="$1"
+  if [ -n "$db" ]; then printf 's3://%s/%s/' "$DB_BUCKET" "$db"
+  else printf 's3://%s/' "$DB_BUCKET"; fi
+}
+
+# ── Credentials ───────────────────────────────────────────────────────────────
+# Same key as image pulls. Fail with one actionable message if it's missing.
+db_require_creds() {
+  [ -n "${CHEESE_AWS_ACCESS_KEY_ID:-}" ] && [ -n "${CHEESE_AWS_SECRET_ACCESS_KEY:-}" ] && return 0
+  echo "ERROR: downloading databases needs CHEESE_AWS_ACCESS_KEY_ID and" >&2
+  echo "CHEESE_AWS_SECRET_ACCESS_KEY in ~/.config/cheese/cheese-env-file.conf —" >&2
+  echo "the same access key that pulls the images. Ask the DeepMedChem team for" >&2
+  echo "your key, then store it with:  cheese aws-auth" >&2
+  echo "(The old DB_SERVER / CHEESE_DB_PASSWORD SFTP settings are retired and unused.)" >&2
   return 1
 }
 
-# Run rclone in Docker with the SFTP backend pre-configured via env. Pass extra
-# `docker run` options (e.g. volume mounts, --user) in the RCLONE_DOCKER_OPTS
-# array before calling. rclone's sftp backend skips host-key verification by
-# default, so non-interactive runs don't stall on an unknown-host prompt.
-RCLONE_DOCKER_OPTS=()
-rclone_sftp() {
-  local pass
-  pass=$(db_obscured_pass) || return 1
-  # --log-level ERROR silences rclone's chatty NOTICE/INFO lines (config-not-
-  # found, host-key notice, etc.) while still surfacing real ERROR/CRITICAL
-  # failures. Override with RCLONE_LOG_LEVEL=NOTICE to debug.
-  #
-  # RCLONE_CONFIG pins the config file to a writable, world-writable dir. The
-  # download copy runs as the invoking UID (-u, so files aren't root-owned), and
-  # that UID has no /etc/passwd entry in the container, so $HOME resolves to "/".
-  # rclone would then default its config to /.rclone.conf and write its atomic
-  # save temp file alongside it in "/" — which a non-root UID can't, producing a
-  # "Failed to save config after 10 tries: ... permission denied" loop that stalls
-  # the transfer at 0 B. Pointing it at /tmp (writable by any UID) avoids that;
-  # the config is throwaway since every run is --rm with env-supplied credentials.
-  docker run --rm "${RCLONE_DOCKER_OPTS[@]}" \
-    -e RCLONE_CONFIG=/tmp/rclone.conf \
-    -e RCLONE_SFTP_HOST="$DB_SERVER" \
-    -e RCLONE_SFTP_USER="$DB_SFTP_USER" \
-    -e RCLONE_SFTP_PASS="$pass" \
-    "$RCLONE_IMAGE" --log-level "${RCLONE_LOG_LEVEL:-ERROR}" "$@"
+# The aws CLI is pointed at a generated profile that assumes the pull role with
+# `credential_source = Environment`. This matters for more than tidiness: the CLI
+# then refreshes the role's temporary credentials by itself, so a multi-hour
+# sync of a 200 GB database cannot die halfway through when the initial 1-hour
+# session expires. (A one-shot `sts assume-role` — what update-images does for
+# its instantaneous docker-login token — would.)
+#
+# Note botocore deliberately skips the environment credential provider when a
+# profile is named explicitly, which is why the static key must be handed to the
+# profile via credential_source rather than being picked up as the identity.
+_db_cfg_dir=""
+db_aws_config_dir() {
+  [ -n "$_db_cfg_dir" ] && { printf '%s' "$_db_cfg_dir"; return 0; }
+  _db_cfg_dir="$(mktemp -d)" || return 1
+  # Contains no secrets — just the role ARN and where to find source creds.
+  cat > "$_db_cfg_dir/config" <<CFG
+[profile onprem]
+role_arn = ${DB_ROLE_ARN}
+credential_source = Environment
+region = ${DB_REGION}
+role_session_name = cheese-download-dbs
+s3 =
+    max_concurrent_requests = ${DB_TRANSFERS:-8}
+CFG
+  chmod 0700 "$_db_cfg_dir"
+  printf '%s' "$_db_cfg_dir"
+}
+# Clean the generated config up on exit, however the script ends. The explicit
+# `return 0` matters: as an EXIT trap, a non-zero return here would surface as the
+# script's exit status, so a run that never needed an aws config (and therefore
+# has nothing to delete) would report failure.
+db_cleanup() { [ -n "$_db_cfg_dir" ] && rm -rf "$_db_cfg_dir"; return 0; }
+trap db_cleanup EXIT
+
+# How we run the aws CLI. The compose stack guarantees docker, so the container
+# is the default and needs nothing installed on the host. But `aws-auth` is also
+# meant to be run from wherever an operator administers a Kubernetes install —
+# a workstation or bastion that may well have the aws CLI and kubectl but no
+# docker — so a host CLI is used when one is present. CHEESE_AWS_RUNNER=docker|host
+# forces a choice.
+db_runner() {
+  case "${CHEESE_AWS_RUNNER:-}" in
+    docker|host) printf '%s' "$CHEESE_AWS_RUNNER"; return 0 ;;
+  esac
+  if command -v aws >/dev/null 2>&1; then printf 'host'; else printf 'docker'; fi
 }
 
-# List database directory names (one per line) from the server, or fail with a
-# clear message. Distinguishes a connection/auth failure (rclone non-zero) from
-# a successful-but-empty listing — callers handle the empty case themselves.
+# Does this host have any way to talk to AWS at all? Callers use this to degrade
+# gracefully (skip verification) instead of dying with a docker error.
+db_have_runner() {
+  command -v aws >/dev/null 2>&1 && return 0
+  command -v docker >/dev/null 2>&1 && return 0
+  return 1
+}
+
+# Path a destination directory takes *inside* the runner. The container sees the
+# bind mount, a host CLI sees the real path — so callers ask instead of assuming.
+db_dest_path() {
+  if [ "$(db_runner)" = "docker" ]; then printf '/dest'; else printf '%s' "$1"; fi
+}
+
+# Run the aws CLI as the pull role. When running in docker, extra `docker run`
+# options (mounts, --user, -t) go in the AWS_DOCKER_OPTS array before calling.
+#
+# HOME=/tmp in the container is not cosmetic: `aws s3 sync` runs as the invoking
+# UID (so downloaded files aren't root-owned) and that UID has no /etc/passwd
+# entry in the container, so HOME would resolve to "/" — where a non-root UID
+# cannot write the CLI's assumed-role credential cache. Pointing HOME at /tmp
+# keeps the credential refresh working.
+AWS_DOCKER_OPTS=()
+aws_db() {
+  local cfg
+  cfg="$(db_aws_config_dir)" || return 1
+  if [ "$(db_runner)" = "host" ]; then
+    AWS_ACCESS_KEY_ID="$CHEESE_AWS_ACCESS_KEY_ID" \
+    AWS_SECRET_ACCESS_KEY="$CHEESE_AWS_SECRET_ACCESS_KEY" \
+    AWS_CONFIG_FILE="$cfg/config" \
+    AWS_PROFILE=onprem \
+    AWS_DEFAULT_REGION="$DB_REGION" \
+    AWS_EC2_METADATA_DISABLED=true \
+      aws "$@"
+    return $?
+  fi
+  docker run --rm "${AWS_DOCKER_OPTS[@]}" \
+    -e AWS_ACCESS_KEY_ID="$CHEESE_AWS_ACCESS_KEY_ID" \
+    -e AWS_SECRET_ACCESS_KEY="$CHEESE_AWS_SECRET_ACCESS_KEY" \
+    -e AWS_CONFIG_FILE=/aws-config/config \
+    -e AWS_PROFILE=onprem \
+    -e AWS_DEFAULT_REGION="$DB_REGION" \
+    -e AWS_EC2_METADATA_DISABLED=true \
+    -e HOME=/tmp \
+    -v "$cfg:/aws-config:ro" \
+    "$AWSCLI_IMAGE" "$@"
+}
+
+# Turn an AWS error into a message that names the thing to fix. The three
+# failures customers actually hit are a mistyped key, a key that isn't entitled
+# to CHEESE, and an archived object — each needs a different action.
+db_explain_error() {
+  local out="$1"
+  if printf '%s' "$out" | grep -qiE 'InvalidClientTokenId|SignatureDoesNotMatch|invalid.*access key'; then
+    echo "The access key was rejected — CHEESE_AWS_ACCESS_KEY_ID /" >&2
+    echo "CHEESE_AWS_SECRET_ACCESS_KEY are wrong or the key was rotated." >&2
+    echo "Fix it with:  cheese aws-auth" >&2
+  elif printf '%s' "$out" | grep -qiE 'not authorized to perform: sts:AssumeRole|AccessDenied.*assumed?[- ]role'; then
+    echo "The key is valid but not entitled to CHEESE — it cannot assume" >&2
+    echo "${DB_ROLE_ARN}." >&2
+    echo "Ask the DeepMedChem team to add your key to the CHEESE on-prem group." >&2
+  elif printf '%s' "$out" | grep -qiE 'InvalidObjectState|storage class|archive'; then
+    echo "Part of this database has been moved to S3 archive storage and cannot" >&2
+    echo "be downloaded until DeepMedChem restores it. Please report this —" >&2
+    echo "it needs fixing on our side, not yours." >&2
+  elif printf '%s' "$out" | grep -qiE 'AccessDenied|Forbidden'; then
+    echo "Access denied reading $(db_s3_uri) — your key is valid but its" >&2
+    echo "permissions don't cover this database. Contact the DeepMedChem team." >&2
+  elif printf '%s' "$out" | grep -qiE 'could not connect|network|timed out|timeout|temporary failure in name resolution|EndpointConnectionError'; then
+    echo "Could not reach AWS S3 — check this host's outbound network/proxy." >&2
+    echo "The stack needs HTTPS access to s3.${DB_REGION}.amazonaws.com." >&2
+  elif printf '%s' "$out" | grep -qiE 'Cannot connect to the Docker daemon|permission denied.*docker.sock'; then
+    echo "Cannot talk to Docker — start it (systemctl start docker) and make sure" >&2
+    echo "your user is in the 'docker' group." >&2
+  else
+    echo "Could not read the database bucket." >&2
+  fi
+  local detail
+  detail=$(printf '%s\n' "$out" | grep -iE 'error|denied|invalid|expired|fatal' | head -1)
+  [ -n "$detail" ] && echo "  (aws: ${detail})" >&2
+  return 0
+}
+
+# Connectivity + entitlement check. Verifies in order: credentials work at all
+# (get-caller-identity as the assumed role) and the bucket is actually readable
+# (a one-key listing of the first catalogued database). Cheap, and fails in
+# seconds with a message that points at the right knob.
+db_ping() {
+  db_require_creds || return 1
+  echo "Checking access to $(db_s3_uri)..."
+  local out rc
+  out=$(aws_db sts get-caller-identity --query Arn --output text 2>&1); rc=$?
+  if [ "$rc" -ne 0 ]; then db_explain_error "$out"; return 1; fi
+
+  # Reading is the right that matters, so prove it against a real prefix.
+  local probe
+  probe="$(list_db_dirs 2>/dev/null | head -1)"
+  if [ -n "$probe" ]; then
+    out=$(aws_db s3api list-objects-v2 --bucket "$DB_BUCKET" --prefix "$probe/" \
+            --max-keys 1 --query 'KeyCount' --output text 2>&1); rc=$?
+    if [ "$rc" -ne 0 ]; then db_explain_error "$out"; return 1; fi
+  fi
+  echo "Connected."
+  return 0
+}
+
+# ── Catalog ───────────────────────────────────────────────────────────────────
+# Lines are "folder|bytes|objects"; blank lines and # comments are ignored.
+_db_catalog_field() {
+  local db="$1" field="$2"
+  [ -f "$DB_CATALOG" ] || return 1
+  awk -F'|' -v db="$db" -v f="$field" '
+    /^[[:space:]]*(#|$)/ { next }
+    $1 == db { print $f; found=1; exit }
+    END { exit (found?0:1) }
+  ' "$DB_CATALOG"
+}
+
+# Database folder names, one per line, sorted.
 list_db_dirs() {
-  local listing
-  if ! listing=$(rclone_sftp lsf --dirs-only "$(db_remote)"); then
-    echo "Could not list databases on ${DB_SERVER} — check connectivity and that" >&2
-    echo "CHEESE_DB_PASSWORD is correct." >&2
+  if [ ! -f "$DB_CATALOG" ]; then
+    echo "Database catalog $DB_CATALOG is missing — reinstall or update the" >&2
+    echo "cheese-on-prem scripts (cheese update-scripts)." >&2
     return 1
   fi
-  printf '%s\n' "$listing" | sed 's:/*$::; /^[[:space:]]*$/d' | sort
+  awk -F'|' '/^[[:space:]]*(#|$)/ { next } { print $1 }' "$DB_CATALOG" | sort
+}
+
+# Human-readable size for a database, from the catalog. Informational only — it
+# tells the operator whether they have the disk before starting a 200 GB pull.
+db_catalog_size() {
+  local bytes
+  bytes="$(_db_catalog_field "$1" 2 2>/dev/null)" || return 0
+  [ -z "$bytes" ] && return 0
+  awk -v b="$bytes" 'BEGIN{
+    split("B KiB MiB GiB TiB",u," "); i=1
+    while (b>=1024 && i<5) { b/=1024; i++ }
+    printf (i<=2 ? "%.0f %s" : "%.1f %s"), b, u[i]
+  }'
+}
+
+db_catalog_objects() { _db_catalog_field "$1" 3 2>/dev/null || true; }
+
+# Is this database folder present and readable with our credentials? One cheap
+# request — used to flag catalog entries the key isn't entitled to (or that were
+# withdrawn) instead of failing later mid-download.
+db_exists() {
+  local db="$1" count
+  count=$(aws_db s3api list-objects-v2 --bucket "$DB_BUCKET" --prefix "$db/" \
+            --max-keys 1 --query 'KeyCount' --output text 2>/dev/null) || return 1
+  [ "$count" = "1" ]
 }

@@ -2,6 +2,29 @@
 
 echo Installing CHEESE...
 
+# ── Dependency check ─────────────────────────────────────────────────────────
+# docker runs the stack; the AWS CLI authenticates to the image registry and
+# downloads the databases. Both are needed before the first pull, and both are
+# much cheaper to flag here than to discover half-way through setup. This warns
+# and offers to install rather than aborting, so an operator who provisions
+# tooling their own way isn't blocked.
+check_dependency() {
+  cmd="$1"; label="$2"; installer="$3"
+  command -v "$cmd" >/dev/null 2>&1 && return 0
+  echo
+  echo "WARNING: $label is not installed (no '$cmd' on PATH)."
+  if [ -n "$installer" ] && [ -f "$installer" ]; then
+    read -r -p "Install it now with $installer? [y/N] " ans
+    case "${ans:-N}" in
+      [Yy]*) bash "$installer" || echo "  ($label install failed — install it manually and re-run.)" ;;
+      *)     echo "  Skipped. Install $label before 'cheese update-images'." ;;
+    esac
+  fi
+}
+
+check_dependency docker "Docker" "./install/install-docker.sh"
+check_dependency aws "the AWS CLI v2" "./install/install-aws-cli.sh"
+
 # Environment file is in ./config/cheese-env.conf.template
 env_file="./config/cheese-env.conf.template"
 

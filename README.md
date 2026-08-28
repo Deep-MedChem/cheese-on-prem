@@ -9,6 +9,16 @@ Full CHEESE platform on-premises version.
 - A physical or virtual machine with Ubuntu 24.
 - git
 - Docker; the unix user must be a member of the `docker` group (check by running `docker ps`).
+- The **AWS CLI v2** (`aws --version`). CHEESE uses it to authenticate to the
+  image registry and to download the indexed databases. Install it with
+  `bash install/install-aws-cli.sh` if you don't have it — use AWS's own
+  installer rather than `apt install awscli`, which on some Ubuntu releases is
+  still v1 and cannot refresh credentials during a long database transfer.
+- Outbound HTTPS to AWS in `us-east-1` (ECR for images, S3 for databases). No
+  inbound access is needed.
+- Disk space for the databases you select. They are large — individual databases
+  range from about 3 GB to 1.5 TB; `cheese configure-dbs` shows each size before
+  you commit to downloading.
 
 ## Installing CHEESE
 
@@ -29,9 +39,16 @@ bash install-cheese.sh
 ``` 
 in the repo's directory. Follow the prompts. Then re-log in to the shell (or run `source ~/.bashrc`) and check if the installation completed by running `cheese`
 
-3. Contact us to provide you with registry credentials (`CHEESE_AWS_ACCESS_KEY_ID` + `CHEESE_AWS_SECRET_ACCESS_KEY`) to be able to download CHEESE docker images. (The legacy `CHEESE_PASSWORD` no longer works — the old Azure registry has been retired.)
+3. Contact us for your **AWS access key** (an access key ID and a secret). One
+   key covers everything: pulling the CHEESE images and downloading the
+   databases. There is no separate database password. (The legacy
+   `CHEESE_PASSWORD` and the `DB_SERVER`/`CHEESE_DB_PASSWORD` SFTP settings no
+   longer work — the Azure registry and the SFTP server have both been retired.)
 
-4. Run `cheese update-env` and insert the credentials in the config file
+4. Run `cheese aws-auth` and paste the key when prompted. It checks the key
+   against AWS before storing it, so you find out immediately whether it works,
+   and it writes it to a file only your user can read. You only do this once —
+   re-run it to rotate a key, or `cheese aws-auth --check` to re-test one.
 
 5. Run `cheese update-images` to be able to download the docker images. _This step will take a while!_
 
@@ -52,7 +69,8 @@ Database download happens in two steps:
 
 1. `cheese configure-dbs`
 
-Will fetch the list of available databases from the CHEESE SFTP server. 
+Will list the databases available to you, with their sizes, so you can choose
+what to download. 
 
 2. fetches the selected databases and auto-register them in the engine config: 
 
@@ -174,6 +192,6 @@ docker stats $(docker compose -p cheese ps -q)
 
 * Nginx
 * Oauth2
-* Rclone
+* AWS CLI v2 (image registry auth + database downloads)
 
 Automatically pulled by `docker` upon installation.
