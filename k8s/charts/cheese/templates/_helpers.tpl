@@ -37,19 +37,69 @@ app.kubernetes.io/component: {{ $component }}
 {{- end -}}
 
 {{/*
-Image reference. Takes an image block — e.g. `.Values.database.image` — and
-returns "<repository>:<tag>" from the selected source.
+Image reference. Returns "<repository>:<tag>" for the selected source.
+
+Call it with the root context so `source: ecr` can compose paths from the shared
+`onprem` settings:
+
+    {{ include "cheese.image" (list $ .Values.database.image) }}
+
+A bare image block still works (`include "cheese.image" $db.image`) for callers
+that predate this, but then `source: ecr` has nothing to compose from and fails
+with an explicit message rather than rendering a half-built reference.
+
+Sources:
+  local — an image already on the node (kind dev). Used verbatim.
+  ecr   — DeepMedChem's registry. Composed as
+          <onprem.registry>/on-prem/<ecr.image>/<onprem.customer>:<tag>
+          so the customer slug lives in ONE place rather than in every
+          component. Per-component ecr.tag wins over onprem.imageTag.
+  acr   — RETIRED. The Azure registry account was shut down in July 2026 and is
+          unreachable, so this fails at render time. Left in place only so an
+          existing values.yaml gets a message that says what to do instead of an
+          ImagePullBackOff nobody can explain.
 */}}
+{{- define "cheese._imageCtx" -}}
+{{- /* Normalise both call styles into a dict of root + image block. */ -}}
+{{- if kindIs "slice" . -}}
+{{- dict "root" (index . 0) "img" (index . 1) | toYaml -}}
+{{- else -}}
+{{- dict "root" nil "img" . | toYaml -}}
+{{- end -}}
+{{- end -}}
+
 {{- define "cheese.image" -}}
-{{- $src := .source -}}
-{{- $img := index . $src -}}
-{{- printf "%s:%s" $img.repository (default "latest" $img.tag) -}}
+{{- $ctx := fromYaml (include "cheese._imageCtx" .) -}}
+{{- $image := $ctx.img -}}
+{{- $src := $image.source -}}
+{{- if eq $src "acr" -}}
+{{- fail "image.source: acr is retired — the Azure registry account was shut down in July 2026 and cannot be pulled from. Use source: ecr and set onprem.customer (see k8s/README.md, \"Images\")." -}}
+{{- end -}}
+{{- $sel := index $image $src -}}
+{{- if eq $src "ecr" -}}
+{{- $root := $ctx.root -}}
+{{- if not $root -}}
+{{- fail "source: ecr needs the root context — call this helper as (list $ <image block>), not with the image block alone." -}}
+{{- end -}}
+{{- $op := $root.Values.onprem -}}
+{{- if not $op.customer -}}
+{{- fail "source: ecr requires onprem.customer — the per-customer segment of on-prem/<image>/<customer>. DeepMedChem issues you this slug together with your access key." -}}
+{{- end -}}
+{{- if not $sel.image -}}
+{{- fail (printf "source: ecr requires ecr.image (the <image> in on-prem/<image>/<customer>) on this component") -}}
+{{- end -}}
+{{- $tag := $sel.tag | default $op.imageTag | default "latest" -}}
+{{- printf "%s/on-prem/%s/%s:%s" (trimSuffix "/" $op.registry) $sel.image $op.customer $tag -}}
+{{- else -}}
+{{- printf "%s:%s" $sel.repository (default "latest" $sel.tag) -}}
+{{- end -}}
 {{- end -}}
 
 {{- define "cheese.imagePullPolicy" -}}
-{{- $src := .source -}}
-{{- $img := index . $src -}}
-{{- default "IfNotPresent" $img.pullPolicy -}}
+{{- $ctx := fromYaml (include "cheese._imageCtx" .) -}}
+{{- $image := $ctx.img -}}
+{{- $sel := index $image $image.source -}}
+{{- default "IfNotPresent" $sel.pullPolicy -}}
 {{- end -}}
 
 {{/*
@@ -57,9 +107,16 @@ Image pull secrets block: emits "imagePullSecrets:" only when source = acr.
 Pass an image block (e.g. `.Values.orchestrator.image`).
 */}}
 {{- define "cheese.imagePullSecrets" -}}
-{{- if eq .source "acr" }}
+{{- $ctx := fromYaml (include "cheese._imageCtx" .) -}}
+{{- $image := $ctx.img -}}
+{{- if eq $image.source "ecr" }}
+{{- $root := $ctx.root }}
+{{- $name := $image.ecr.pullSecret | default (and $root $root.Values.onprem.pullSecret) | default "cheese-ecr-pull" }}
 imagePullSecrets:
-  - name: {{ default "cheese-acr-pull" .acr.pullSecret }}
+  - name: {{ $name }}
+{{- else if eq $image.source "acr" }}
+imagePullSecrets:
+  - name: {{ default "cheese-acr-pull" $image.acr.pullSecret }}
 {{- end }}
 {{- end -}}
 

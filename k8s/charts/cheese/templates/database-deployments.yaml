@@ -33,7 +33,7 @@ spec:
       labels:
         {{- include "cheese.componentSelectorLabels" (list $root $component) | nindent 8 }}
     spec:
-      {{- include "cheese.imagePullSecrets" $db.image | nindent 6 }}
+      {{- include "cheese.imagePullSecrets" (list $ $db.image) | nindent 6 }}
       securityContext:
         {{- toYaml $db.podSecurityContext | nindent 8 }}
       volumes:
@@ -47,8 +47,8 @@ spec:
         - name: {{ $roleName }}
           securityContext:
             {{- toYaml $db.securityContext | nindent 12 }}
-          image: {{ include "cheese.image" $db.image | quote }}
-          imagePullPolicy: {{ include "cheese.imagePullPolicy" $db.image }}
+          image: {{ include "cheese.image" (list $ $db.image) | quote }}
+          imagePullPolicy: {{ include "cheese.imagePullPolicy" (list $ $db.image) }}
           {{- if $role.fileServer }}
           {{- $served := printf "%s/%s" (trimSuffix "/" $root.Values.data.mountPath) (trimPrefix "/" $db.env.jobs_data_path) }}
           command: ["bash", "-c", {{ printf "mkdir -p %s && exec python3 -m http.server %v --directory %s" $served $role.port $served | quote }}]
