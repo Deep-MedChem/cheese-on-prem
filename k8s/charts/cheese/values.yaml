@@ -40,6 +40,30 @@ deployment:
 # --- Shared data plane -----------------------------------------------------
 # Single PVC mounted at /data by database, orchestrator, synthongpt, alignment.
 # Search UI / ketcher / inference are stateless and don't mount it.
+# ===========================================================================
+# On-prem registry (source: ecr)
+# ===========================================================================
+# DeepMedChem publishes the licensed product images per customer, as
+#   <registry>/on-prem/<image>/<customer>:<tag>
+# Set `customer` once here and every component with `image.source: ecr` composes
+# its own path — the slug is not repeated per component, so onboarding a new
+# customer is a one-line change.
+onprem:
+  registry: 815935788477.dkr.ecr.us-east-1.amazonaws.com
+  # The per-customer segment. REQUIRED when any component uses source: ecr;
+  # rendering fails with an explicit message if it is empty. DeepMedChem issues
+  # this slug along with your access key. (The old `cheese-customer` value was
+  # Azure-era notation, not a real per-customer identity.)
+  customer: ""
+  # Default tag for every ecr image; a component's own ecr.tag overrides it.
+  # `develop` tracks the development channel, `latest` tracks main.
+  imageTag: develop
+  # Secret the kubelet pulls with. NOTE: an ECR docker-login token is valid for
+  # only 12 HOURS, so a static Secret stops working the next time a pod is
+  # rescheduled. Refresh it (a CronJob, external-secrets, or an EKS node role
+  # with the ECR credential provider) — see k8s/README.md, "Images".
+  pullSecret: cheese-ecr-pull
+
 data:
   pvcName: cheese-data-pvc
   mountPath: /data
@@ -51,11 +75,16 @@ database:
   enabled: true
 
   image:
-    source: local                            # local | acr
+    source: local                            # local | ecr  (acr is RETIRED: fails at render)
     local:
       repository: cheese-database-local
       tag: dev
       pullPolicy: IfNotPresent
+    ecr:
+      image: cheese-database
+      tag: ""                                # empty -> onprem.imageTag
+      pullPolicy: IfNotPresent
+      # pullSecret: ""                       # empty -> onprem.pullSecret
     acr:
       repository: cheese.azurecr.io/on-prem/cheese-database/cheese-customer
       tag: latest
@@ -219,11 +248,16 @@ synthongpt:
   enabled: false
 
   image:
-    source: acr                            # local | acr
+    source: ecr                            # local | ecr  (acr is RETIRED: fails at render)
     local:
       repository: cheese-synthongpt-local
       tag: dev
       pullPolicy: IfNotPresent
+    ecr:
+      image: cheese-synthongpt
+      tag: ""                                # empty -> onprem.imageTag
+      pullPolicy: IfNotPresent
+      # pullSecret: ""                       # empty -> onprem.pullSecret
     acr:
       repository: cheese.azurecr.io/on-prem/cheese-synthongpt/cheese-customer
       tag: latest
@@ -282,11 +316,16 @@ orchestrator:
   enabled: true
 
   image:
-    source: local                            # local | acr
+    source: local                            # local | ecr  (acr is RETIRED: fails at render)
     local:
       repository: cheese-orchestrator-local
       tag: dev
       pullPolicy: IfNotPresent
+    ecr:
+      image: cheese-orchestrator
+      tag: ""                                # empty -> onprem.imageTag
+      pullPolicy: IfNotPresent
+      # pullSecret: ""                       # empty -> onprem.pullSecret
     acr:
       repository: cheese.azurecr.io/on-prem/cheese-orchestrator/cheese-customer
       tag: latest
@@ -384,11 +423,16 @@ searchUi:
   enabled: false
 
   image:
-    source: local                            # local | acr
+    source: local                            # local | ecr  (acr is RETIRED: fails at render)
     local:
       repository: cheese-search-ui-local
       tag: dev
       pullPolicy: IfNotPresent
+    ecr:
+      image: cheese-search-ui
+      tag: ""                                # empty -> onprem.imageTag
+      pullPolicy: IfNotPresent
+      # pullSecret: ""                       # empty -> onprem.pullSecret
     acr:
       repository: cheese.azurecr.io/on-prem/cheese-search-ui/cheese-customer
       tag: latest
@@ -483,11 +527,16 @@ searchUi:
 ketcher:
   enabled: false
   image:
-    source: local                            # local | acr
+    source: local                            # local | ecr  (acr is RETIRED: fails at render)
     local:
       repository: cheese-ketcher-local
       tag: dev
       pullPolicy: IfNotPresent
+    ecr:
+      image: ketcher
+      tag: ""                                # empty -> onprem.imageTag
+      pullPolicy: IfNotPresent
+      # pullSecret: ""                       # empty -> onprem.pullSecret
     acr:
       repository: cheese.azurecr.io/on-prem/ketcher/cheese-customer
       tag: latest
@@ -531,6 +580,11 @@ inference:
       repository: cheese-inference-local
       tag: dev
       pullPolicy: IfNotPresent
+    ecr:
+      image: cheese-electrostatics-inference
+      tag: ""                                # empty -> onprem.imageTag
+      pullPolicy: IfNotPresent
+      # pullSecret: ""                       # empty -> onprem.pullSecret
     acr:
       repository: cheese.azurecr.io/on-prem/cheese-electrostatics-inference/cheese-customer
       tag: latest                          # this image has no per-branch tag upstream; always latest
@@ -568,6 +622,11 @@ alignment:
       repository: cheese-alignment-service-local
       tag: dev
       pullPolicy: IfNotPresent
+    ecr:
+      image: cheese-alignment-service
+      tag: ""                                # empty -> onprem.imageTag
+      pullPolicy: IfNotPresent
+      # pullSecret: ""                       # empty -> onprem.pullSecret
     acr:
       repository: cheese.azurecr.io/on-prem/cheese-alignment-service/cheese-customer
       tag: latest
