@@ -62,10 +62,8 @@ CHEESE has two licensing schemes. On Kubernetes only one of them applies:
   hardware id**. It cannot work on a cluster whose nodes change, so it is offered
   only for single-host Docker Compose installs.
 
-> **⚠️ Status, so nobody is misled.** Two pieces of this are still being
-> finished: the licence agent is **not yet a template in this chart** (it is
-> deployed separately for now), and **no released product image verifies a v1
-> licence yet** — that port is open work in the four gated repos. Until it lands,
+> **⚠️ Status, so nobody is misled.** **No released product image verifies a v1
+> licence yet** — that port is open work in the four gated repos. Until it ships,
 > a v1 key is issued but not enforced, and a v1 licence *file* handed to a current
 > image will be rejected by its v0 verifier with a misleading
 > "signature does not match". Talk to us before wiring licensing into a partner
