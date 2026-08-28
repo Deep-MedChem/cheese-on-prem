@@ -1,197 +1,109 @@
-# CHEESE platform on-premises 
+# CHEESE platform — on-premises
 
 ![cheese.png](assets/cheese.png)
 
-Full CHEESE platform on-premises version.
+CHEESE (**CH**emical **E**mbeddings **S**earch **E**ngine) run entirely inside
+your own infrastructure. Ultra-large chemical space search over billions of
+molecules, with no data leaving your network: molecules you search are never
+sent anywhere, and the databases you download are yours to keep offline.
 
-### Requirements
+This repository contains everything needed to deploy it. Pick the install type
+that matches your infrastructure — each is self-contained and has its own guide.
 
-- A physical or virtual machine with Ubuntu 24.
-- git
-- Docker; the unix user must be a member of the `docker` group (check by running `docker ps`).
-- The **AWS CLI v2** (`aws --version`). CHEESE uses it to authenticate to the
-  image registry and to download the indexed databases. Install it with
-  `bash install/install-aws-cli.sh` if you don't have it — use AWS's own
-  installer rather than `apt install awscli`, which on some Ubuntu releases is
-  still v1 and cannot refresh credentials during a long database transfer.
-- Outbound HTTPS to AWS in `us-east-1` (ECR for images, S3 for databases). No
-  inbound access is needed.
-- Disk space for the databases you select. They are large — individual databases
-  range from about 3 GB to 1.5 TB; `cheese configure-dbs` shows each size before
-  you commit to downloading.
+---
 
-## Installing CHEESE
+## Choose your install
 
-### 1. CHEESE CLI
+| | Install | Guide | Use it when |
+|---|---|---|---|
+| <kbd>🐳 compose</kbd> | **Docker Compose on a single host** | **[docs/compose-install.md](docs/compose-install.md)** | The standard install. You have a VM or physical server and want the whole platform running with one command. Start here unless you specifically need Kubernetes. |
+| <kbd>☸️ k8s</kbd> | **Kubernetes (Helm chart)** | **[k8s/README.md](k8s/README.md)** | You already run a Kubernetes cluster and want CHEESE deployed into it with your existing storage, ingress and secret management. |
 
-You can install CHEESE on your instance using the following steps :
+Both install types run the same product images and read the same databases. They
+differ only in how the containers are orchestrated.
 
-1. Clone this repository 
+---
 
-```bash
-git clone git@github.com:Deep-MedChem/cheese-on-prem.git
+## What you need, whichever install you choose
+
+### <kbd>🔑 credentials</kbd> One AWS access key
+
+DeepMedChem issues you a single AWS access key (an ID starting with `AKIA` and a
+secret). That one key does everything: it pulls the container images **and**
+downloads the indexed databases. There is no separate database password.
+
+The key carries no permissions of its own — its only right is to assume a
+read-only role. So the worst case if it leaks is that someone can download the
+images and databases you are already licensed for.
+
+### <kbd>📄 licence</kbd> A licence file
+
+The product images verify a licence file at startup. After your first image pull
+you generate a key, send it to us, and we return the licence file. The Compose
+guide walks through this; on Kubernetes it is supplied as a Secret.
+
+### <kbd>🌐 network</kbd> Outbound HTTPS to AWS
+
+Both installs need outbound HTTPS to AWS in `us-east-1` — Elastic Container
+Registry for the images, S3 for the databases. **No inbound access is required**,
+and nothing phones home during normal operation.
+
+### <kbd>💾 disk</kbd> Room for the databases
+
+The databases are the bulk of the footprint, and they are large. A CHEESE licence
+entitles you to **all** of them, so the only question is which ones you have room
+for. Run `cheese configure-dbs` to see the full list with exact sizes before
+committing to a download.
+
+| | Size |
+|---|---|
+| The whole catalogue (20 databases) | **≈ 8 TB** |
+| Largest single database (`10B_Beyond_RO5_chunks`) | ≈ 1.3 TB |
+| Smallest single database (`enamine_amino_acids`) | ≈ 625 MB |
+| A typical useful starting set (e.g. ZINC15 + MCULE in-stock + MolPort) | ≈ 135 GB |
+| Bundled test database | a few MB, ships with this repo |
+
+Downloads are resumable and incremental, so a large database can be fetched over
+several sessions. Plan for the sum of what you select plus roughly 10% headroom.
+
+### <kbd>🖥️ compute</kbd> Hardware
+
+Search is CPU- and memory-bound; a GPU is optional and only accelerates the
+embedding/indexing of your own custom databases. Sizing depends heavily on which
+databases you load and how many concurrent users you expect — contact us and we
+will size it with you.
+
+---
+
+## Repository layout
+
+```
+install-cheese.sh        Installs the `cheese` CLI (Docker Compose install)
+docker-compose.yml       The stack; docker-compose.supabase.yml adds accounts
+scripts/                 The `cheese` command and its subcommands
+config/                  Config templates + the database catalogue
+install/                 Dependency installers and the environment loader
+docs/                    Documentation, including the Compose install guide
+tests/                   The bundled test database
+k8s/                     Kubernetes install: the CHEESE Helm chart, plus
+                         local-dev tooling for testing it on kind
+assets/                  Images used by the documentation
+deprecated/              Retired components, kept for reference only
 ```
 
-2. Install CHEESE CLI: 
+The Docker Compose install lives at the repository root; the Kubernetes install
+is self-contained under `k8s/`.
 
-```bash
-bash install-cheese.sh
-``` 
-in the repo's directory. Follow the prompts. Then re-log in to the shell (or run `source ~/.bashrc`) and check if the installation completed by running `cheese`
+Reference documentation lives in [docs/](docs/) — including
+[database-configuration.md](docs/database-configuration.md), which
+explains how databases are delivered and how the engine discovers them. That one
+is worth reading whichever install type you use, since the database layout and
+the engine's config maps are the same in both.
 
-3. Contact us for your **AWS access key** (an access key ID and a secret). One
-   key covers everything: pulling the CHEESE images and downloading the
-   databases. There is no separate database password. (The legacy
-   `CHEESE_PASSWORD` and the `DB_SERVER`/`CHEESE_DB_PASSWORD` SFTP settings no
-   longer work — the Azure registry and the SFTP server have both been retired.)
+---
 
-4. Run `cheese aws-auth` and paste the key when prompted. It checks the key
-   against AWS before storing it, so you find out immediately whether it works,
-   and it writes it to a file only your user can read. You only do this once —
-   re-run it to rotate a key, or `cheese aws-auth --check` to re-test one.
+## Support
 
-5. Run `cheese update-images` to be able to download the docker images. _This step will take a while!_
-
-6. After `cheese-database` image is successfully pulled, run `cheese generate-license-key` to generate your license key.
-
-7. Send us the key so that we can generate your license file.
-
-8. Once we send you the JSON license file, run `cheese update-license` and paste its contents there.
-
-9. You can now use CHEESE on-prem version. Start the platform by running `cheese start`
-> This starts a docker network of about 10 containers. The startup takes a few minutes.
-
-### 2. CHEESE databases
-
-By default, CHEESE comes with a small test database which can be used to test the general workflow.
-
-Database download happens in two steps:
-
-1. `cheese configure-dbs`
-
-Will list the databases available to you, with their sizes, so you can choose
-what to download. 
-
-2. fetches the selected databases and auto-register them in the engine config: 
-
-```bash
-cheese download-dbs --dest <folder>
-```
-For how the engine recognizes a
-database (the required folder structure and the `OUTPUT_DIRECTORIES` /
-`INDEX_TYPES` / `DELIMITERS` config entries), and how to fix a DB that won't
-load, see [docs/database-configuration.md](docs/database-configuration.md).
-
-### Authentication & user accounts (optional)
-
-By default, CHEESE on-prem runs with no authentication: anyone who can reach the
-UI gets the full product, and everyone shares one workspace (searches, downloads
-and history are common to all users). Two independent options change that:
-
-#### Option A — per-user accounts with private spaces (self-hosted Supabase)
-
-Every user signs in with their own email/password and gets a **private space**
-(their searches, downloads and history are visible only to them), while all
-accounts keep full access to the product. This runs a slim self-hosted Supabase
-next to CHEESE — it needs nothing from your infrastructure except Docker.
-
-```bash
-cheese setup-supabase        # generates secrets, pulls + starts Supabase, wires the config
-cheese update-images         # pulls the auth-enabled UI variant (<channel>-auth)
-cheese stop && cheese start
-```
-
-> The login UI is compiled into the image at build time, so accounts use a
-> dedicated **auth variant** of the UI image (`<channel>-auth`, e.g.
-> `develop-auth`). `cheese setup-supabase` selects it automatically via
-> `CHEESE_UI_IMAGE_TAG`; the rest of the stack stays on the regular channel tag.
-
-Full guide: [docs/supabase-auth-setup.md](docs/supabase-auth-setup.md).
-
-#### Option B — sign-in via your corporate IdP (SSO perimeter)
-
-An nginx + oauth2-proxy perimeter in front of CHEESE forces every visitor to
-sign in through your own identity provider (Azure/Entra ID, Okta, or any OIDC
-IdP) before anything reaches the stack. Configure with `cheese configure-oauth2`
-and `cheese configure-nginx`, then set `NGINX=true` and restart.
-
-> Note: SSO controls **who gets in**, but behind it all users still share one
-> common workspace — it does not create per-user private spaces. Combine it with
-> Option A if you want both corporate sign-in and per-user isolation (with the
-> perimeter on, Supabase is served through nginx at `https://<host>/supabase`
-> and is never exposed on its own port).
-
-Full guide: [docs/custom-auth-setup.md](docs/custom-auth-setup.md).
-
-
-## Housekeeping
-
-### Updating CHEESE
-
-Currently, there is no support for automatic updates (COMING SOON!). 
-When we notify you that the update is necessary, please run:
-```bash
-cheese update  
-```
-It pulls the latest scripts from this repo and writes them as well as the images from the container repository.
-
-### Troubleshooting
-
-```bash
-cheese doctor
-```
-Identifies unhealthy containers and runs basic diagnostics. 
-
-## Uninstall
-
-```bash
-cheese uninstall
-```
-
-Following the prompts, you chose to delete all or either of:
-- cheese environment
-- cheese images
-- cheese scripts
-
-## What's under the hood
-
-CHEESE stack is managed by `docker compose` - you can use common `compose` commands to diagnose and troubleshoot.
-The stack runs as the compose project `cheese`, so target it with `-p cheese`.
-Service names are `db`, `api`, `ui`, `jobs-db`, `jobs-exec`, `download-exec`, `file-server`, `inference`, `alignment`, `ketcher`.
-Examples:
-
-* Status — every CHEESE container and whether it's healthy:
-```bash
-docker compose -p cheese ps
-```
-
-* Inspecting — follow a service's logs live, tail the whole stack, or look at one container by name:
-```bash
-docker compose -p cheese logs -f api        # follow one service
-docker compose -p cheese logs --tail 100    # last 100 lines, all services
-docker logs cheese-file-server --tail 20    # a single container by name
-```
-
-* Restart a single service (e.g. after editing the engine config):
-```bash
-docker compose -p cheese restart api
-```
-
-* Open a shell inside a container to poke around:
-```bash
-docker compose -p cheese exec db bash
-```
-
-* Resource usage (CPU / memory) of the running containers:
-```bash
-docker stats $(docker compose -p cheese ps -q)
-```
-
-
-### External dependencies
-
-* Nginx
-* Oauth2
-* AWS CLI v2 (image registry auth + database downloads)
-
-Automatically pulled by `docker` upon installation.
+Reach out to the DeepMedChem team for your access key, your licence file, and
+help sizing a deployment. If something is broken, `cheese doctor` (Compose)
+collects the diagnostics we will ask for.
