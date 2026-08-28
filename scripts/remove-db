@@ -1,0 +1,167 @@
+#!/bin/bash
+# Remove one or more databases from the CHEESE engine config (and optionally
+# delete their indexed folders).
+#
+# Why this exists as a command rather than "just edit the YAML": the engine needs
+# THREE parallel, same-keyed maps for every database — OUTPUT_DIRECTORIES,
+# INDEX_TYPES and DELIMITERS. A key left in one map but dropped from another
+# raises KeyError at import and the DB container crash-loops (see
+# docs/database-configuration.md §1). Hand-editing is exactly how that happens.
+# This command removes a key from all three sections or from none of them.
+#
+# Atomicity: every edit is applied to a temporary copy of the config. The copy
+# replaces the real config only after all requested databases were removed AND
+# the result still passes validation. A failure part-way leaves the live config
+# untouched.
+set -e
+source "$(dirname "$(readlink -f "$0")")/_engine-config"
+
+show_help() {
+  echo "Usage: cheese remove-db <DB-NAME> [<DB-NAME>...] [options]"
+  echo
+  echo "Removes each named database from all three engine config sections"
+  echo "(OUTPUT_DIRECTORIES, INDEX_TYPES, DELIMITERS)."
+  echo
+  echo "Options:"
+  echo "  --purge      Also delete the database folder from disk (irreversible)"
+  echo "  -y, --yes    Don't ask for confirmation"
+  echo "  -h, --help   Show this help message"
+  echo
+  echo "Names are the canonical database names shown by 'cheese doctor', e.g."
+  echo "AURIGENE or SYNPLE-1B — not the distribution folder name."
+  exit 1
+}
+
+purge=false
+assume_yes=false
+names=()
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --purge)   purge=true; shift ;;
+    -y|--yes)  assume_yes=true; shift ;;
+    -h|--help) show_help ;;
+    -*)        echo "Unknown option: $1" >&2; show_help ;;
+    *)         names+=("$1"); shift ;;
+  esac
+done
+
+[ ${#names[@]} -eq 0 ] && { echo "No database name given." >&2; show_help; }
+
+CFG="$(engine_config_path)"
+[ -f "$CFG" ] || { echo "Engine config not found: $CFG" >&2; exit 1; }
+
+SECTIONS=(OUTPUT_DIRECTORIES INDEX_TYPES DELIMITERS)
+
+# ── Resolve and validate before touching anything ───────────────────────────
+# Refuse the whole run if any name is unknown, rather than removing some and
+# failing on the rest — a partial removal is the state we're trying to avoid.
+declare -a paths=()
+unknown=()
+for name in "${names[@]}"; do
+  found=false
+  for sec in "${SECTIONS[@]}"; do
+    if _yaml_key_in_section "$sec" "$name" "$CFG"; then found=true; fi
+  done
+  if [ "$found" = false ]; then
+    unknown+=("$name")
+    continue
+  fi
+  # Capture the folder now — after removal the path is gone from the config.
+  paths+=("$(yaml_get OUTPUT_DIRECTORIES "$name" "$CFG")")
+done
+
+if [ ${#unknown[@]} -gt 0 ]; then
+  echo "Not in $CFG: ${unknown[*]}" >&2
+  echo >&2
+  echo "Configured databases:" >&2
+  yaml_section_keys OUTPUT_DIRECTORIES "$CFG" | sed 's/^/  /' >&2
+  exit 1
+fi
+
+# ── Show the plan ───────────────────────────────────────────────────────────
+echo "Will remove from $CFG:"
+for i in "${!names[@]}"; do
+  if [ "$purge" = true ] && [ -n "${paths[$i]}" ]; then
+    echo "  ${names[$i]}  (and delete ${paths[$i]})"
+  else
+    echo "  ${names[$i]}"
+  fi
+done
+
+if [ "$purge" = true ]; then
+  echo
+  echo "--purge will permanently delete the folders listed above."
+fi
+
+if [ "$assume_yes" != true ]; then
+  echo
+  read -r -p "Proceed? [y/N] " ans
+  case "${ans:-N}" in [Yy]*) : ;; *) echo "Aborted."; exit 1 ;; esac
+fi
+
+# ── Edit a copy, swap it in only if the result is valid ─────────────────────
+tmp="$(mktemp)"
+trap 'rm -f "$tmp" "$tmp.tmp"' EXIT
+cp "$CFG" "$tmp"
+
+for name in "${names[@]}"; do
+  for sec in "${SECTIONS[@]}"; do
+    delete_config_key "$name" "$sec" "$tmp"
+  done
+done
+
+# Nothing we removed may survive in any section, or the engine KeyErrors.
+for name in "${names[@]}"; do
+  for sec in "${SECTIONS[@]}"; do
+    if _yaml_key_in_section "$sec" "$name" "$tmp"; then
+      echo "Internal error: '$name' still present in $sec after removal." >&2
+      echo "Live config left unchanged: $CFG" >&2
+      exit 1
+    fi
+  done
+done
+
+# The three maps must still be key-for-key identical for the remaining DBs.
+remaining=$(yaml_section_keys OUTPUT_DIRECTORIES "$tmp" | sort)
+for sec in INDEX_TYPES DELIMITERS; do
+  if [ "$(yaml_section_keys "$sec" "$tmp" | sort)" != "$remaining" ]; then
+    echo "Internal error: $sec no longer matches OUTPUT_DIRECTORIES." >&2
+    echo "Live config left unchanged: $CFG" >&2
+    exit 1
+  fi
+done
+
+backup="${CFG}.bak-$(date +%Y%m%d-%H%M%S)"
+cp "$CFG" "$backup"
+cp "$tmp" "$CFG"
+echo
+echo "Updated $CFG (previous version saved as $backup)"
+
+# ── Optional folder deletion, after the config no longer references it ──────
+if [ "$purge" = true ]; then
+  for i in "${!names[@]}"; do
+    p="${paths[$i]}"
+    if [ -z "$p" ]; then
+      echo "  ${names[$i]}: no OUTPUT_DIRECTORIES path recorded — nothing to delete"
+      continue
+    fi
+    case "$p" in
+      /) echo "  ${names[$i]}: refusing to delete '/'" >&2; continue ;;
+      /*) : ;;
+      *)  echo "  ${names[$i]}: path '$p' is not absolute — skipping" >&2; continue ;;
+    esac
+    if [ -d "$p" ]; then
+      rm -rf "$p"
+      echo "  deleted $p"
+    else
+      echo "  ${names[$i]}: $p not present — nothing to delete"
+    fi
+  done
+fi
+
+# ── Prove the config still imports ──────────────────────────────────────────
+echo
+echo "Validating the resulting config..."
+validate_engine_config "$CFG" report || true
+echo
+echo "Done. Run 'cheese start' to restart the stack without the removed database(s)."
