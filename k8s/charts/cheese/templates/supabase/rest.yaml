@@ -1,0 +1,78 @@
+{{- if .Values.supabase.enabled -}}
+{{- $s := .Values.supabase -}}
+{{- $sec := include "cheese.supabaseSecretName" . -}}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: supabase-rest
+  labels:
+    {{- include "cheese.componentLabels" (list . "supabase-rest") | nindent 4 }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      {{- include "cheese.componentSelectorLabels" (list . "supabase-rest") | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "cheese.componentSelectorLabels" (list . "supabase-rest") | nindent 8 }}
+    spec:
+      securityContext:
+        {{- toYaml $s.securityContext | nindent 8 }}
+      containers:
+        - name: rest
+          image: "{{ $s.images.rest.repository }}:{{ $s.images.rest.tag }}"
+          imagePullPolicy: {{ $s.imagePullPolicy }}
+          ports:
+            - name: http
+              containerPort: 3000
+              protocol: TCP
+          env:
+            # authenticator role + its password are created by 00-roles.sql (init job).
+            - name: PGPASS
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $sec }}
+                  key: postgresPassword
+            - name: PGRST_DB_URI
+              value: "postgres://authenticator:$(PGPASS)@supabase-db:5432/postgres"
+            - name: PGRST_DB_SCHEMAS
+              value: public
+            - name: PGRST_DB_ANON_ROLE
+              value: anon
+            - name: PGRST_DB_USE_LEGACY_GUCS
+              value: "false"
+            - name: PGRST_JWT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $sec }}
+                  key: jwtSecret
+            - name: PGRST_APP_SETTINGS_JWT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $sec }}
+                  key: jwtSecret
+          readinessProbe:
+            tcpSocket:
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          resources:
+            {{- toYaml $s.resources | nindent 12 }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: supabase-rest
+  labels:
+    {{- include "cheese.componentLabels" (list . "supabase-rest") | nindent 4 }}
+spec:
+  type: ClusterIP
+  ports:
+    - port: 3000
+      targetPort: http
+      protocol: TCP
+      name: http
+  selector:
+    {{- include "cheese.componentSelectorLabels" (list . "supabase-rest") | nindent 4 }}
+{{- end }}

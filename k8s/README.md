@@ -1,0 +1,219 @@
+# cheese-k8s
+
+A single Helm chart (`charts/cheese`) that brings up the whole on-prem CHEESE
+stack from one `helm install`. Every component is toggled with a top-level
+`.enabled` key in **one** `values.yaml` — there are no per-environment overlay
+files. The environment (storage class + ingress class) is selected with
+`deployment.target`.
+
+## Components
+
+| Component | Key | Default | Notes |
+|---|---|---|---|
+| Database (app / jobs-db / jobs-exec / download-exec / **file-server**) | `database.enabled` | on | search engine + result file server, all off one image |
+| Orchestrator | `orchestrator.enabled` | on | the API the UI calls |
+| Search UI | `searchUi.enabled` | on | public frontend |
+| SynthonGPT | `synthongpt.enabled` | on | synthon model server |
+| **Ketcher** | `ketcher.enabled` | on | self-hosted molecule editor (UI iframes it) |
+| **Inference** | `inference.enabled` | off | electrostatics; UI degrades gracefully if absent |
+| **Alignment** | `alignment.enabled` | off | conformer alignment, license-gated |
+| **Supabase** | `supabase.enabled` | off | in-cluster auth + per-user spaces (test profile) |
+| **oauth2-proxy** | `oauth2Proxy.enabled` | off | SSO stub (alternate to Supabase) |
+
+## Deployment target
+
+`deployment.target` selects storage + ingress class (see `templates/_platform.tpl`):
+
+- **`local`** — kind / bare-metal dev. hostPath PV (`cheese-local-manual`) + `nginx`. Fully supported and tested.
+- **`aws`** — **scaffold only** (no AWS sources/images yet): `gp3`/`efs-sc` + `alb` stubs, untested.
+- **`azure`** — **deprecated / unsupported.**
+
+An explicit `deployment.storage.className` / `deployment.ingress.className` always wins.
+
+## Secrets
+
+Each secret-producing component (`database`, `orchestrator`, `searchUi`, `supabase`)
+accepts `secret.existingSecret: <name>`:
+
+- **Set it** → reference your own pre-created Secret (Vault / External Secrets
+  Operator / SealedSecrets / `kubectl create secret`). The chart renders no inline
+  Secret. Required keys per component are listed in `values-secrets.yaml.example`.
+- **Leave it empty** → the chart renders the Secret inline from your values
+  (self-contained / local path). See `values-secrets.yaml.example`.
+
+## Quick start
+
+Prerequisites: a Kubernetes cluster (≥ 1.28) with an ingress controller,
+`kubectl`, `helm` ≥ 3.14. All commands run from this `k8s/` directory.
+
+> **No cluster yet / just testing?** [`local-dev/`](local-dev/README.md) holds
+> the internal kind test harness (throwaway cluster config, source-image
+> build/sideload tooling). Nothing in it is needed for a real deployment.
+
+```bash
+# 1. Stage data on /data (license file, per-database dirs, SynthonGPT tree),
+#    all chowned 2112:0. The chart creates the PV + PVC for you — no manual
+#    kubectl apply. Layout + staging commands: docs/pvc-data-runbook.md.
+
+# 2. Images — apply the registry pull secret; kubelet pulls
+#    cheese.azurecr.io/on-prem/<svc>/cheese-customer:latest at install
+#    (image.source: acr, the default):
+cp manifests/base/image-pull-secret.example.yaml manifests/base/image-pull-secret.yaml
+$EDITOR manifests/base/image-pull-secret.yaml      # fill in real registry creds
+kubectl create namespace cheese
+kubectl apply -f manifests/base/image-pull-secret.yaml
+
+# 3. Fill in secrets and install with your profile
+cp charts/cheese/values-secrets.yaml.example charts/cheese/values-secrets.yaml
+$EDITOR charts/cheese/values-secrets.yaml
+helm install cheese charts/cheese -n cheese --create-namespace \
+  -f charts/cheese/values-secrets.yaml \
+  -f local-profile.yaml          # see "Profiles" below (or use --set flags)
+
+# 4. Wait for rollouts (SynthonGPT loads checkpoints — give it ~10m)
+kubectl -n cheese get pods
+```
+
+With the local profile: UI → `http://cheese-ui.localtest.me`, orchestrator →
+`http://cheese-api.localtest.me` (both resolve to `127.0.0.1` — swap in your
+real hostnames via the ingress values for anything non-local).
+
+## Profiles
+
+The single `values.yaml` defaults are production-leaning (target=local but supabase
+off, etc.). Layer a tiny profile file (or `--set` flags) for each environment.
+
+**local / test** (`local-profile.yaml`) — in-cluster Supabase auth, local storage:
+
+```yaml
+deployment:
+  target: local
+supabase:
+  enabled: true
+  allowedEmailDomains: [deepmedchem.com]
+orchestrator:
+  supabase:
+    enable: "true"
+  env:
+    enable_auth: "true"
+ketcher:
+  enabled: true
+  ingress:                          # ketcher origin must be browser-reachable
+    enabled: true
+    hosts: [{ host: cheese-ketcher.localtest.me }]
+```
+
+**prod (aws scaffold)** (`prod-profile.yaml`) — external secrets, no in-cluster Supabase:
+
+```yaml
+deployment:
+  target: aws                       # scaffold; storageClass/ingress are stubs until AWS images exist
+  storage:
+    accessMode: ReadWriteMany       # efs-sc — required to scale the search role across nodes
+database:   { secret: { existingSecret: cheese-database } }
+orchestrator: { secret: { existingSecret: cheese-orchestrator } }
+searchUi:   { secret: { existingSecret: cheese-search-ui-secret } }
+supabase:   { enabled: false }
+inference:  { enabled: true }
+alignment:  { enabled: true }
+searchUi:
+  config:
+    FRONTEND_URL: https://cheese.example.com
+    KETCHER_ORIGIN: https://ketcher.example.com
+    SUPABASE_PUBLIC_URL: https://supabase.example.com
+```
+
+## Headless (API-only)
+
+Set `searchUi.enabled: false` and turn auth off:
+
+```yaml
+searchUi:     { enabled: false }
+ketcher:      { enabled: false }
+orchestrator:
+  supabase: { enable: "false" }
+  env:      { enable_auth: "false" }
+```
+
+You get `cheese-database` + `cheese-synthongpt` + `cheese-orchestrator` behind the
+`cheese-api.localtest.me` ingress, no UI/auth. Sanity-check:
+`curl -sf http://cheese-api.localtest.me/health`.
+
+## Generate license
+
+The license is keyed to the host hardware of the node running the database
+container, so keygen runs as a pod on that node:
+
+```bash
+kubectl run -n cheese cheese-license-keygen --rm -it --restart=Never \
+  --image=cheese.azurecr.io/on-prem/cheese-database/cheese-customer:latest \
+  --overrides='{"spec":{"imagePullSecrets":[{"name":"cheese-acr-pull"}]}}' \
+  --command -- python -c 'from generate_license_ID import main; main()'
+```
+
+Send the key to support, then drop the returned JSON onto `/data` on the host:
+
+```bash
+cp cheese_license_file.json /data/cheese_license_file.json
+chown 2112:0 /data/cheese_license_file.json
+```
+
+Set `database.secret.cheeseLicenseFile` and `orchestrator.secret.cheeseLicenseFile`
+to that filename (they must match — one shared PVC). On kind the node is itself a
+container and fakes the hardware identity — see
+[`local-dev/README.md`](local-dev/README.md) for the extra steps.
+
+## Verify the chart (no cluster)
+
+```bash
+helm lint charts/cheese
+helm template cheese charts/cheese                                   # defaults
+helm template cheese charts/cheese --set supabase.enabled=true \
+  --set supabase.secret.postgresPassword=x --set supabase.secret.jwtSecret=x \
+  --set supabase.secret.anonKey=x --set supabase.secret.serviceRoleKey=x
+helm template cheese charts/cheese --set deployment.target=aws       # storage gp3 / ingress alb, no local PV
+helm template cheese charts/cheese --set orchestrator.secret.existingSecret=my-sec
+```
+
+## Repo layout
+
+```
+k8s/
+├── charts/cheese/                  # ← the deliverable: everything a deployment needs
+│   ├── Chart.yaml
+│   ├── values.yaml                 # the one source of truth (all components + deployment.target)
+│   ├── values-secrets.yaml.example # inline secrets / existingSecret contract
+│   ├── files/supabase/             # vendored gateway.conf + SQL (db / schema / on-prem overlay)
+│   └── templates/
+│       ├── _helpers.tpl  _platform.tpl
+│       ├── data-pvc.yaml  data-pv-local.yaml
+│       ├── database-* orchestrator-* synthongpt-* search-ui-*
+│       ├── ketcher-* inference-* alignment-*
+│       └── supabase/   # db / auth / rest / meta / studio / gateway / sql-configmap / init-job
+├── docs/                           # pvc-data-runbook, architecture, headless-variant
+├── manifests/base/                 # namespace.yaml, image-pull-secret.example.yaml
+└── local-dev/                      # internal kind test harness — NOT needed to deploy
+    ├── Makefile  scripts/  kind/   # build-source-images, load-images, ingress-controller
+    ├── env/                        # UI source-build Vite args
+    └── docs/                       # install-order (kind playbook), kind-bringup-log
+```
+
+## Conventions
+
+- **Image source.** Each app component accepts `image.source: local | acr`.
+- **Shared PVC at `/data`.** database / orchestrator / synthongpt / alignment mount
+  `cheese-data-pvc` (RWO by default; set `deployment.storage.accessMode: ReadWriteMany`
+  on a cloud target to scale the search role across nodes). Supabase uses its own PVC.
+- **UID 2112 group 0.** Pods touching `/data` run as that identity; stage files `chown -R 2112:0`.
+- **Stable resource names.** `cheese-database-app`, `cheese-orchestrator`, `cheese-inference`,
+  `cheese-alignment-app`, `cheese-ketcher`, `supabase-*` — so in-cluster service URLs work out of the box.
+
+## Teardown
+
+```bash
+helm uninstall cheese -n cheese
+kubectl -n cheese delete pvc -l app.kubernetes.io/name=cheese
+kubectl delete pv cheese-data-pv
+# The data itself lives on the node at /data — remove it there only if you
+# really mean to destroy it. (kind clusters: see local-dev/README.md.)
+```

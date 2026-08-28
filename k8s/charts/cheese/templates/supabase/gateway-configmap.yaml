@@ -1,0 +1,13 @@
+{{- if .Values.supabase.enabled -}}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: cheese-supabase-gateway
+  labels:
+    {{- include "cheese.componentLabels" (list . "supabase-gateway") | nindent 4 }}
+data:
+  default.conf: |
+{{ .Files.Get "files/supabase/gateway.conf" | indent 4 }}
+  # Single htpasswd line (user:bcrypt) guarding Studio behind the gateway.
+  htpasswd: {{ htpasswd .Values.supabase.studio.adminUser .Values.supabase.studio.adminPassword | quote }}
+{{- end }}
