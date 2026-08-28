@@ -70,8 +70,9 @@ diagnose() {
     return
   fi
   if printf '%s' "$logs" | grep -qiE 'unable to authenticate|handshake failed|permission denied.*ssh'; then
-    echo "      cause: cannot authenticate to the database SFTP server."
-    echo "      fix:   cheese update-env   (set DB_SERVER / CHEESE_DB_PASSWORD from DeepMedChem)"
+    echo "      cause: cannot authenticate to AWS to download databases."
+    echo "      fix:   cheese aws-auth     (store the access key DeepMedChem issued you)"
+    echo "             cheese aws-auth --check   tests a key that is already stored"
     return
   fi
   if printf '%s' "$logs" | grep -qiE 'license.*(invalid|expired|not valid|verify)|verify_cheese_license'; then

@@ -1,32 +1,43 @@
 #!/bin/bash
-# Discover the databases available on the SFTP server and write a selection
-# config that `cheese download-dbs` reads. Re-running refreshes the list while
-# preserving any yes/no choices you've already made.
+# List the indexed databases available to you and write a selection config that
+# `cheese download-dbs` reads. Re-running refreshes the list while preserving any
+# yes/no choices you've already made.
+#
+# The list comes from the catalog shipped with these scripts (config/databases.
+# catalog): the read-only role your key assumes can read the database folders but
+# deliberately cannot list the bucket root, so there is nothing to enumerate
+# remotely. Every catalogued entry is checked against the bucket, so anything
+# withdrawn or outside your entitlement shows up here rather than failing later
+# mid-download.
 set -e
 source "$(dirname "$(readlink -f "$0")")/_db-common"
+source "$(dirname "$(readlink -f "$0")")/_engine-config"
 source "$(dirname "$(readlink -f "$0")")/_editor"
 
 show_help() {
   echo "Usage: cheese configure-dbs [options]"
-  echo "Lists databases available on ${DB_SERVER} and writes the download"
-  echo "selection to ${DB_CONFIG}."
+  echo "Lists the databases available in $(db_s3_uri) and writes the"
+  echo "download selection to ${DB_CONFIG}."
   echo "Options:"
   echo "  --no-edit    Just (re)write the config; don't open it in an editor"
+  echo "  --fast       Skip the per-database availability check"
   echo "  -h, --help   Show this help message"
   exit 1
 }
 
 edit=true
+verify=true
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --no-edit) edit=false; shift ;;
+    --fast)    verify=false; shift ;;
     -h|--help) show_help ;;
     *) echo "Unknown option: $1"; show_help ;;
   esac
 done
 
-# Verify we can actually reach the server with the configured credentials, and
-# fail fast with a targeted message if not.
+# Verify the credentials actually open the bucket, and fail fast with a targeted
+# message if not.
 db_ping || exit 1
 
 # Preserve previously-chosen flags (name -> yes/no) so a refresh doesn't reset
@@ -42,43 +53,78 @@ if [ -f "$DB_CONFIG" ]; then
   done < "$DB_CONFIG"
 fi
 
-echo "Listing databases on ${DB_SERVER}..."
+echo "Reading the database catalog..."
 listing=$(list_db_dirs) || exit 1
 if [ -z "$listing" ]; then
-  echo "No databases found at $(db_remote) on ${DB_SERVER}." >&2
-  echo "(Set DB_REMOTE_PATH if the layout differs.)" >&2
+  echo "The catalog $DB_CATALOG is empty." >&2
+  echo "Run 'cheese update-scripts' to refresh it." >&2
   exit 1
 fi
 mapfile -t dbs <<< "$listing"
+echo "Catalog lists ${#dbs[@]} database(s)."
 
-echo "Found ${#dbs[@]} database(s)."
+# A first install has no selection config, and download-dbs treats "no config"
+# as "download everything" — which for this catalog is several terabytes. So new
+# entries default to NO here and the operator opts in per database. (An existing
+# config's choices are always preserved, so this only affects first runs and
+# genuinely new databases.)
+default_flag=no
 
 mkdir -p "$(dirname "$DB_CONFIG")"
 tmp="$(mktemp)"
 {
-  echo "# CHEESE databases available on ${DB_SERVER}"
+  echo "# CHEESE databases available in $(db_s3_uri)"
   echo "# Refreshed: $(date '+%Y-%m-%d %H:%M:%S %z')  (re-run 'cheese configure-dbs' to update)"
   echo "#"
-  echo "# Set each flag to yes/no, then run 'cheese download-dbs' (downloads all"
-  echo "# selected; with no config it downloads everything)."
+  echo "# Set a flag to yes for each database you want, then run"
+  echo "#   cheese download-dbs --dest <folder>"
+  echo "#"
+  echo "# Sizes are the full download size — check your free disk space first."
+  echo "# The name in brackets is how the database appears in the CHEESE UI."
   echo "#"
   echo "#   <name>=<yes|no>"
   echo
 } > "$tmp"
 
+unavailable=()
+total_selected=0
 for db in "${dbs[@]}"; do
-  flag="${prev[$db]:-yes}"           # new DBs default to yes (download by default)
-  [[ "$flag" == "yes" || "$flag" == "no" ]] || flag="yes"
+  flag="${prev[$db]:-$default_flag}"
+  [[ "$flag" == "yes" || "$flag" == "no" ]] || flag="$default_flag"
+
+  size="$(db_catalog_size "$db")"
+  canonical="$(canonical_db_name "$db")"
+  label="$db"
+  [ "$canonical" != "$db" ] && label="$db [$canonical]"
+
+  status=""
+  if [ "$verify" = true ] && ! db_exists "$db"; then
+    status="  (NOT AVAILABLE to your key — skipped)"
+    unavailable+=("$db")
+    # Don't offer something that cannot be downloaded: comment it out so a
+    # later refresh can bring it back if entitlement changes.
+    printf '# %s=%s   # unavailable %s\n' "$db" "$flag" "$(date '+%Y-%m-%d')" >> "$tmp"
+    printf '  %-52s %10s%s\n' "$label" "$size" "$status"
+    continue
+  fi
+
   printf '%s=%s\n' "$db" "$flag" >> "$tmp"
-  echo "  $db  -> $flag"
+  printf '  %-52s %10s  -> %s\n' "$label" "$size" "$flag"
+  [ "$flag" = "yes" ] && total_selected=$((total_selected + 1))
 done
 
 mv "$tmp" "$DB_CONFIG"
 echo
-echo "Wrote selection to $DB_CONFIG"
+if [ "${#unavailable[@]}" -gt 0 ]; then
+  echo "${#unavailable[@]} catalogued database(s) are not available to your key and were"
+  echo "commented out: ${unavailable[*]}"
+  echo "If you expected access to one of these, contact the DeepMedChem team."
+  echo
+fi
+echo "Wrote selection to $DB_CONFIG ($total_selected selected)."
 
 if [ "$edit" = true ]; then
-  read -r -p "Open it now to adjust which databases to download? [Y/n] " ans
+  read -r -p "Open it now to choose which databases to download? [Y/n] " ans
   case "${ans:-Y}" in
     [Nn]*) : ;;
     *) open_in_editor "$DB_CONFIG" ;;
