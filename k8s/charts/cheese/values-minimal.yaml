@@ -1,0 +1,73 @@
+# Minimal profile: cheese-database + cheese-orchestrator (CHEESE API only).
+#   helm install cheese . -n cheese --create-namespace -f values-minimal.yaml
+#
+# On kind, the database folders live under database.databasesRoot, which must
+# also be bind-mounted into the node — see ../../kind/cluster.local.yaml.
+
+database:
+  # ── ROOT LOCATION — set ONCE. Every DB path = <databasesRoot>/<folder>. ──────
+  databasesRoot: "/mnt/DATA/cheese-databases"
+
+  config:
+    DIM: "256"
+    DEVICE: "cpu"
+    MODELS_DIRECTORY: ""              # on-prem: models decrypted from the image via licence; MUST stay empty
+    PROPERTY_MODELS_PATH: ""
+    TRANSFORMERS:
+      morgan: "tanimoto"
+      espsim_electrostatic: "espsim"
+      espsim_shape: "shapesim"
+
+  # ── DATABASES — listed are some examples, this list will be expanded on the prod. ───
+  # flip `enabled` to toggle each. 
+  # Keys are canonical names (scripts/_engine-config); output_directory is the
+  # folder under databasesRoot; all are clustered indices.
+  databases:
+    test:
+      enabled: false                 # chart default stub — off (path not on the drive)
+    ENAMINE-AA:
+      enabled: true
+      output_directory: "enamine_amino_acids"
+      index_type: "clustered"
+      delimiter: ","
+    MCULE-IN-STOCK:
+      enabled: true
+      output_directory: "mcule_purchasable_in_stock_240717_clustered"
+      index_type: "clustered"
+      delimiter: ","
+    MOLPORT:
+      enabled: false                 # incomplete build on the drive (missing smiles_clusters/)
+      output_directory: "molport_10_25"
+      index_type: "clustered"
+      delimiter: ","
+    ZINC15:
+      enabled: true
+      output_directory: "zinc15"
+      index_type: "clustered"
+      delimiter: ","
+
+  # NB: VISUALIZATION is pinned off in the chart template (not part of the serving
+  # product) — do not re-add it here; it would duplicate the env and break upgrades.
+
+  secret:
+    # Licensing mode. NOTE: on kind the licence is validated against the
+    # kind-control-plane container's DMI (product_name="kind"), NOT this host, so
+    # this licence will NOT validate. Regenerate a node licence (see
+    # k8s/local-dev/docs/kind-bringup-log.md step 4) or set `production: "OUR_SECRET"`.
+    # NOTE: THIS WILL BE CHANGED IN THE NEAR FUTURE TO A PROPER SYSTEM!
+    cheeseLicenseFile: "/home/katja/.config/cheese/cheese_license_file.json"
+    production: ""
+
+orchestrator:
+  env:
+    production: ""                   # must match database.secret.production
+  secret:
+    cheeseLicenseFile: "/home/katja/.config/cheese/cheese_license_file.json"
+  ingress:
+    public:
+      enabled: true
+      hosts:
+        - host: cheese-api.localtest.me
+          paths:
+            - path: /
+              pathType: Prefix
