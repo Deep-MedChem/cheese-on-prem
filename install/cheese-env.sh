@@ -25,6 +25,16 @@ export_env_vars() {
 
 export_env_vars ${HOME}/.config/cheese/cheese-env-file.conf
 
+# ── AWS credentials ──────────────────────────────────────────────────────────
+# The access key lives in its own file, not in cheese-env-file.conf: that file is
+# made world-readable for docker compose, and a long-lived secret should not be.
+# `cheese aws-auth` writes the dedicated file 0600 and records a non-default
+# location in CHEESE_AWS_CREDENTIALS_FILE (set above if it was moved). Loaded
+# after the main file so it wins over any legacy key pasted into the template.
+_cheese_aws_creds="${CHEESE_AWS_CREDENTIALS_FILE:-${HOME}/.config/cheese/aws-credentials.conf}"
+[ -f "$_cheese_aws_creds" ] && export_env_vars "$_cheese_aws_creds"
+unset _cheese_aws_creds
+
 # ── Container registry (ACR → ECR migration, 2026-07) ────────────────────────
 # Central resolution, exported for every `cheese` subcommand and for
 # docker-compose interpolation. AWS ECR is the only registry — the legacy Azure

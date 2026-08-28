@@ -1,11 +1,14 @@
 #!/bin/bash
-# Download indexed databases from the SFTP server using rclone (resumable and
-# incremental — re-running only fetches what's missing/changed). Databases on
-# the server are plain folders, so there's no archive extraction step.
+# Download indexed databases from the CHEESE S3 bucket with `aws s3 sync`
+# (resumable and incremental — re-running only fetches what's missing or
+# changed). Databases are stored as plain folders in exactly the layout the
+# engine expects, so there is no archive extraction step.
 #
-# Selection: if ${DB_CONFIG} exists (written by `cheese configure-dbs`), only
-# the databases flagged =yes are downloaded. With no config, ALL available
-# databases are downloaded by default.
+# Selection: the databases flagged =yes in ${DB_CONFIG} (written by
+# `cheese configure-dbs`) are downloaded. There is deliberately no implicit
+# "everything" default — the full catalog is several terabytes, with single
+# databases over 1 TB, so downloading it by accident costs days of transfer and
+# fills the disk. Pass --all to ask for the whole catalog on purpose.
 set -e
 source "$(dirname "$(readlink -f "$0")")/_db-common"
 source "$(dirname "$(readlink -f "$0")")/_engine-config"
@@ -14,11 +17,16 @@ show_help() {
   echo "Usage: cheese download-dbs --dest <folder> [options]"
   echo "Options:"
   echo "  --dest FOLDER        Destination folder for the databases (required)"
-  echo "  --transfers N        Parallel file transfers (default: 4)"
+  echo "  --all                Download every available database (several TB)"
+  echo "  --transfers N        Parallel transfers per database (default: 8)"
+  echo "  --dry-run            Show what would be downloaded, transfer nothing"
+  echo "  --yes                Don't prompt, even if disk space looks short"
   echo "  -h, --help           Show this help message"
   echo
-  echo "Run 'cheese configure-dbs' first to choose which databases to download;"
-  echo "without a selection config, all available databases are downloaded."
+  echo "Run 'cheese configure-dbs' first to choose which databases you want."
+  echo
+  echo "Databases are read from $(db_s3_uri) using the same AWS access key that"
+  echo "pulls the images — no separate database password is needed."
   exit 1
 }
 
@@ -74,7 +82,10 @@ persist_env_var() {
 }
 
 dest=""
-transfers=4
+transfers=8
+dryrun=false
+assume_yes=false
+want_all=false
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --dest)
@@ -83,6 +94,9 @@ while [[ $# -gt 0 ]]; do
     --transfers)
       [ -z "$2" ] && { echo "--transfers needs a number."; exit 1; }
       transfers="$2"; shift 2 ;;
+    --all) want_all=true; shift ;;
+    --dry-run|--dryrun) dryrun=true; shift ;;
+    --yes|-y) assume_yes=true; shift ;;
     -h|--help) show_help ;;
     *) echo "Unknown option: $1"; show_help ;;
   esac
@@ -90,17 +104,28 @@ done
 
 [ -z "$dest" ] && { echo "Destination folder is required (use --dest)."; show_help; }
 
+# Feeds max_concurrent_requests in the generated aws profile (see _db-common).
+export DB_TRANSFERS="$transfers"
+
 # The destination IS the read-only DB mount root the hardened stack binds. Persist
 # it so `cheese start` mounts the right directory without having to re-derive it.
-persist_env_var CHEESE_DATA_DIR "$dest"
+# Skipped on a dry run, which must not change any state.
+if [ "$dryrun" = false ]; then
+  persist_env_var CHEESE_DATA_DIR "$dest"
+fi
 
-# Verify we can actually reach the server with the configured credentials, and
-# fail fast with a targeted message if not.
+# Verify the credentials actually open the bucket, and fail fast with a targeted
+# message if not.
 db_ping || exit 1
 
 # Build the list of databases to download.
 selected=()
-if [ -f "$DB_CONFIG" ]; then
+if [ "$want_all" = true ]; then
+  echo "--all: downloading every available database."
+  listing=$(list_db_dirs) || exit 1
+  [ -z "$listing" ] && { echo "No databases listed in the catalog." >&2; exit 1; }
+  mapfile -t selected <<< "$listing"
+elif [ -f "$DB_CONFIG" ]; then
   echo "Using selection from $DB_CONFIG"
   while IFS= read -r line; do
     line="${line%%#*}"
@@ -115,46 +140,117 @@ if [ -f "$DB_CONFIG" ]; then
     exit 0
   fi
 else
-  echo "No selection config found — downloading ALL available databases."
-  echo "(Run 'cheese configure-dbs' first if you want to pick a subset.)"
-  listing=$(list_db_dirs) || exit 1
-  [ -z "$listing" ] && { echo "No databases found on ${DB_SERVER}." >&2; exit 1; }
-  mapfile -t selected <<< "$listing"
+  # No implicit "download everything": the catalog is several terabytes, so an
+  # unconfigured run must be a mistake rather than a very expensive default.
+  echo "No database selection found at $DB_CONFIG." >&2
+  echo >&2
+  echo "Run 'cheese configure-dbs' first to see what's available (with sizes) and" >&2
+  echo "choose what you need. To fetch the entire catalog on purpose — several" >&2
+  echo "terabytes — re-run this with --all." >&2
+  exit 1
 fi
 
 mkdir -p "$dest"
-echo "Downloading ${#selected[@]} database(s) to $dest from ${DB_SERVER}..."
 
-# Run rclone as the invoking user so files aren't root-owned, and mount the
-# destination into the container.
-RCLONE_DOCKER_OPTS=(-u "$(id -u):$(id -g)" -v "$dest:/dest")
-
-# Progress display. rclone only repaints its progress line *in place* when its
-# stdout is a terminal, so allocate a docker TTY (-t) when we have one and let
-# --progress show a single, live-updating status line. With no TTY (output piped
-# or redirected to a log) --progress instead dumps one un-erased line per refresh
-# — the console spam — so fall back to a periodic one-line stats summary, bumped
-# to NOTICE so it isn't swallowed by rclone_sftp's default ERROR log level.
-progress_opts=(--progress --stats-one-line)
-copy_log_level=""
-if [ -t 1 ]; then
-  RCLONE_DOCKER_OPTS+=(-t)
-else
-  progress_opts=(--stats 30s --stats-one-line)
-  copy_log_level="NOTICE"
+# Canonical-name collision check. Two folders can map to one canonical name when
+# a database has been re-indexed (e.g. the 2024 and 2026 mcule builds are both
+# MCULE-IN-STOCK). The engine config is keyed by canonical name, so registering
+# both means the second silently wins — with the operator having paid to download
+# both. Catch it before the transfer, not after.
+declare -A _canon_seen
+collisions=()
+for db in "${selected[@]}"; do
+  c="$(canonical_db_name "$db")"
+  if [ -n "${_canon_seen[$c]:-}" ]; then
+    collisions+=("$c: ${_canon_seen[$c]} and $db")
+  else
+    _canon_seen[$c]="$db"
+  fi
+done
+if [ "${#collisions[@]}" -gt 0 ]; then
+  echo
+  echo "WARNING: your selection maps different folders onto the same CHEESE database name:" >&2
+  for c in "${collisions[@]}"; do echo "  $c" >&2; done
+  echo "These are different builds of the same database — only the last one registered" >&2
+  echo "would be served. Deselect the ones you don't want in $DB_CONFIG." >&2
+  if [ "$assume_yes" = false ] && [ "$dryrun" = false ] && [ -t 0 ]; then
+    read -r -p "Continue anyway? [y/N] " ans
+    case "${ans:-N}" in [Yy]*) : ;; *) echo "Aborted."; exit 1 ;; esac
+  fi
 fi
 
+# Disk-space preflight. These databases run to hundreds of gigabytes each, and
+# running out of room part-way through wastes hours of transfer, so compare the
+# catalogued total against what's actually free before starting. The catalog is
+# the only cheap source of sizes — measuring in S3 means listing millions of
+# objects — so treat a missing entry as unknown rather than as zero.
+need_bytes=0
+unknown=0
+for db in "${selected[@]}"; do
+  b="$(_db_catalog_field "$db" 2 2>/dev/null || true)"
+  if [ -n "$b" ]; then need_bytes=$((need_bytes + b)); else unknown=$((unknown + 1)); fi
+done
+avail_bytes=$(( $(df -Pk "$dest" | awk 'NR==2{print $4}') * 1024 ))
+human() { awk -v b="$1" 'BEGIN{split("B KiB MiB GiB TiB",u," ");i=1;while(b>=1024&&i<5){b/=1024;i++}printf (i<=2?"%.0f %s":"%.1f %s"),b,u[i]}'; }
+echo
+echo "Selected ${#selected[@]} database(s), about $(human "$need_bytes") to fetch."
+[ "$unknown" -gt 0 ] && echo "($unknown of them are not in the catalog, so the real total is higher.)"
+echo "Free space on $dest: $(human "$avail_bytes")"
+# Already-downloaded files are skipped, so an existing copy makes the estimate
+# pessimistic — warn, never block, and let --yes drive it non-interactively.
+if [ "$need_bytes" -gt "$avail_bytes" ] && [ "$dryrun" = false ]; then
+  echo
+  echo "WARNING: the selection looks larger than the free space on $dest."
+  echo "(If some of these databases are already downloaded, only the missing"
+  echo "files are fetched, so this may still fit.)"
+  if [ "$assume_yes" = false ] && [ -t 0 ]; then
+    read -r -p "Continue anyway? [y/N] " ans
+    case "${ans:-N}" in [Yy]*) : ;; *) echo "Aborted."; exit 1 ;; esac
+  fi
+fi
+
+echo
+echo "Downloading ${#selected[@]} database(s) to $dest from $(db_s3_uri)..."
+
+# When running the CLI in docker, run it as the invoking user so downloaded
+# files aren't root-owned, and mount the destination in. A host aws CLI already
+# writes as the invoking user and sees the real path, so it needs neither.
+AWS_DOCKER_OPTS=()
+if [ "$(db_runner)" = "docker" ]; then
+  AWS_DOCKER_OPTS=(-u "$(id -u):$(id -g)" -v "$dest:/dest")
+fi
+dest_in_runner="$(db_dest_path "$dest")"
+
+# Progress display. `aws s3 sync` repaints a live progress line only on a
+# terminal; with output piped or redirected to a log the same output becomes one
+# un-erased line per refresh (console spam), so suppress it and rely on the
+# per-database summary lines instead.
+sync_opts=()
+if [ -t 1 ]; then
+  AWS_DOCKER_OPTS+=(-t)
+else
+  sync_opts+=(--no-progress)
+fi
+[ "$dryrun" = true ] && sync_opts+=(--dryrun)
+
+failed=()
 for db in "${selected[@]}"; do
   echo
-  echo "=== $db ==="
-  # copy is incremental: files already present with a matching size/modtime are
-  # skipped, so an interrupted run resumes instead of starting over — only the
+  echo "=== $db ($(db_catalog_size "$db" || true)) ==="
+  # sync is incremental: files already present with a matching size are skipped,
+  # so an interrupted run resumes instead of starting over — only the
   # not-yet-transferred files are fetched.
   if [ -d "$dest/$db" ] && [ -n "$(ls -A "$dest/$db" 2>/dev/null)" ]; then
     echo "Existing data detected — resuming download (already-fetched files are skipped)."
   fi
-  RCLONE_LOG_LEVEL="$copy_log_level" rclone_sftp copy "$(db_remote "$db")" "/dest/$db" \
-    --transfers "$transfers" "${progress_opts[@]}"
+  out=""
+  if ! out=$(aws_db s3 sync "$(db_s3_uri "$db")" "$dest_in_runner/$db" "${sync_opts[@]}" 2>&1 | tee /dev/stderr); then
+    echo "FAILED: $db" >&2
+    db_explain_error "$out"
+    failed+=("$db")
+    continue
+  fi
+  [ "$dryrun" = true ] && continue
   # Wire the freshly-downloaded folder into the engine config automatically
   # (OUTPUT_DIRECTORIES + INDEX_TYPES + DELIMITERS). Register under the CANONICAL
   # DB name — the raw/dated folder name is what's on disk (the path), but the
@@ -166,7 +262,18 @@ for db in "${selected[@]}"; do
   register_db "$canonical" "$dest/$db" "$ENGINE_CONFIG"
 done
 
+if [ "${#failed[@]}" -gt 0 ]; then
+  echo
+  echo "${#failed[@]} database(s) FAILED: ${failed[*]}" >&2
+  echo "Re-running download-dbs resumes them — nothing already fetched is re-downloaded." >&2
+  exit 1
+fi
+
 echo
+if [ "$dryrun" = true ]; then
+  echo "Dry run complete — nothing was transferred and no config was changed."
+  exit 0
+fi
 echo "All selected databases are in $dest"
 echo "Registered them in $ENGINE_CONFIG (OUTPUT_DIRECTORIES + INDEX_TYPES + DELIMITERS)"
 echo "Review any '!' warnings above before restarting — a wrong INDEX_TYPES/DELIMITERS"

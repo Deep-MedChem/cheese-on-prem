@@ -3,18 +3,32 @@ CHEESE_CUSTOMER=cheese-customer
 # Thank you for installing CHEESE.
 # Please, reach out to the DeepMedChem team for the following:
 
-# 1. Container registry credentials — an AWS access key from the DeepMedChem
-# team. The key's only right is assuming the pull-only role below; image pulls
-# run through that role.
-CHEESE_AWS_ACCESS_KEY_ID=XXX
-CHEESE_AWS_SECRET_ACCESS_KEY=XXX
-# Optional overrides — the defaults are correct for the DeepMedChem registry:
+# 1. An AWS access key from the DeepMedChem team. ONE key covers everything —
+# pulling the container images AND downloading the indexed databases. The key
+# itself carries no permissions: its only right is assuming the read-only role
+# below, and both image pulls and database downloads run through that role.
+#
+# Don't paste it here. Run:
+#
+#     cheese aws-auth
+#
+# which checks the key against AWS before storing it, and writes it to
+# ~/.config/cheese/aws-credentials.conf with permissions only your user can read
+# (this file is world-readable, because docker compose reads it).
+#
+# Optional overrides — the defaults are correct for the DeepMedChem account:
 # CHEESE_AWS_REGION=us-east-1
 # CHEESE_AWS_ROLE_ARN=arn:aws:iam::815935788477:role/cheese-onprem-pull
-# 2. Database SFTP server + password for `cheese configure-dbs` / `cheese download-dbs`.
-# Both are required to download databases.
-DB_SERVER=XXX
-CHEESE_DB_PASSWORD=XXX
+#
+# Where 'cheese aws-auth --file <path>' put the key, if you moved it off the
+# default. Set automatically; you should not need to edit this.
+# CHEESE_AWS_CREDENTIALS_FILE=
+
+# Databases are downloaded from S3 with the same key — there is no separate
+# database password. The retired SFTP settings (DB_SERVER, CHEESE_DB_PASSWORD)
+# are gone; delete them if you are upgrading from an older install.
+# Optional override, for testing against a different bucket:
+# CHEESE_DB_BUCKET=cheese-dev-s3pilot-815935788477
 
 # On-disk location for job state (search jobs, downloads). The installer prompts
 # for this and writes the resolved (absolute) value into cheese-env-file.conf;

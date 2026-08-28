@@ -136,9 +136,13 @@ docker pull quay.io/oauth2-proxy/oauth2-proxy:latest
 
 fi
 
-# Pull the rclone image used by configure-dbs / download-dbs (public Docker Hub,
-# no ACR login needed). Non-fatal: a failure here shouldn't abort the run, since
-# database download is a separate, optional step.
-RCLONE_IMAGE="${RCLONE_IMAGE:-rclone/rclone:latest}"
-echo "Pulling rclone image ($RCLONE_IMAGE) for database transfers..."
-docker pull "$RCLONE_IMAGE" || echo "⚠️  Could not pull $RCLONE_IMAGE — 'cheese download-dbs' will retry on first use."
+# Pre-pull the AWS CLI image used by configure-dbs / download-dbs when the host
+# has no aws CLI of its own (those scripts prefer a host CLI and fall back to
+# this container). Doing it here keeps the first database download from stalling
+# on an image pull.
+if ! command -v aws >/dev/null 2>&1; then
+  AWSCLI_IMAGE="${AWSCLI_IMAGE:-public.ecr.aws/aws-cli/aws-cli}"
+  echo "No host aws CLI found — pulling $AWSCLI_IMAGE for database transfers..."
+  echo "(Installing the AWS CLI instead is faster: bash install/install-aws-cli.sh)"
+  docker pull "$AWSCLI_IMAGE" || echo "⚠️  Could not pull $AWSCLI_IMAGE — 'cheese download-dbs' will retry on first use."
+fi

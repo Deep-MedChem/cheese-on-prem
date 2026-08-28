@@ -9,6 +9,7 @@ show_help() {
   echo "  -h, --help                   Show this help message"
   echo
   echo "--- Installation --- "
+  echo "  aws-auth                     Store the AWS access key issued to you (do this first)"
   echo "  update-license               Update CHEESE license file"
   echo "  configure-engine             Edit the CHEESE engine config (cheese_config_file.yaml)"
   echo "  generate-license-key         Generate CHEESE license key"
@@ -40,6 +41,7 @@ show_help() {
   echo "  update-env                   Update CHEESE environment file"
   echo "  update-images                Update CHEESE Docker Images"
   echo "  check-license                Check CHEESE license"
+  echo "  aws-auth --check             Test the stored AWS access key"
   echo "  preflight-config             Validate & auto-heal the engine config"
   echo "  doctor                       Diagnose stack/config problems and suggest fixes"
   echo "  uninstall                    Uninstall CHEESE"
@@ -236,6 +238,11 @@ while [[ $# -gt 0 ]]; do
     generate-license-key)
       shift 1
       generate-license-key $@
+      exit 0
+      ;;
+    aws-auth)
+      shift 1
+      aws-auth $@
       exit 0
       ;;
     configure-dbs)
