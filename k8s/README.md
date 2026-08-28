@@ -19,6 +19,7 @@ files. The environment (storage class + ingress class) is selected with
 | **Alignment** | `alignment.enabled` | off | conformer alignment, license-gated |
 | **Supabase** | `supabase.enabled` | off | in-cluster auth + per-user spaces (test profile) |
 | **oauth2-proxy** | `oauth2Proxy.enabled` | off | SSO stub (alternate to Supabase) |
+| **Licence agent** | `licenseAgent.enabled` | off | v1 licensing: renews the licence file onto `/data` daily ([docs](docs/licensing-agent.md)) |
 
 ## Deployment target
 
@@ -32,8 +33,8 @@ An explicit `deployment.storage.className` / `deployment.ingress.className` alwa
 
 ## Secrets
 
-Each secret-producing component (`database`, `orchestrator`, `searchUi`, `supabase`)
-accepts `secret.existingSecret: <name>`:
+Each secret-producing component (`database`, `orchestrator`, `searchUi`, `supabase`,
+`licenseAgent`) accepts `secret.existingSecret: <name>`:
 
 - **Set it** → reference your own pre-created Secret (Vault / External Secrets
   Operator / SealedSecrets / `kubectl create secret`). The chart renders no inline
@@ -163,6 +164,41 @@ to that filename (they must match — one shared PVC). On kind the node is itsel
 container and fakes the hardware identity — see
 [`local-dev/README.md`](local-dev/README.md) for the extra steps.
 
+## Licensing v1 — the licence agent
+
+The section above is the **v0** procedure: a long-lived licence file bound to one
+machine's hardware id. On a cluster that only works while the database pod stays
+on the node the licence was cut for.
+
+**v1** is the alternative: you are issued a `DMCH-…` **key** instead of a file,
+and an optional chart component — the **licence agent** — exchanges it for a
+signed 30-day licence file, writes that onto the shared `/data` PVC where the
+product containers already look, and renews it daily. The fingerprint it
+registers is the **cluster's `kube-system` namespace UID**, so one licence covers
+the whole installation and nodes may come and go.
+
+```yaml
+licenseAgent:
+  enabled: true                                  # off by default
+  serverUrl: https://licensing.deepmedchem.com
+  secret:
+    existingSecret: cheese-license-key           # a Secret with a `licenseKey` key
+    # licenseKey: "DMCH-…"                       # …or inline, for self-contained installs
+```
+
+It adds one Deployment (1 replica), a ServiceAccount, and a `Role` in
+`kube-system` whose only right is `get` on the `kube-system` namespace object.
+The agent runs as UID 2112, not root.
+
+> **⚠️ This lands ahead of enforcement.** No released CHEESE image verifies a v1
+> licence yet (the verifier PRs are still open), and a v1 file handed to a current
+> image is rejected by its v0 verifier with a misleading "signature does not
+> match". A `DMCH-PTN-…` **partner token is not a licence key.**
+
+Full detail — the licensing model, one-licence-per-installation vs partner
+sublicensing, the RBAC probe results, why the agent is not root, operating and
+troubleshooting it: **[docs/licensing-agent.md](docs/licensing-agent.md)**.
+
 ## Verify the chart (no cluster)
 
 ```bash
@@ -173,6 +209,12 @@ helm template cheese charts/cheese --set supabase.enabled=true \
   --set supabase.secret.anonKey=x --set supabase.secret.serviceRoleKey=x
 helm template cheese charts/cheese --set deployment.target=aws       # storage gp3 / ingress alb, no local PV
 helm template cheese charts/cheese --set orchestrator.secret.existingSecret=my-sec
+# licence agent: nothing may render by default, then inline key / external secret
+helm template cheese charts/cheese | grep -c license-agent            # → 0
+helm template cheese charts/cheese --set licenseAgent.enabled=true \
+  --set licenseAgent.secret.licenseKey=DMCH-EXAMPLE
+helm template cheese charts/cheese --set licenseAgent.enabled=true \
+  --set licenseAgent.secret.existingSecret=cheese-license-key
 ```
 
 ## Repo layout
@@ -189,8 +231,9 @@ k8s/
 │       ├── data-pvc.yaml  data-pv-local.yaml
 │       ├── database-* orchestrator-* synthongpt-* search-ui-*
 │       ├── ketcher-* inference-* alignment-*
+│       ├── license-agent-*         # v1 licensing agent (deployment / rbac / secret), off by default
 │       └── supabase/   # db / auth / rest / meta / studio / gateway / sql-configmap / init-job
-├── docs/                           # pvc-data-runbook, architecture, headless-variant
+├── docs/                           # pvc-data-runbook, architecture, headless-variant, licensing-agent
 ├── manifests/base/                 # namespace.yaml, image-pull-secret.example.yaml
 └── local-dev/                      # internal kind test harness — NOT needed to deploy
     ├── Makefile  scripts/  kind/   # build-source-images, load-images, ingress-controller
