@@ -23,6 +23,11 @@ files. The environment (storage class + ingress class) is selected with
 
 ## Images
 
+> **Partner deploying on your own cluster?** [docs/partner-deployment.md](docs/partner-deployment.md)
+> is the end-to-end sequence — credentials, database download, licence, one
+> `helm install`. The rest of this section is the image-resolution detail behind it.
+
+
 Every component picks its registry with `image.source`:
 
 | `source` | Where the image comes from |

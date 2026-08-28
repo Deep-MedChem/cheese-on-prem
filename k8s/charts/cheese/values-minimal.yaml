@@ -23,6 +23,19 @@
 #   customer: ""
 #   imageTag: develop
 
+# ── DATABASES ON THE VOLUME ──────────────────────────────────────────────────
+# Nothing else in the chart puts data on the volume, so enable this to have the
+# databases fetched from DeepMedChem's S3 with the same AWS key that pulls the
+# images. Off here because the kind profile points at databases already on the
+# host. Sizes run from under 1 GB to ~1.3 TB each — check disk first.
+#
+# dataSync:
+#   enabled: true
+#   # folders default to the ENABLED entries under database.databases below,
+#   # so what you sync and what the engine reads cannot drift apart.
+#
+# The Secret it reads is the one `cheese aws-auth --target k8s` writes.
+
 database:
   # ── ROOT LOCATION — set ONCE. Every DB path = <databasesRoot>/<folder>. ──────
   databasesRoot: "/mnt/DATA/cheese-databases"
