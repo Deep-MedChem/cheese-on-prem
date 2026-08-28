@@ -22,6 +22,76 @@ SMILES/IDs.
 
 ---
 
+## 0. Getting the databases
+
+Databases are downloaded from a private AWS S3 bucket — the same bucket the
+hosted CHEESE service reads, so you get byte-identical data. Access is by IAM
+only: the bucket is private, blocks public access, and requires TLS.
+
+**Authentication is one access key, for everything.** DeepMedChem issues you a
+single AWS access key that pulls the container images *and* downloads the
+databases. There is no separate database password. The key carries no
+permissions of its own — its only right is to assume a read-only role, so the
+worst case if it leaks is that someone downloads data you are already licensed
+for. (Older installs used an SFTP server with `DB_SERVER` and
+`CHEESE_DB_PASSWORD`; that server is retired and those settings are ignored.)
+
+```bash
+cheese aws-auth                        # paste the key once; it is verified before being stored
+cheese aws-auth --check                # re-test it later
+cheese configure-dbs                   # see what's available, with sizes; choose what you want
+cheese download-dbs --dest /srv/cheese-databases
+```
+
+`aws-auth` stores the key in `~/.config/cheese/aws-credentials.conf`, mode
+`0600` — deliberately *not* in `cheese-env-file.conf`, which is world-readable
+because docker compose reads it. Use `--file` to put it somewhere else; the
+location is recorded so later commands still find it.
+
+**Requirements:** the AWS CLI v2 (`bash install/install-aws-cli.sh`) and
+outbound HTTPS to `us-east-1`. Nothing needs to be open inbound.
+
+### Choosing what to download
+
+A CHEESE licence entitles you to **every** database — there is no per-database
+licensing — so the only question is which ones you have room for. They are
+large: the smallest is a few GB, the largest over 1.4 TB, and the full catalog
+is several terabytes.
+
+`cheese configure-dbs` prints each database with its size and writes your
+choices to `~/.config/cheese/databases.conf`. `download-dbs` then fetches only
+the ones flagged `yes`, and refuses to run at all without a selection — there is
+no implicit "download everything" (use `--all` if that is genuinely what you
+want). It also checks free disk space against the selection before starting, and
+warns if you have picked two builds of the same database (for example the 2024
+and 2026 mcule indexes, which share one CHEESE name).
+
+The list of databases comes from `config/databases.catalog`, shipped with these
+scripts, because the read-only role can read the database folders but cannot list
+the bucket root. `configure-dbs` checks every catalogued entry against the bucket
+and marks anything unavailable, so a stale catalog is visible rather than silent.
+
+### Transfers are resumable
+
+`download-dbs` uses `aws s3 sync`, which is incremental: files already present
+with a matching size are skipped. An interrupted download resumes where it left
+off — re-run the same command. A 1 TB database over a slow link takes many hours,
+which is why the credentials are configured to refresh themselves mid-transfer
+rather than expiring after an hour.
+
+Use `--dry-run` to see exactly what would be transferred without moving any bytes
+or touching any config.
+
+### Kubernetes installs
+
+The above is the docker-compose path. In a Helm-chart install nothing reads
+`~/.config/cheese/`, so use `cheese aws-auth --target k8s` to store the key as a
+Kubernetes Secret instead (or `--target print` to emit the manifest for
+SealedSecrets / Vault / a GitOps repo). Getting the data onto the chart's data
+volume is a separate step from storing the credential — see the k8s README.
+
+---
+
 ## 1. The three config maps
 
 The engine reads its config at **import time**
