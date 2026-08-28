@@ -46,19 +46,11 @@ declare -A DB_CANONICAL_NAME=(
   [eXplore_Enumerated_55M]="EXPLORE-ENUMERATED"
   [mcule_purchasable_full_240610]="MCULE-FULL"
   [mcule_purchasable_in_stock_240717_clustered]="MCULE-IN-STOCK"
-  # Re-indexed 2026 mcule builds. They map to the SAME canonical names as the
-  # 2024 folders above because they are newer versions of the same database, not
-  # additional ones — so download one or the other, never both. download-dbs
-  # warns if a selection maps two folders onto one canonical name.
-  [mcule_purchasable_full_260509_canonical_clustered]="MCULE-FULL"
-  [mcule_purchasable_in_stock_260510_canonical_clustered]="MCULE-IN-STOCK"
-  [Synple-new-1B]="SYNPLE-1B"
   [molport_10_25]="MOLPORT"
   [M1]="MOLECULE-ONE"
   [chemspace_screening]="CHEMSPACE-SCREENING"
   [10B_RO5_chunks]="CHEMSPACE-10B-RO5"
   [10B_Beyond_RO5_chunks]="CHEMSPACE-10B-BEYOND-RO5"
-  [Aurigene]="AURIGENE"
   [Synple-4B]="SYNPLE-4B"
   [zinc15]="ZINC15"
   [xtalpi-09-03-2026]="XTALPI"
