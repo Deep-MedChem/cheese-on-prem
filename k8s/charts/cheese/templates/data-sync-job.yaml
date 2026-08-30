@@ -57,7 +57,7 @@ spec:
       volumes:
         - name: data
           persistentVolumeClaim:
-            claimName: {{ $root.Values.data.pvcName }}
+            claimName: {{ include "cheese.dataClaimName" $root }}
         - name: tmp
           emptyDir: {}
       {{- if $ds.prepareDataDir.enabled }}

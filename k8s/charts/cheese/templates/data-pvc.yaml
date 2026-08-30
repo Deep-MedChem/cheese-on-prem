@@ -3,7 +3,11 @@ Shared data-plane PVC (mounted at /data by database, orchestrator, synthongpt,
 alignment). storageClassName is resolved from deployment.target via the
 cheese.storageClass helper. Replaces the hand-applied manifests/base PVC so the
 whole stack comes up from one `helm install`.
+
+Skipped entirely when data.existingClaim is set: the site brought its own
+volume, so the chart mounts that claim and provisions nothing.
 */ -}}
+{{- if not .Values.data.existingClaim -}}
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
@@ -20,3 +24,4 @@ spec:
   {{- if $sc }}
   storageClassName: {{ $sc | quote }}
   {{- end }}
+{{- end }}

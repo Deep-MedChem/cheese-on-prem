@@ -1,6 +1,13 @@
 # Minimal profile: cheese-database + cheese-orchestrator (CHEESE API only).
 #   helm install cheese . -n cheese --create-namespace -f values-minimal.yaml
 #
+# ⚠️ This is a kind / laptop HARNESS for trying the chart out against databases
+# already on the host — local images, a hand-placed v0 licence, localtest.me
+# hostnames, a hostPath volume. It is not an install profile. For a real
+# deployment use values-production.yaml, which pulls licensed images, runs the
+# v1 licence agent, and lets you point the stack at a volume you provisioned
+# yourself (data.existingClaim).
+#
 # On kind, the database folders live under database.databasesRoot, which must
 # also be bind-mounted into the node — see ../../kind/cluster.local.yaml.
 
@@ -9,10 +16,7 @@
 # kind work. To pull the real images instead:
 #
 #   onprem:
-#     imageTag: latest               # released channel (chart default); the
-#                                    # development channel is `develop`, but
-#                                    # ketcher and electrostatics-inference are
-#                                    # published on `latest` only.
+#     imageTag: latest               # released channel (chart default)
 #   database:
 #     image: { source: ecr }
 #   orchestrator:
