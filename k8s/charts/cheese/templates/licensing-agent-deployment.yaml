@@ -29,8 +29,8 @@ deliberately NOT renamed to DMCH_LICENSING_* (that rename applies to the server)
 {{- if not $la.secret.licenseKey -}}
 {{- fail "licensingAgent.enabled=true requires either licensingAgent.secret.existingSecret or licensingAgent.secret.licenseKey" -}}
 {{- end -}}
-{{- if hasPrefix "DMCH-PTN-" $la.secret.licenseKey -}}
-{{- fail "licensingAgent.secret.licenseKey looks like a DMCH-PTN-… partner token. A partner token is NOT a licence key: it issues keys for end-customers via /partner/v1/licenses. Using it here fails with 401 partner_token_not_a_license_key." -}}
+{{- if hasPrefix "DMCH-PP-" $la.secret.licenseKey -}}
+{{- fail "licensingAgent.secret.licenseKey looks like a DMCH-PP-… partner token. A partner token is NOT a licence key: it issues keys for end-customers via /partner/v1/licenses. Using it here fails with 401 partner_token_not_a_license_key." -}}
 {{- end -}}
 {{- end -}}
 apiVersion: apps/v1

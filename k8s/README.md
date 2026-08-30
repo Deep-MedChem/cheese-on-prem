@@ -460,7 +460,7 @@ The agent runs as UID 2112, not root.
   `max_activations` defaults to 1 and the next activation is refused with `409
   max_activations_reached`. For a delete/recreate test loop, pin
   `licensingAgent.fingerprintOverride` so every cluster reuses one activation.
-- A `DMCH-PTN-…` **partner token is not a licence key.** It mints keys for your
+- A `DMCH-PP-…` **partner token is not a licence key.** It mints keys for your
   end-customers; the chart refuses to render if it sees one.
 
 Full detail — the licensing model, one-licence-per-installation vs partner

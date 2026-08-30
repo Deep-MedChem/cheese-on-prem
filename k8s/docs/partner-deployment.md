@@ -18,7 +18,7 @@ The access key carries no permissions of its own — its only right is assuming 
 read-only role. So the worst case if it leaks is that someone downloads the
 images and databases you are already licensed for.
 
-> A `DMCH-PTN-…` **partner token is not a licence key.** If you were given one,
+> A `DMCH-PP-…` **partner token is not a licence key.** If you were given one,
 > it issues licence keys for *your* end-customers via the partner API; each
 > deployment still needs its own `DMCH-…` key. Putting the partner token in the
 > licence secret fails immediately with `partner_token_not_a_license_key`.

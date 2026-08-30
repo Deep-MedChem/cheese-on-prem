@@ -156,7 +156,7 @@ licensingAgent:
 
   secret:
     existingSecret: ""                     # if set, reference this pre-created Secret (key: licenseKey) and render NO inline Secret
-    # The licence key issued to this INSTALLATION. A DMCH-PTN-… value is a
+    # The licence key issued to this INSTALLATION. A DMCH-PP-… value is a
     # PARTNER TOKEN, not a licence key — it mints keys for end-customers via
     # /partner/v1/licenses and is rejected here (401 partner_token_not_a_license_key).
     # The chart fails the render if it sees one.
