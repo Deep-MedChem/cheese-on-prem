@@ -79,7 +79,7 @@ kubectl create secret docker-registry cheese-ecr-pull -n cheese \
 ```yaml
 # my-values.yaml
 onprem:
-  imageTag: develop              # or `latest`; the channel for the CHEESE images
+  imageTag: latest               # released channel (default) for the CHEESE images
 
 database:
   image:
@@ -165,8 +165,9 @@ the orchestrator's ingress.
   `cheese-inference` and `conformer-alignment-api` still verify v0 only; their
   verifier ports are open. The two components you actually need
   (`cheese-database`, `cheese-orchestrator`) enforce v1 and are unaffected.
-- **Three optional images have no `:develop` tag** (`ketcher`, `cheese-inference`,
-  `cheese-electrostatics-inference`). With `onprem.imageTag: develop` they will
-  not resolve — pin them to `latest` with their own `ecr.tag` if you enable them.
-  The licence agent is unaffected: its tag is pinned by the chart and does not
-  follow `onprem.imageTag` at all.
+- **Three optional images are published on `:latest` only** (`ketcher`,
+  `cheese-inference`, `cheese-electrostatics-inference`). The chart default
+  (`onprem.imageTag: latest`) resolves them fine; if you switch the channel to
+  `develop`, pin those three back to `latest` with their own `ecr.tag` or they
+  will not resolve. The licence agent is unaffected: its tag is pinned by the
+  chart and does not follow `onprem.imageTag` at all.

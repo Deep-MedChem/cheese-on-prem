@@ -9,7 +9,10 @@
 # kind work. To pull the real images instead:
 #
 #   onprem:
-#     imageTag: develop              # or latest
+#     imageTag: latest               # released channel (chart default); the
+#                                    # development channel is `develop`, but
+#                                    # ketcher and electrostatics-inference are
+#                                    # published on `latest` only.
 #   database:
 #     image: { source: ecr }
 #   orchestrator:
