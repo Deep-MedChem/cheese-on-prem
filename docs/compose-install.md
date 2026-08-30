@@ -49,8 +49,8 @@ in the repo's directory. Follow the prompts. Then re-log in to the shell (or run
 3. Contact us for your **AWS access key** (an access key ID and a secret). One
    key covers everything: pulling the CHEESE images and downloading the
    databases. There is no separate database password. (The legacy
-   `CHEESE_PASSWORD` and the `DB_SERVER`/`CHEESE_DB_PASSWORD` SFTP settings no
-   longer work — the Azure registry and the SFTP server have both been retired.)
+   `CHEESE_PASSWORD` and the `DB_SERVER`/`CHEESE_DB_PASSWORD` SFTP settings are
+   obsolete and no longer work.)
 
 4. Run `cheese aws-auth` and paste the key when prompted. It checks the key
    against AWS before storing it, so you find out immediately whether it works,
