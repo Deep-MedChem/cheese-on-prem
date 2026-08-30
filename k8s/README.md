@@ -95,7 +95,7 @@ step-by-step, including the secrets, is in [Quick start](#quick-start) below.
 | **Alignment** | `alignment.enabled` | off | conformer alignment, license-gated |
 | **Supabase** | `supabase.enabled` | off | in-cluster auth + per-user spaces (test profile) |
 | **oauth2-proxy** | `oauth2Proxy.enabled` | off | SSO stub (alternate to Supabase) |
-| **Licence agent** | `licensingAgent.enabled` | off | v1 licensing: renews the licence file onto `/data` daily ([docs](docs/licensing-agent.md)) |
+| **Licence agent** | `licensingAgent.enabled` | off — **turn it on** | v1 licensing, the scheme Kubernetes uses: renews the licence file onto `/data` daily. Off only because the chart cannot invent your licence key ([docs](docs/licensing-agent.md)) |
 
 ## Images
 
@@ -143,6 +143,72 @@ orchestrator:
     source: ecr
     ecr:
       tag: develop-v1lic
+```
+
+### Your AWS credentials
+
+DeepMedChem issues **one** access key. It does both jobs — pulls the images *and*
+downloads the databases; there is no separate database credential.
+
+The key itself carries **no permissions**. Its only right is `sts:AssumeRole` on a
+read-only per-product role, so it must always be used through a profile that
+assumes that role — using it directly gets `AccessDenied`, not an image.
+
+`~/.aws/credentials` — the identity:
+
+```ini
+[pharmaco]
+aws_access_key_id     = AKIA…
+aws_secret_access_key = …
+```
+
+`~/.aws/config` — one entry per **product** you are entitled to:
+
+```ini
+[profile dmch-cheese]
+role_arn       = arn:aws:iam::815935788477:role/cheese-onprem-pull
+source_profile = pharmaco
+region         = us-east-1
+```
+
+The profile names are yours; only `source_profile` must match the credentials
+block. One profile *per product*, all sharing the one key — a second entitlement
+is another `role_arn` (e.g. `navigator-onprem-pull`) with the same
+`source_profile`, not another key.
+
+Verify before anything else:
+
+```bash
+aws sts get-caller-identity --profile dmch-cheese
+# Arn ends in :assumed-role/cheese-onprem-pull/…
+```
+
+> **Using a secret manager instead?** Most teams will. Nothing here requires files
+> under `~/.aws/` — `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` in the
+> environment work identically, and the two Kubernetes Secrets below can come from
+> Vault, External Secrets or SealedSecrets. The files are simply the smallest
+> thing that works, and the shape to hand a client who has not standardised yet.
+
+### The two Kubernetes Secrets take *different* credentials
+
+This catches people, because the same key backs both:
+
+| Secret | Takes | Why |
+|---|---|---|
+| `cheese-aws-credentials` — read by the dataSync Job | the **raw key** | the Job builds its own profile and assumes the role *inside* the container, so botocore refreshes the session itself — a multi-hour database sync outlives the 1-hour session a one-shot assume-role would give it |
+| `cheese-ecr-pull` — read by the kubelet | an **assumed-role token** | the kubelet cannot assume a role; it needs a docker-registry Secret holding a ready ECR password |
+
+```bash
+# dataSync — raw key, no profile
+kubectl -n cheese create secret generic cheese-aws-credentials \
+  --from-literal=AWS_ACCESS_KEY_ID=AKIA… \
+  --from-literal=AWS_SECRET_ACCESS_KEY='…'
+
+# image pull — note --profile: the token must come from the ASSUMED role
+kubectl -n cheese create secret docker-registry cheese-ecr-pull \
+  --docker-server=815935788477.dkr.ecr.us-east-1.amazonaws.com \
+  --docker-username=AWS \
+  --docker-password="$(aws ecr get-login-password --region us-east-1 --profile dmch-cheese)"
 ```
 
 ### ⚠️ The pull Secret expires every 12 hours
@@ -194,9 +260,12 @@ Prerequisites: a Kubernetes cluster (≥ 1.28) with an ingress controller,
 > build/sideload tooling). Nothing in it is needed for a real deployment.
 
 ```bash
-# 1. Stage data on /data (license file, per-database dirs, SynthonGPT tree),
-#    all chowned 2112:0. The chart creates the PV + PVC for you — no manual
-#    kubectl apply. Layout + staging commands: docs/pvc-data-runbook.md.
+# 1. Stage data on /data (per-database dirs, SynthonGPT tree), all chowned
+#    2112:0. The chart creates the PV + PVC for you — no manual kubectl apply.
+#    Layout + staging commands: docs/pvc-data-runbook.md.
+#    You do NOT stage a licence file: the agent writes it (see "Licensing").
+#    Nor do you have to stage databases by hand — dataSync.enabled fetches
+#    exactly the ones you enabled, from the same AWS key that pulls the images.
 
 # 2. Images — apply the registry pull secret; with image.source: ecr the
 #    kubelet pulls <registry>/on-prem/cheese/<svc>:<tag> at install. (The
@@ -207,7 +276,11 @@ $EDITOR manifests/base/image-pull-secret.yaml      # fill in real registry creds
 kubectl create namespace cheese
 kubectl apply -f manifests/base/image-pull-secret.yaml
 
-# 3. Fill in secrets and install with your profile
+# 3. Licence key — the agent exchanges it for the licence file (see "Licensing")
+kubectl -n cheese create secret generic dmch-license-key \
+  --from-literal=licenseKey='DMCH-…'
+
+# 4. Fill in secrets and install with your profile
 cp charts/cheese/values-secrets.yaml.example charts/cheese/values-secrets.yaml
 $EDITOR charts/cheese/values-secrets.yaml
 helm install cheese charts/cheese -n cheese --create-namespace \
@@ -219,8 +292,9 @@ helm install cheese charts/cheese -n cheese --create-namespace \
 # is API-only: it leaves the search UI and SynthonGPT off, and its paths are
 # examples. Read it before layering it in.
 
-# 4. Wait for rollouts (SynthonGPT loads checkpoints — give it ~10m)
+# 5. Wait for rollouts (SynthonGPT loads checkpoints — give it ~10m)
 kubectl -n cheese get pods
+kubectl -n cheese logs -f deploy/dmch-licensing-agent     # licence activation
 ```
 
 With the local profile: UI → `http://cheese-ui.localtest.me`, orchestrator →
@@ -235,7 +309,7 @@ off, etc.). Layer a tiny profile file (or `--set` flags) for each environment.
 **minimal / API-only** (`charts/cheese/values-minimal.yaml`) — the only profile
 checked into the repo, and the one the kind bring-up is tested against: database +
 orchestrator, real DB folders under `database.databasesRoot`, canonical database
-names, licence file path. Everything else stays off.
+names. Everything else stays off.
 
 ```bash
 helm install cheese charts/cheese -n cheese --create-namespace \
@@ -302,64 +376,71 @@ You get `cheese-database` + `cheese-synthongpt` + `cheese-orchestrator` behind t
 `cheese-api.localtest.me` ingress, no UI/auth. Sanity-check:
 `curl -sf http://cheese-api.localtest.me/health`.
 
-## Generate license
+## Licensing
 
-The license is keyed to the host hardware of the node running the database
-container, so keygen runs as a pod on that node:
+Kubernetes uses **v1** licensing. You are issued a `DMCH-…` **key**; the chart's
+**licence agent** exchanges it for a signed 30-day licence file, writes that onto
+the shared `/data` PVC where the product containers already look, and renews it
+daily.
 
-```bash
-kubectl run -n cheese cheese-license-keygen --rm -it --restart=Never \
-  --image=815935788477.dkr.ecr.us-east-1.amazonaws.com/on-prem/cheese/cheese-database:latest \
-  --overrides='{"spec":{"imagePullSecrets":[{"name":"cheese-ecr-pull"}]}}' \
-  --command -- python -c 'from generate_license_ID import main; main()'
-```
-
-Send the key to support, then drop the returned JSON onto `/data` on the host:
-
-```bash
-cp cheese_license_file.json /data/cheese_license_file.json
-chown 2112:0 /data/cheese_license_file.json
-```
-
-Set `database.secret.cheeseLicenseFile` and `orchestrator.secret.cheeseLicenseFile`
-to that filename (they must match — one shared PVC). On kind the node is itself a
-container and fakes the hardware identity — see
-[`local-dev/README.md`](local-dev/README.md) for the extra steps.
-
-## Licensing v1 — the licence agent
-
-The section above is the **v0** procedure: a long-lived licence file bound to one
-machine's hardware id. On a cluster that only works while the database pod stays
-on the node the licence was cut for.
-
-**v1** is the alternative: you are issued a `DMCH-…` **key** instead of a file,
-and an optional chart component — the **licence agent** — exchanges it for a
-signed 30-day licence file, writes that onto the shared `/data` PVC where the
-product containers already look, and renews it daily. The fingerprint it
-registers is the **cluster's `kube-system` namespace UID**, so one licence covers
-the whole installation and nodes may come and go.
+The fingerprint it registers is the **cluster's `kube-system` namespace UID**, so
+one licence covers the whole installation and nodes may come and go freely.
 
 ```yaml
 licensingAgent:
-  enabled: true                                  # off by default
+  enabled: true
+  image:
+    source: ecr                                  # tag is pinned by the chart
   serverUrl: https://licensing.deepmedchem.com
   secret:
-    existingSecret: dmch-license-key           # a Secret with a `licenseKey` key
+    existingSecret: dmch-license-key             # a Secret with a `licenseKey` key
     # licenseKey: "DMCH-…"                       # …or inline, for self-contained installs
 ```
+
+```bash
+kubectl -n cheese create secret generic dmch-license-key \
+  --from-literal=licenseKey='DMCH-…'
+```
+
+`database.secret.cheeseLicenseFile` and `orchestrator.secret.cheeseLicenseFile`
+must both name the file the agent writes — a **plain filename**, resolved against
+`/data`, not a host path. They default to `cheese_license_file.json` and agree
+out of the box; only change them together.
 
 It adds one Deployment (1 replica), a ServiceAccount, and a `Role` in
 `kube-system` whose only right is `get` on the `kube-system` namespace object.
 The agent runs as UID 2112, not root.
 
-> **⚠️ This lands ahead of enforcement.** No released CHEESE image verifies a v1
-> licence yet (the verifier PRs are still open), and a v1 file handed to a current
-> image is rejected by its v0 verifier with a misleading "signature does not
-> match". A `DMCH-PTN-…` **partner token is not a licence key.**
+### What to expect
+
+- **Products verify the licence offline.** They check a signature against a public
+  key baked into the image; they never call the licensing server. Only the agent
+  talks to it. If the server is unreachable the stack keeps running — the file has
+  a 30-day TTL renewed daily, so roughly 29 days of margin.
+- **Enforcement is live** on `cheese-database` and `cheese-orchestrator`, the two
+  components a headless install needs. `cheese-inference` and the alignment API
+  still verify v0 only; both are off by default.
+- **One licence per cluster, not per release.** Several Helm releases in one
+  cluster share its fingerprint. Separate tenants at the application layer, not
+  with extra licences.
+- **Recreating a cluster costs an activation.** A new cluster means a new
+  `kube-system` UID, so a new fingerprint and another activation slot;
+  `max_activations` defaults to 1 and the next activation is refused with `409
+  max_activations_reached`. For a delete/recreate test loop, pin
+  `licensingAgent.fingerprintOverride` so every cluster reuses one activation.
+- A `DMCH-PTN-…` **partner token is not a licence key.** It mints keys for your
+  end-customers; the chart refuses to render if it sees one.
 
 Full detail — the licensing model, one-licence-per-installation vs partner
 sublicensing, the RBAC probe results, why the agent is not root, operating and
 troubleshooting it: **[docs/licensing-agent.md](docs/licensing-agent.md)**.
+
+### v0 is not usable on a cluster
+
+The older scheme is a long-lived file bound to **one machine's** DMI hardware id.
+It cannot span a cluster whose nodes change, and it is not what you were issued a
+`DMCH-…` key for. It remains the Docker Compose / single-host path only — see the
+[Compose install guide](../docs/compose-install.md).
 
 ## Verify the chart (no cluster)
 

@@ -52,8 +52,14 @@ Secret the kubelet uses):
 kubectl create secret docker-registry cheese-ecr-pull -n cheese \
   --docker-server=815935788477.dkr.ecr.us-east-1.amazonaws.com \
   --docker-username=AWS \
-  --docker-password="$(aws ecr get-login-password --region us-east-1)"
+  --docker-password="$(aws ecr get-login-password --region us-east-1 --profile dmch-cheese)"
 ```
+
+> **`--profile` is not optional.** Your key's only permission is `sts:AssumeRole`;
+> it cannot call ECR directly, so without a profile that assumes the read-only
+> role this returns `AccessDenied` rather than a token. Set the profile up first —
+> see [the k8s README](../README.md#your-aws-credentials) — and confirm it with
+> `aws sts get-caller-identity --profile dmch-cheese`.
 
 > ### ⚠️ This one expires in 12 hours
 >

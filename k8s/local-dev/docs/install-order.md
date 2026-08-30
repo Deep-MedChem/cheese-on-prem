@@ -4,8 +4,12 @@
 > `values.yaml` + `deployment.target` (no `values-onprem.yaml`/`values-headless.yaml`
 > overlays), and the chart now creates the PV/PVC itself (no manual
 > `kubectl apply -f manifests/base/persistent-volume*`). See **[../../README.md](../../README.md)**
-> for the current quick-start and profiles; the data-staging and license steps
-> below remain accurate.
+> for the current quick-start and profiles; the data-staging steps below remain
+> accurate.
+>
+> **The licence step below does not.** It stages a v0 licence file by hand.
+> Kubernetes uses **v1**: the licence agent writes that file for you and renews
+> it — see [../README.md](../README.md) § "Licence on kind".
 
 End-to-end install of the on-prem prototype on a fresh **local kind cluster**
 (the internal test setup — for a real deployment follow
@@ -69,7 +73,8 @@ kubectl apply -f manifests/base/image-pull-secret.yaml
 Required before any data-plane pod starts. Follow
 [`pvc-data-runbook.md`](../../docs/pvc-data-runbook.md) sections 1–3:
 
-- license file at `/data/cheese_license_file.json`
+- ~~license file at `/data/cheese_license_file.json`~~ — **not any more**: the v1
+  licence agent writes this file itself, see [../README.md](../README.md)
 - per-database directories under `/data/<db_name>/`
 - SynthonGPT tree under `/data/synthongpt_data/`
 - everything chowned to `2112:0`

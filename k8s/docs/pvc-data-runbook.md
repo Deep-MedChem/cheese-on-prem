@@ -15,7 +15,7 @@ the authoritative description of what the charts expect to find there.
 
 ```
 /data/
-├── cheese_license_file.json                  # cheese-database — license file
+├── cheese_license_file.json                  # licence file — WRITTEN BY THE AGENT, not staged
 ├── jobs/                                     # cheese-database — auto-created by jobs/exec roles
 │   └── ...                                   #   (empty at install time)
 ├── <db_name>/                                # cheese-database — one per .Values.databases entry
@@ -65,7 +65,12 @@ match (`cheese-local-manual` in the example), and the host path must exist.
 
 ## 2. cheese-database — required files
 
-### License file
+### Licence file
+
+> **You do not stage this on Kubernetes.** The v1 licence agent writes it here
+> and renews it daily — see [licensing-agent.md](licensing-agent.md). The rest of
+> this section describes the file for reference, and applies to the single-host
+> v0 flow.
 
 ```
 /data/license.yaml
