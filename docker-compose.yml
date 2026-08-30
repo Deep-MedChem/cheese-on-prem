@@ -26,8 +26,14 @@
 #      (inference, alignment, oauth2-proxy) always bind localhost. Under
 #      `--profile sso`, nginx is the only service meant to face the network.
 
+# Image paths. Images live at on-prem/cheese/<image> — one repository per
+# product image, no customer segment: the images are customer-agnostic and a
+# tailored build is a tag, not a repository. cheese-database and
+# cheese-orchestrator have moved; the remaining services below still use the
+# older on-prem/<image>/${CHEESE_CUSTOMER} layout and follow as each one's
+# on-prem build is repointed.
 x-cheese-db-image: &cheese-db-image
-  image: ${CHEESE_REGISTRY:-815935788477.dkr.ecr.us-east-1.amazonaws.com}/on-prem/cheese-database/${CHEESE_CUSTOMER}:${CHEESE_IMAGE_TAG:-latest}
+  image: ${CHEESE_REGISTRY:-815935788477.dkr.ecr.us-east-1.amazonaws.com}/on-prem/cheese/cheese-database:${CHEESE_IMAGE_TAG:-latest}
 
 # Drop-everything baseline applied to every cheese-* service.
 x-hardening: &hardening
@@ -117,7 +123,7 @@ services:
 
   # ── cheese-orchestrator: the public CHEESE API ────────────────────────────────
   api:
-    image: ${CHEESE_REGISTRY:-815935788477.dkr.ecr.us-east-1.amazonaws.com}/on-prem/cheese-orchestrator/${CHEESE_CUSTOMER}:${CHEESE_IMAGE_TAG:-latest}
+    image: ${CHEESE_REGISTRY:-815935788477.dkr.ecr.us-east-1.amazonaws.com}/on-prem/cheese/cheese-orchestrator:${CHEESE_IMAGE_TAG:-latest}
     container_name: cheese-api
     <<: [*hardening, *cheese-data-mounts]
     env_file:
