@@ -3,9 +3,8 @@
 set -e
 
 echo Downloading CHEESE images...
-# Registry (2026-07 AWS migration): AWS ECR is the only registry — the legacy
-# Azure ACR (cheese.azurecr.io) account is retired. An explicit CHEESE_REGISTRY
-# in cheese-env-file.conf still overrides (e.g. a future mirror).
+# An explicit CHEESE_REGISTRY in cheese-env-file.conf overrides the default
+# (e.g. a mirror).
 CHEESE_REGISTRY="${CHEESE_REGISTRY:-815935788477.dkr.ecr.us-east-1.amazonaws.com}"
 REGISTRY="$CHEESE_REGISTRY"
 REPO_NAME="${REGISTRY}/on-prem"
@@ -39,6 +38,19 @@ image_tag() {
   esac
 }
 
+# image_repo IMAGE → the ECR repository that image is published to. Images live
+# at on-prem/cheese/<image>: one repository per product image, no customer
+# segment — the images are customer-agnostic and a tailored build is a tag, not
+# a repository. cheese-database and cheese-orchestrator have moved; the rest are
+# still published to the older on-prem/<image>/<customer> path and follow as
+# each one's on-prem build is repointed.
+image_repo() {
+  case "$1" in
+    cheese-database|cheese-orchestrator) echo "${REGISTRY}/on-prem/cheese/$1" ;;
+    *) echo "${REPO_NAME}/$1/${CHEESE_CUSTOMER}" ;;
+  esac
+}
+
 # ── Registry login (ECR) ─────────────────────────────────────────────────────
 # Auth is IAM. The customer's access key (CHEESE_AWS_ACCESS_KEY_ID/
 # CHEESE_AWS_SECRET_ACCESS_KEY in cheese-env-file.conf, provided by DeepMedChem)
@@ -49,7 +61,7 @@ image_tag() {
 if [ -z "${CHEESE_AWS_ACCESS_KEY_ID:-}" ] || [ -z "${CHEESE_AWS_SECRET_ACCESS_KEY:-}" ]; then
   echo "ERROR: registry $REGISTRY needs CHEESE_AWS_ACCESS_KEY_ID and CHEESE_AWS_SECRET_ACCESS_KEY"
   echo "in ~/.config/cheese/cheese-env-file.conf. Ask the DeepMedChem team for your keys."
-  echo "(The old CHEESE_PASSWORD no longer works: the Azure registry has been retired.)"
+  echo "(CHEESE_PASSWORD is obsolete and no longer works.)"
   exit 1
 fi
 ecr_token=$(docker run --rm --entrypoint /bin/sh \
@@ -97,10 +109,11 @@ case "$answer" in
         done
 
         pull_image() {
-            local tag
+            local tag repo
             tag="$(image_tag "$1")"
-            echo "Pulling $REPO_NAME/$1/${CHEESE_CUSTOMER}:${tag}"
-            docker pull "$REPO_NAME/$1/${CHEESE_CUSTOMER}:${tag}"
+            repo="$(image_repo "$1")"
+            echo "Pulling ${repo}:${tag}"
+            docker pull "${repo}:${tag}"
         }
 
         # 1) Recognised images, in canonical order.

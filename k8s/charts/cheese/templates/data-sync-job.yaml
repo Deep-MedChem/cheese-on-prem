@@ -1,0 +1,168 @@
+{{- /*
+Database sync Job — populates the shared data volume from DeepMedChem's S3.
+
+Why a Job and not an init container on the database pods: five database roles
+mount the same PVC, so an init container would run five concurrent syncs of the
+same terabytes. And why not a Helm hook: a hook blocks `helm install` until it
+finishes, and a full database is hundreds of GB — the install would appear hung
+for hours. So this is a plain Job that runs alongside the stack. The database
+pods will restart until their data is present; that is expected and documented.
+
+Auth is the customer's own AWS access key, whose only right is assuming the
+read-only pull role. It is the SAME key that pulls the images, and the Secret
+this reads is the one `cheese aws-auth --target k8s` writes.
+
+`aws s3 sync` is incremental, so re-running the Job resumes rather than
+restarting, and a completed Job is cheap to re-run after adding a database.
+*/}}
+{{- $ds := .Values.dataSync }}
+{{- if $ds.enabled }}
+{{- $root := . }}
+{{- $selected := list }}
+{{- range $name, $db := .Values.database.databases }}
+{{- if $db.enabled }}{{ $selected = append $selected ($db.output_directory | default $name) }}{{ end }}
+{{- end }}
+{{- if $ds.databases }}{{ $selected = $ds.databases }}{{ end }}
+{{- if not $selected }}
+{{- fail "dataSync.enabled=true but no databases are selected: either enable entries under database.databases (their output_directory is synced) or list folder names in dataSync.databases." }}
+{{- end }}
+{{- $secretName := $ds.secret.existingSecret | default "cheese-aws-credentials" }}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ include "cheese.fullname" $root }}-data-sync
+  labels:
+    {{- include "cheese.labels" $root | nindent 4 }}
+    app.kubernetes.io/component: data-sync
+  annotations:
+    {{- /* Re-created on each upgrade so a changed database selection actually
+           syncs; a Job's pod template is immutable, so it cannot be patched. */}}
+    helm.sh/resource-policy: keep
+spec:
+  backoffLimit: {{ $ds.backoffLimit }}
+  {{- if $ds.activeDeadlineSeconds }}
+  activeDeadlineSeconds: {{ $ds.activeDeadlineSeconds }}
+  {{- end }}
+  ttlSecondsAfterFinished: {{ $ds.ttlSecondsAfterFinished }}
+  template:
+    metadata:
+      labels:
+        {{- include "cheese.labels" $root | nindent 8 }}
+        app.kubernetes.io/component: data-sync
+    spec:
+      restartPolicy: Never
+      {{- with $ds.nodeSelector }}
+      nodeSelector: {{- toYaml . | nindent 8 }}
+      {{- end }}
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: {{ $root.Values.data.pvcName }}
+        - name: tmp
+          emptyDir: {}
+      {{- if $ds.prepareDataDir.enabled }}
+      {{- /* Same trick as the licence agent: the PVC root is root-owned, so a
+             non-root sync cannot create the per-database directories. Prepare
+             ONLY the databases root — group 0, group-write, setgid so files the
+             sync creates stay group-readable for the 2112 product containers.
+             Never a recursive chown: this volume holds terabytes. */}}
+      initContainers:
+        - name: prepare-data-dir
+          image: {{ $ds.image.repository }}:{{ $ds.image.tag }}
+          imagePullPolicy: {{ $ds.image.pullPolicy }}
+          securityContext:
+            runAsUser: 0
+            runAsNonRoot: false
+            capabilities:
+              drop: [ALL]
+              add: [CHOWN, FOWNER, DAC_OVERRIDE]
+            allowPrivilegeEscalation: false
+          command: ["sh", "-c"]
+          args:
+            - |
+              set -eu
+              d={{ include "cheese.dataSyncRoot" $root | quote }}
+              mkdir -p "$d"
+              chgrp 0 "$d"
+              chmod g+rwxs "$d"
+              ls -ld "$d"
+          volumeMounts:
+            - name: data
+              mountPath: {{ $root.Values.data.mountPath | quote }}
+      {{- end }}
+      containers:
+        - name: sync
+          image: {{ $ds.image.repository }}:{{ $ds.image.tag }}
+          imagePullPolicy: {{ $ds.image.pullPolicy }}
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: {{ $ds.runAsUser }}
+            runAsGroup: 0
+            capabilities:
+              drop: [ALL]
+            allowPrivilegeEscalation: false
+          env:
+            {{- /* The key itself carries no S3 rights; it may only assume the
+                   pull role. The CLI is pointed at a profile that assumes that
+                   role with credential_source=Environment, so botocore REFRESHES
+                   the role credentials by itself — a multi-hour sync of a large
+                   database outlives the 1-hour session a one-shot assume-role
+                   would give it. */}}
+            - name: AWS_ACCESS_KEY_ID
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $secretName }}
+                  key: {{ $ds.secret.accessKeyIdKey }}
+            - name: AWS_SECRET_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $secretName }}
+                  key: {{ $ds.secret.secretAccessKeyKey }}
+            - name: AWS_CONFIG_FILE
+              value: /tmp/aws/config
+            - name: AWS_PROFILE
+              value: onprem
+            - name: AWS_DEFAULT_REGION
+              value: {{ $ds.region | quote }}
+            - name: AWS_EC2_METADATA_DISABLED
+              value: "true"
+            - name: HOME
+              value: /tmp
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              set -eu
+              mkdir -p /tmp/aws
+              cat > /tmp/aws/config <<EOF
+              [profile onprem]
+              role_arn = {{ $ds.roleArn }}
+              credential_source = Environment
+              region = {{ $ds.region }}
+              role_session_name = cheese-data-sync
+              s3 =
+                  max_concurrent_requests = {{ $ds.maxConcurrentRequests }}
+              EOF
+              echo "Identity: $(aws sts get-caller-identity --query Arn --output text)"
+              root={{ include "cheese.dataSyncRoot" $root | quote }}
+              rc=0
+              for db in {{ range $selected }}{{ . | quote }} {{ end }}; do
+                echo "=== $db ==="
+                if aws s3 sync "s3://{{ $ds.bucket }}/$db/" "$root/$db" {{ $ds.syncArgs }}; then
+                  echo "  ok: $db"
+                else
+                  echo "  FAILED: $db" >&2
+                  rc=1
+                fi
+              done
+              {{- /* Fail the Job if any database failed, so the pod's status is
+                     honest and backoffLimit retries. sync is incremental, so a
+                     retry resumes rather than restarting. */}}
+              exit $rc
+          volumeMounts:
+            - name: data
+              mountPath: {{ $root.Values.data.mountPath | quote }}
+            - name: tmp
+              mountPath: /tmp
+          resources:
+            {{- toYaml $ds.resources | nindent 12 }}
+{{- end }}

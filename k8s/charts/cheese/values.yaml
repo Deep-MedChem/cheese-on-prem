@@ -196,6 +196,79 @@ licenseAgent:
   affinity: {}
 
 # ===========================================================================
+# dataSync — populate the data volume from DeepMedChem's S3
+# ===========================================================================
+# A Job that copies the indexed databases you are licensed for onto the shared
+# volume, using the SAME AWS access key that pulls the images (its only right is
+# assuming the read-only pull role). Nothing else in the chart puts data on that
+# volume, so without this the database pods start with nothing to serve.
+#
+# `aws s3 sync` is incremental: re-running resumes rather than restarting, so an
+# interrupted or extended sync is cheap to retry, and adding a database later
+# only fetches the new one.
+#
+# ⚠️ SIZE. These databases are large — from under 1 GB to ~1.3 TB each, ~8 TB for
+# the full catalogue. Enable only what you have disk for; check sizes first.
+dataSync:
+  enabled: false
+
+  # Which folders to fetch. Empty → derived from the ENABLED entries under
+  # database.databases (their output_directory), so the data you sync and the
+  # data the engine is configured to read cannot drift apart. Set this only to
+  # sync something the engine is not configured for yet.
+  databases: []
+
+  # Where the folders land. Empty → derived to match how the database resolves
+  # OUTPUT_DIRECTORIES (see the cheese.dataSyncRoot helper). Override only if
+  # your layout is unusual — getting this wrong populates a path nothing reads.
+  targetDir: ""
+
+  bucket: cheese-dev-s3pilot-815935788477
+  region: us-east-1
+  # The read-only role the key assumes. Same role that pulls the images.
+  roleArn: arn:aws:iam::815935788477:role/cheese-onprem-pull
+
+  secret:
+    # Secret holding the AWS key. `cheese aws-auth --target k8s` writes exactly
+    # this shape, so the compose CLI and the chart consume one artefact.
+    existingSecret: ""                     # "" → cheese-aws-credentials
+    accessKeyIdKey: AWS_ACCESS_KEY_ID
+    secretAccessKeyKey: AWS_SECRET_ACCESS_KEY
+
+  image:
+    repository: public.ecr.aws/aws-cli/aws-cli
+    tag: latest
+    pullPolicy: IfNotPresent
+
+  # Extra flags for `aws s3 sync`. --only-show-errors keeps the Job log readable:
+  # the default per-file progress output is megabytes of noise for a large DB.
+  syncArgs: "--only-show-errors"
+  # Parallel S3 requests. Higher saturates a fat link sooner but costs memory.
+  maxConcurrentRequests: 10
+
+  # Runs as the same UID as the product containers so the files it writes are
+  # readable by them without a second ownership pass.
+  runAsUser: 2112
+
+  # The PVC root is root-owned, so a non-root sync cannot create directories in
+  # it. This prepares ONLY the databases root, non-recursively (group 0 +
+  # group-write + setgid). Never a recursive chown — the volume holds terabytes.
+  prepareDataDir:
+    enabled: true
+
+  # A large sync legitimately takes hours; failures retry with backoff, and sync
+  # resumes, so a couple of attempts is enough. activeDeadlineSeconds is left
+  # empty deliberately — a deadline that fires mid-transfer wastes the transfer.
+  backoffLimit: 2
+  activeDeadlineSeconds: ""
+  ttlSecondsAfterFinished: 86400
+
+  nodeSelector: {}
+  resources:
+    requests: { cpu: "200m", memory: 256Mi }
+    limits:   { cpu: "2",    memory: 1Gi }
+
+# ===========================================================================
 # cheese-database
 # ===========================================================================
 database:
@@ -241,7 +314,9 @@ database:
 
   secret:
     existingSecret: ""                     # if set, reference this pre-created Secret (keys: production, cheeseLicense, discordWebhookUrl) and render NO inline Secret
-    production: ""                         # OUR_SECRET-style value enabling licensing-prod path
+    production: ""                         # "" = licensed on-prem mode (leave empty);
+                                           # must match orchestrator.env.production, where the
+                                           # two modes are documented in full
     cheeseLicense: ""                      # optional inline license; if set, used instead of file
     cheeseLicenseFile: "cheese_license_file.json"  # filename on the PVC (relative to /data)
     discordWebhookUrl: ""
@@ -483,7 +558,23 @@ orchestrator:
     domain_url: "http://cheese-api.localtest.me"
     ui_url: "http://cheese-ui.localtest.me"
     cheese_env: "onprem"
-    production: "OUR_SECRET"               # must match database.secret.production
+    # PRODUCTION is compared to the literal "OUR_SECRET" by the product, and
+    # that ONE value switches TWO things at once (cheese_orchestrator/cheese_core.py):
+    #   ""            customer install — per-call licence verification stays ON
+    #                 (the @check_license decorator on the core functions), and
+    #                 the engine reads CONFIG_FILE, so DIM and the search limits
+    #                 come from config.yaml. Compose never sets PRODUCTION at
+    #                 all, so this is also the compose behaviour.
+    #   "OUR_SECRET"  SaaS / dev mode — the per-call licence check becomes a
+    #                 no-op (a released on-prem image still verifies the licence
+    #                 at import; a locally built one has no other check at all),
+    #                 CONFIG_FILE is ignored, and DIM=256 /
+    #                 MAX_NEIGHBORS=100 / search batch cap=10 are hardcoded
+    #                 (that cap surfaces to users as "Provide fewer than 10
+    #                 molecules"). Wrong for a customer install on both counts.
+    # Must match database.secret.production — orchestrator-deployment.yaml
+    # fails the render if it does not.
+    production: ""
     enable_auth: "false"
     enable_notifications: "false"
 

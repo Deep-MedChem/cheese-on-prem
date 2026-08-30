@@ -35,11 +35,10 @@ _cheese_aws_creds="${CHEESE_AWS_CREDENTIALS_FILE:-${HOME}/.config/cheese/aws-cre
 [ -f "$_cheese_aws_creds" ] && export_env_vars "$_cheese_aws_creds"
 unset _cheese_aws_creds
 
-# ── Container registry (ACR → ECR migration, 2026-07) ────────────────────────
+# ── Container registry ───────────────────────────────────────────────────────
 # Central resolution, exported for every `cheese` subcommand and for
-# docker-compose interpolation. AWS ECR is the only registry — the legacy Azure
-# ACR (cheese.azurecr.io) account is retired. An explicit CHEESE_REGISTRY in
-# the conf still overrides (e.g. a future mirror). (update-images and
-# _compose-env repeat this default so they also work when invoked standalone,
-# outside the dispatcher.)
+# docker-compose interpolation. An explicit CHEESE_REGISTRY in the conf
+# overrides the default (e.g. a mirror). (update-images and _compose-env repeat
+# this default so they also work when invoked standalone, outside the
+# dispatcher.)
 export CHEESE_REGISTRY="${CHEESE_REGISTRY:-815935788477.dkr.ecr.us-east-1.amazonaws.com}"

@@ -17,6 +17,18 @@
 #
 # An ECR pull token is valid for 12 HOURS only, so the pull Secret must be
 # refreshed — see k8s/README.md, "Images".
+# ── DATABASES ON THE VOLUME ──────────────────────────────────────────────────
+# Nothing else in the chart puts data on the volume, so enable this to have the
+# databases fetched from DeepMedChem's S3 with the same AWS key that pulls the
+# images. Off here because the kind profile points at databases already on the
+# host. Sizes run from under 1 GB to ~1.3 TB each — check disk first.
+#
+# dataSync:
+#   enabled: true
+#   # folders default to the ENABLED entries under database.databases below,
+#   # so what you sync and what the engine reads cannot drift apart.
+#
+# The Secret it reads is the one `cheese aws-auth --target k8s` writes.
 
 database:
   # ── ROOT LOCATION — set ONCE. Every DB path = <databasesRoot>/<folder>. ──────
@@ -67,7 +79,16 @@ database:
     # Licensing mode. NOTE: on kind the licence is validated against the
     # kind-control-plane container's DMI (product_name="kind"), NOT this host, so
     # this licence will NOT validate. Regenerate a node licence (see
-    # k8s/local-dev/docs/kind-bringup-log.md step 4) or set `production: "OUR_SECRET"`.
+    # k8s/local-dev/docs/kind-bringup-log.md step 4) or set `production: "OUR_SECRET"`
+    # HERE AND on orchestrator.env.production — the chart requires the pair to
+    # match. What that pair actually switches off depends on the image: in a
+    # released on-prem image the licence is still verified at import (that check
+    # is unconditional), so it only drops the per-call re-check; in a locally
+    # built image (plain Dockerfile, no enable_licensing.py — which is what
+    # image.source: local means here) the per-call check is the ONLY licence
+    # mechanism, so the pair removes licensing outright. Either way it also
+    # drops the orchestrator to a hardcoded DIM=256 and a 10-molecule search
+    # cap, so never leave it set for anything a customer or a benchmark touches.
     # NOTE: THIS WILL BE CHANGED IN THE NEAR FUTURE TO A PROPER SYSTEM!
     #
     # A PLAIN FILENAME, not a host path. The products resolve this as
@@ -80,7 +101,7 @@ database:
 
 orchestrator:
   env:
-    production: ""                   # must match database.secret.production
+    production: ""                   # must match database.secret.production (chart default is "" too)
   secret:
     # Plain filename, and it must match database.secret.cheeseLicenseFile —
     # see the note there for why an absolute host path does not work.

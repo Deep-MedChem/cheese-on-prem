@@ -196,3 +196,41 @@ relative to the mount too. Pass root context.
 {{- define "cheese.licenseFileAbsPath" -}}
 {{- printf "%s/%s" (trimSuffix "/" .Values.data.mountPath) (include "cheese.licenseFileRelPath" .) -}}
 {{- end -}}
+
+{{/*
+Release-prefixed object name. The chart otherwise hardcodes resource names, but
+the data-sync Job is per-release (two releases in one namespace would collide on
+a bare name), so it gets a prefixed one.
+*/}}
+{{- define "cheese.fullname" -}}
+{{- printf "%s-%s" .Release.Name .Chart.Name | trunc 63 | trimSuffix "-" -}}
+{{- end -}}
+
+{{/*
+Absolute in-container directory the data-sync Job writes database folders into.
+
+It MUST land where the database expects them, or the sync silently populates a
+path nothing reads. The database resolves each entry as
+    OUTPUT_DIRECTORIES[name] = <database.databasesRoot>/<output_directory>
+and the products then resolve that against ${DATA_ROOT:-/data}, stripping any
+leading slash — which is why an absolute-looking databasesRoot such as
+`/mnt/DATA/cheese-databases` really becomes `/data/mnt/DATA/cheese-databases`
+inside the container. This helper reproduces that join exactly rather than
+guessing, so writer and readers cannot disagree.
+
+`dataSync.targetDir` overrides it outright for layouts this does not cover.
+*/}}
+{{- define "cheese.dataSyncRoot" -}}
+{{- $ds := .Values.dataSync -}}
+{{- if $ds.targetDir -}}
+{{- $ds.targetDir -}}
+{{- else -}}
+{{- $mount := .Values.data.mountPath | trimSuffix "/" -}}
+{{- $dbRoot := .Values.database.databasesRoot | default "" | trimPrefix "/" | trimSuffix "/" -}}
+{{- if $dbRoot -}}
+{{- printf "%s/%s" $mount $dbRoot -}}
+{{- else -}}
+{{- $mount -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
