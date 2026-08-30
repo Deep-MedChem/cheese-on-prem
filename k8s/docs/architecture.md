@@ -111,7 +111,7 @@ databases:
     transformer: morgan_tanimoto
 
 image:
-  source: local              # local | acr
+  source: local              # local | ecr
 ```
 
 `databases:` is the values-driven hook for the recurring "add a real database" routine — bumping that map and `helm upgrade` is the established path; the actual data files land on the PVC out-of-band.
@@ -119,7 +119,7 @@ image:
 ## Install order
 
 1. `kind` cluster + ingress controller
-2. Namespace + PVC + (optional) ACR pull secret
+2. Namespace + PVC + (optional) ECR pull secret
 3. `cheese-database` (data plane up first; orchestrator polls it)
 4. `cheese-synthongpt` (optional)
 5. `cheese-orchestrator`
