@@ -100,11 +100,11 @@ dictionaries, all keyed by the **database name**:
 
 ```yaml
 OUTPUT_DIRECTORIES:
-  mcule_purchasable_in_stock_240717_clustered: '/mnt/DATA/cheese-databases/mcule_purchasable_in_stock_240717_clustered'
+  MCULE-IN-STOCK: '/mnt/DATA/cheese-databases/mcule_purchasable_in_stock_260510_canonical_clustered'
 INDEX_TYPES:
-  mcule_purchasable_in_stock_240717_clustered: "clustered"      # clustered | in_memory
+  MCULE-IN-STOCK: "clustered"      # clustered | in_memory
 DELIMITERS:
-  mcule_purchasable_in_stock_240717_clustered: ","              # column separator
+  MCULE-IN-STOCK: ","              # column separator
 ```
 
 The startup loop iterates over `OUTPUT_DIRECTORIES` and immediately indexes
