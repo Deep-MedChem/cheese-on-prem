@@ -16,6 +16,7 @@ development, source-image iteration, and pre-release smoke tests.
 | `scripts/build-source-images.sh` | rebuild `<svc>-local:dev` images from the upstream source repos |
 | `scripts/load-kind-images.sh` | sideload those images into the kind node (`kind load docker-image`) |
 | `kind/cluster.yaml` | single-node kind cluster, host ports 80/443 mapped to the ingress |
+| `values-kind-smoke.yaml.example` | ready-made smoke profile: database + orchestrator + one 655 MB database + the v1 licence agent |
 | `env/cheese-search-ui.build.env.example` | Vite build args baked into a source-built UI bundle |
 | `docs/install-order.md` | step-by-step kind install playbook |
 | `docs/kind-bringup-log.md` | annotated log of a real first bring-up (gotchas included) |
@@ -70,30 +71,61 @@ The upstream repos (`cheese-orchestrator`, `cheese-database`, `cheese-search-ui`
 override with `SOURCES_ROOT=/path/to/repos` if they live elsewhere. Then flip
 `image.source: local` in your values for the components you rebuilt.
 
-## License on kind
+## Licence on kind
 
-The license is keyed to the host hardware of the node running the database
-container — on kind that is the `kind-control-plane` container:
-
-```bash
-kubectl run -n cheese cheese-license-keygen --rm -it --restart=Never \
-  --image=cheese-database-local:dev --image-pull-policy=IfNotPresent \
-  --command -- python -c 'from generate_license_ID import main; main()'
-
-# after support returns the license file:
-docker cp cheese_license_file.json kind-control-plane:/data/cheese_license_file.json
-docker exec kind-control-plane chown 2112:0 /data/cheese_license_file.json
-```
-
-Note kind fakes the DMI `product_name` (reads as `kind`), which an on-prem
-license bound to the real host will reject — restoring the host value needs an
-ephemeral node-level bind mount after every cluster (re)create:
+Use **v1** — the licence agent. On kind it is not merely supported, it is
+*simpler* than the alternative: the fingerprint is the cluster's own `kube-system`
+namespace UID, which is a perfectly valid fingerprint, so there is nothing
+machine-specific to work around.
 
 ```bash
-docker exec kind-control-plane sh -c \
-  "printf '%s\n' \"$(cat /sys/devices/virtual/dmi/id/product_name)\" > /tmp/product_name && \
-   mount --bind /tmp/product_name /sys/devices/virtual/dmi/id/product_name"
+kubectl -n cheese create secret generic dmch-license-key \
+  --from-literal=licenseKey='DMCH-…'
 ```
+
+```yaml
+licensingAgent:
+  enabled: true
+  image:
+    source: ecr                 # tag is pinned by the chart, not onprem.imageTag
+  secret:
+    existingSecret: dmch-license-key
+```
+
+The agent writes the licence file onto the PVC at exactly the path
+`database.secret.cheeseLicenseFile` names, and renews it daily. Watch it with
+`kubectl -n cheese logs -f deploy/dmch-licensing-agent`.
+
+`values-kind-smoke.yaml.example` in this directory is a ready-made profile that
+does this — database + orchestrator + one small database + the agent.
+
+> ### ⚠️ Recreating the cluster costs an activation slot
+>
+> `kind delete cluster` + `kind create` mints a **new** `kube-system` UID, so a
+> new fingerprint, so another activation. `max_activations` defaults to 1 and the
+> next one is refused with `409 max_activations_reached` — and a dead activation
+> only ages out after 45 days.
+>
+> For a loop where you recreate the cluster, pin a fixed fingerprint so every
+> cluster reuses one activation:
+>
+> ```yaml
+> licensingAgent:
+>   fingerprintOverride: "kind:<your-name>"
+> ```
+>
+> Note kind's hostPath PV lives *inside* the node container, so deleting the
+> cluster also destroys the licence file and the agent's state. The agent simply
+> re-activates — with the override set, into the same slot.
+
+### Why not the v0 file here
+
+v0 is a long-lived file bound to one machine's DMI hardware id. On kind that id
+belongs to the `kind-control-plane` container, which reports `product_name` as
+`kind`, so a licence cut for the real host is rejected and restoring the host
+value needs an ephemeral `mount --bind` inside the node after **every** cluster
+re-create. v1 removes all of that. v0 remains the Docker Compose / single-host
+path only.
 
 ## Teardown
 
