@@ -117,16 +117,17 @@ orchestrator:
 
 # ===========================================================================
 # licence agent — v1 ("call home") licensing. Mirrors values.yaml; only the
-# site-specific values live here. See values.yaml for the full key set, the
-# v0-vs-v1 explanation and the ⚠️ status note (no released product image
-# verifies a v1 licence yet), and k8s/docs/licensing-v1-agent.md for the model.
+# site-specific values live here. See values.yaml for the full key set and the
+# v0-vs-v1 explanation, and k8s/docs/licensing-agent.md for the model.
 # ===========================================================================
 licensingAgent:
-  # OFF here on purpose: this profile still uses the hand-placed v0 licence
-  # file above. Flip to true only together with the two cheeseLicenseFile
-  # values, which must then point back at a plain PVC-relative filename
-  # (e.g. "cheese_license_file.json") — the agent writes there, and the
-  # absolute host paths used above are a v0-only local hack.
+  # OFF here because this profile uses the hand-placed v0 licence file above.
+  # v1 is the better choice on kind and needs no DMI workaround: the fingerprint
+  # is the cluster's own kube-system namespace UID, which is perfectly valid
+  # there. To switch, flip this to true and point the two cheeseLicenseFile
+  # values back at a plain PVC-relative filename (e.g.
+  # "cheese_license_file.json") — the agent writes there, and the absolute host
+  # paths used above are a v0-only local hack.
   enabled: false
 
   # Site value: the licence key issued for THIS installation. Prefer
@@ -136,11 +137,12 @@ licensingAgent:
     existingSecret: ""                     # e.g. dmch-license-key, created with kubectl/Vault/ESO
     licenseKey: ""                         # DMCH-…
 
-  # Machine-specific: nothing has been published to
-  # on-prem/licensing/dmch-licensing-agent yet (see values.yaml), and a kind node
-  # could not use the pull secret here anyway, so the image is side-loaded:
+  # Machine-specific: side-loading, so a local build can be iterated on without
+  # a registry round-trip:
   #   docker build -f licensing/agent/Dockerfile -t dmch-licensing-agent:dev .   # in dmch-licensing
   #   kind load docker-image dmch-licensing-agent:dev --name <cluster>
+  # The published image works here too — drop this block and set
+  # `image: { source: ecr }` to pull on-prem/licensing/dmch-licensing-agent.
   # No ecr: block on purpose — this overlay carries machine-specific values, and
   # the registry path is a chart default, not a site one.
   image:
