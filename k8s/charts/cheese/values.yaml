@@ -227,7 +227,9 @@ database:
 
   secret:
     existingSecret: ""                     # if set, reference this pre-created Secret (keys: production, cheeseLicense, discordWebhookUrl) and render NO inline Secret
-    production: ""                         # OUR_SECRET-style value enabling licensing-prod path
+    production: ""                         # "" = licensed on-prem mode (leave empty);
+                                           # must match orchestrator.env.production, where the
+                                           # two modes are documented in full
     cheeseLicense: ""                      # optional inline license; if set, used instead of file
     cheeseLicenseFile: "cheese_license_file.json"  # filename on the PVC (relative to /data)
     discordWebhookUrl: ""
@@ -467,7 +469,23 @@ orchestrator:
     domain_url: "http://cheese-api.localtest.me"
     ui_url: "http://cheese-ui.localtest.me"
     cheese_env: "onprem"
-    production: "OUR_SECRET"               # must match database.secret.production
+    # PRODUCTION is compared to the literal "OUR_SECRET" by the product, and
+    # that ONE value switches TWO things at once (cheese_orchestrator/cheese_core.py):
+    #   ""            customer install — per-call licence verification stays ON
+    #                 (the @check_license decorator on the core functions), and
+    #                 the engine reads CONFIG_FILE, so DIM and the search limits
+    #                 come from config.yaml. Compose never sets PRODUCTION at
+    #                 all, so this is also the compose behaviour.
+    #   "OUR_SECRET"  SaaS / dev mode — the per-call licence check becomes a
+    #                 no-op (a released on-prem image still verifies the licence
+    #                 at import; a locally built one has no other check at all),
+    #                 CONFIG_FILE is ignored, and DIM=256 /
+    #                 MAX_NEIGHBORS=100 / search batch cap=10 are hardcoded
+    #                 (that cap surfaces to users as "Provide fewer than 10
+    #                 molecules"). Wrong for a customer install on both counts.
+    # Must match database.secret.production — orchestrator-deployment.yaml
+    # fails the render if it does not.
+    production: ""
     enable_auth: "false"
     enable_notifications: "false"
 

@@ -17,5 +17,5 @@ description: |
   deprecated. Secrets support an `existingSecret` per component for external
   secret management, with an inline fallback for self-contained installs.
 type: application
-version: 0.4.0
+version: 0.4.1
 appVersion: "0.0.1"
