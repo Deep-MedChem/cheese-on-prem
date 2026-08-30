@@ -146,6 +146,11 @@ $EDITOR charts/cheese/values-secrets.yaml
 helm install cheese charts/cheese -n cheese --create-namespace \
   -f charts/cheese/values-secrets.yaml \
   -f local-profile.yaml          # see "Profiles" below (or use --set flags)
+#
+# No profile of your own yet? charts/cheese/values-minimal.yaml is checked in
+# and is the one profile that gets tested end to end (see "Profiles") — but it
+# is API-only: it leaves the search UI and SynthonGPT off, and its paths are
+# examples. Read it before layering it in.
 
 # 4. Wait for rollouts (SynthonGPT loads checkpoints — give it ~10m)
 kubectl -n cheese get pods
@@ -159,6 +164,20 @@ real hostnames via the ingress values for anything non-local).
 
 The single `values.yaml` defaults are production-leaning (target=local but supabase
 off, etc.). Layer a tiny profile file (or `--set` flags) for each environment.
+
+**minimal / API-only** (`charts/cheese/values-minimal.yaml`) — the only profile
+checked into the repo, and the one the kind bring-up is tested against: database +
+orchestrator, real DB folders under `database.databasesRoot`, canonical database
+names, licence file path. Everything else stays off.
+
+```bash
+helm install cheese charts/cheese -n cheese --create-namespace \
+  -f charts/cheese/values-minimal.yaml
+```
+
+Site-specific values in it (`databasesRoot`, the absolute `cheeseLicenseFile`
+paths, the enabled database list) are examples — edit them for the site. Keep it
+in step with `values.yaml`: same keys, same notes, machine-specific values only.
 
 **local / test** (`local-profile.yaml`) — in-cluster Supabase auth, local storage:
 
@@ -285,6 +304,10 @@ helm template cheese charts/cheese --set supabase.enabled=true \
   --set supabase.secret.anonKey=x --set supabase.secret.serviceRoleKey=x
 helm template cheese charts/cheese --set deployment.target=aws       # storage gp3 / ingress alb, no local PV
 helm template cheese charts/cheese --set orchestrator.secret.existingSecret=my-sec
+helm template cheese charts/cheese -f charts/cheese/values-minimal.yaml   # the shipped profile
+# licensing mode: the two PRODUCTION values must match, or the render fails
+helm template cheese charts/cheese | grep -A1 "name: PRODUCTION"          # orchestrator value must be ""
+helm template cheese charts/cheese --set orchestrator.env.production=OUR_SECRET  # → fails, by design
 # licence agent: nothing may render by default, then inline key / external secret
 helm template cheese charts/cheese | grep -c license-agent            # → 0
 helm template cheese charts/cheese --set licenseAgent.enabled=true \

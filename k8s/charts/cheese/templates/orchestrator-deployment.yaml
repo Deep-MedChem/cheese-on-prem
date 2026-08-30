@@ -2,6 +2,23 @@
 {{- $root := . -}}
 {{- $oc := .Values.orchestrator -}}
 {{- $ocSecret := include "cheese.secretName" (list $oc.secret.existingSecret "cheese-orchestrator") -}}
+{{- /* PRODUCTION is one value with two effects (cheese_orchestrator/cheese_core.py):
+       it gates the per-call licence check (@check_license) AND selects the
+       config branch. Setting it on the orchestrator but not the database, or
+       the reverse, gives a split-brain stack: an orchestrator that skips
+       licence verification, ignores CONFIG_FILE and hardcodes DIM=256 with a
+       10-molecule search cap, in front of a database that still enforces the
+       licence and reads its config. values.yaml has always said these two must
+       match — this makes it true at render time instead of at 3am.
+       Skipped when the database secret is externally managed or the database is
+       disabled: the chart cannot read a pre-created Secret's value. */ -}}
+{{- if and .Values.database.enabled (not .Values.database.secret.existingSecret) -}}
+{{- $ocProduction := default "" $oc.env.production | toString -}}
+{{- $dbProduction := default "" .Values.database.secret.production | toString -}}
+{{- if ne $ocProduction $dbProduction -}}
+{{- fail (printf "orchestrator.env.production (%q) must match database.secret.production (%q). A mismatch puts the orchestrator in SaaS mode - no per-call licence verification, CONFIG_FILE ignored, DIM=256 and search batch capped at 10 - in front of a licensed database. Leave both empty for a customer install; OUR_SECRET on both is the unlicensed dev/kind mode." $ocProduction $dbProduction) -}}
+{{- end -}}
+{{- end -}}
 {{- /* When in-cluster supabase is enabled and no explicit URL is set, point the
        orchestrator at the in-cluster gateway. */ -}}
 {{- $supabaseUrl := $oc.supabase.url -}}
