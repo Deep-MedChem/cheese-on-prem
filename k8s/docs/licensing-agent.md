@@ -46,7 +46,7 @@ nodes come and go.
 Some older internal notes call the agent "v2". That numbering is wrong: **v0 is
 the offline file, v1 is the agent.**
 
-⚠️ A **`DMCH-PTN-…` token is not a licence key.** It is a *partner* token, used to
+⚠️ A **`DMCH-PP-…` token is not a licence key.** It is a *partner* token, used to
 issue keys for end-customers via `POST /partner/v1/licenses`. Putting one in the
 licence secret fails with `401 partner_token_not_a_license_key`; the chart
 refuses to render if it spots one.
@@ -67,7 +67,7 @@ That last point decides how to licence a multi-tenant deployment:
 |---|---|---|
 | Running CHEESE for **your own** organisation | **one** | One cluster, one installation. |
 | Running **N releases** (namespaces) in **one** cluster for several internal teams | **one** | They share the cluster's fingerprint. N licences would each try to activate the *same* fingerprint — you would be paying for slots you cannot use, and the second key gets the first key's fingerprint. Separate the tenants at the **application** layer (per-user spaces / Supabase auth), not with per-tenant licences. |
-| A **partner** deploying CHEESE at your own end-customers, each in **their own** cluster | **one per end-customer cluster** | Different clusters, different fingerprints. Issue those keys yourself with your `DMCH-PTN-…` partner token. |
+| A **partner** deploying CHEESE at your own end-customers, each in **their own** cluster | **one per end-customer cluster** | Different clusters, different fingerprints. Issue those keys yourself with your `DMCH-PP-…` partner token. |
 
 `max_activations` on the licence (default **1**) is how many live installations a
 single key may have at once. When the slots are full the next activation is
@@ -244,7 +244,7 @@ of the licence file.
 | Symptom | Cause | Fix |
 |---|---|---|
 | `403 … /api/v1/namespaces/kube-system` in the log | the Role/RoleBinding is missing or the pod uses a different ServiceAccount | check `licensingAgent.rbac.create` / `serviceAccount.name`; try `rbac.scope: cluster` |
-| `401 partner_token_not_a_license_key` | a `DMCH-PTN-…` partner token was used as the licence key | use the `DMCH-…` key; mint one for the end-customer with the partner token |
+| `401 partner_token_not_a_license_key` | a `DMCH-PP-…` partner token was used as the licence key | use the `DMCH-…` key; mint one for the end-customer with the partner token |
 | `activation limit reached` / `409` | `max_activations` slots are all in use | the log prints the live activations; release the stale one, or ask for more slots |
 | `licensing server unreachable (grace continues)` | no outbound HTTPS, or the server is down | no immediate impact — the licence on disk is valid for ~30 days; fix egress |
 | `Permission denied` writing the licence file | `prepareDataDir.enabled: false` and the directory was never prepared | re-enable it, or `chgrp 0` + `chmod g+rwxs` the directory yourself |

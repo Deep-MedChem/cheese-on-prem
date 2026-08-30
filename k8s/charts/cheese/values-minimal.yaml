@@ -135,7 +135,7 @@ licensingAgent:
 
   # Site value: the licence key issued for THIS installation. Prefer
   # secret.existingSecret and keep the key out of any values file.
-  # A DMCH-PTN-… value is a partner token, NOT a licence key.
+  # A DMCH-PP-… value is a partner token, NOT a licence key.
   secret:
     existingSecret: ""                     # e.g. dmch-license-key, created with kubectl/Vault/ESO
     licenseKey: ""                         # DMCH-…
