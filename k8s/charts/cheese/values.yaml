@@ -3,7 +3,7 @@
 # ONE values.yaml drives everything. Every component is toggled with a
 # top-level `.enabled` key. Defaults give the MINIMAL headless profile —
 # cheese-database + cheese-orchestrator only, auth off, local-source images;
-# everything else (licenseAgent, searchUi, ketcher, synthongpt, inference,
+# everything else (licensingAgent, searchUi, ketcher, synthongpt, inference,
 # alignment, supabase, oauth2Proxy) is opt-in. Site-required parameters live in
 # values-minimal.yaml. Resource names are hardcoded
 # (`cheese-database-app`, `cheese-orchestrator`, `cheese-search-ui`,
@@ -81,21 +81,28 @@ data:
 # of enforcement: a v1 file handed to a current image is rejected by its v0
 # verifier as "signature does not match". See k8s/docs/licensing-v1-agent.md.
 # ===========================================================================
-licenseAgent:
+licensingAgent:
   enabled: false
 
   image:
-    # ⚠️ NOT PUBLISHED YET — the repository below does not exist, so source: ecr
-    # will not resolve. Build the agent from the dmch-licensing repo
-    # (`docker build -f licensing/agent/Dockerfile -t cheese-license-agent:dev .`)
-    # and side-load it.
+    # ⚠️ source: ecr is not usable YET. The repository below is real but EMPTY —
+    # it is created by terraform-deepmedchem#82 and filled by
+    # publish-agent-image.yml in the dmch-licensing repo (develop -> :develop,
+    # main -> :latest). Until that Terraform is applied and the first build has
+    # run, a pull gets ImagePullBackOff. Build and side-load it instead:
+    #   docker build -f licensing/agent/Dockerfile -t dmch-licensing-agent:dev .
+    #
+    # Note the namespace: on-prem/LICENSING, not on-prem/cheese. The agent is
+    # product-agnostic — one image shared by every DeepMedChem on-prem product —
+    # so it sits in its own namespace, which every product's customer pull role
+    # is granted. Everything else in this file comes from on-prem/cheese.
     source: local                          # local | ecr
     local:
-      repository: cheese-license-agent
+      repository: dmch-licensing-agent
       tag: dev
       pullPolicy: IfNotPresent
     ecr:
-      repository: 815935788477.dkr.ecr.us-east-1.amazonaws.com/on-prem/cheese/cheese-license-agent
+      repository: 815935788477.dkr.ecr.us-east-1.amazonaws.com/on-prem/licensing/dmch-licensing-agent
       tag: ""                                # empty -> onprem.imageTag
       pullPolicy: IfNotPresent
 
@@ -118,7 +125,7 @@ licenseAgent:
 
   # Agent bookkeeping (activation id + fingerprint), same PVC, relative to
   # data.mountPath. Survives restarts so the install keeps its activation slot.
-  statePath: ".cheese-license-agent.json"
+  statePath: ".dmch-licensing-agent.json"
 
   # Health endpoint (readiness only): 200 when a fresh licence is on disk, 503
   # while activating / renewing / unreachable. 0 disables the server entirely.
@@ -135,7 +142,7 @@ licenseAgent:
 
   serviceAccount:
     create: true
-    name: ""                               # "" → cheese-license-agent
+    name: ""                               # "" → dmch-licensing-agent
     annotations: {}
 
   # The agent's ONLY cluster permission: `get` the kube-system Namespace object,

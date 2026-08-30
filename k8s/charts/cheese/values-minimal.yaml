@@ -121,7 +121,7 @@ orchestrator:
 # v0-vs-v1 explanation and the ⚠️ status note (no released product image
 # verifies a v1 licence yet), and k8s/docs/licensing-v1-agent.md for the model.
 # ===========================================================================
-licenseAgent:
+licensingAgent:
   # OFF here on purpose: this profile still uses the hand-placed v0 licence
   # file above. Flip to true only together with the two cheeseLicenseFile
   # values, which must then point back at a plain PVC-relative filename
@@ -133,15 +133,20 @@ licenseAgent:
   # secret.existingSecret and keep the key out of any values file.
   # A DMCH-PTN-… value is a partner token, NOT a licence key.
   secret:
-    existingSecret: ""                     # e.g. cheese-license-key, created with kubectl/Vault/ESO
+    existingSecret: ""                     # e.g. dmch-license-key, created with kubectl/Vault/ESO
     licenseKey: ""                         # DMCH-…
 
-  # Machine-specific: the agent image is not published to any registry yet, so
-  # on kind it must be side-loaded (`kind load docker-image cheese-license-agent:dev`).
+  # Machine-specific: nothing has been published to
+  # on-prem/licensing/dmch-licensing-agent yet (see values.yaml), and a kind node
+  # could not use the pull secret here anyway, so the image is side-loaded:
+  #   docker build -f licensing/agent/Dockerfile -t dmch-licensing-agent:dev .   # in dmch-licensing
+  #   kind load docker-image dmch-licensing-agent:dev --name <cluster>
+  # No ecr: block on purpose — this overlay carries machine-specific values, and
+  # the registry path is a chart default, not a site one.
   image:
     source: local
     local:
-      repository: cheese-license-agent
+      repository: dmch-licensing-agent     # side-load: docker build -f licensing/agent/Dockerfile -t dmch-licensing-agent:dev .
       tag: dev
       pullPolicy: Never                    # side-loaded into the kind node; never pull
 

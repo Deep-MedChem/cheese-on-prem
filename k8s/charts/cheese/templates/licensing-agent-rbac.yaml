@@ -1,4 +1,4 @@
-{{- if .Values.licenseAgent.enabled -}}
+{{- if .Values.licensingAgent.enabled -}}
 {{- /*
 Identity + API permission for the licence agent.
 
@@ -7,7 +7,7 @@ object, because its UID is the installation fingerprint it registers with the
 licensing server (see licensing/agent/agent.py: get_fingerprint()). It reads no
 secrets, no pods, no other namespace.
 
-licenseAgent.rbac.scope picks how that single permission is granted:
+licensingAgent.rbac.scope picks how that single permission is granted:
 
   namespace (default) — a Role + RoleBinding IN kube-system. A namespaced
       RoleBinding does authorise `get` on the Namespace object of its own
@@ -23,16 +23,16 @@ licenseAgent.rbac.scope picks how that single permission is granted:
       prunes them). Still no `list`: resourceNames do not apply to list/watch,
       so list is simply not granted.
 
-Set licenseAgent.rbac.create=false to wire both yourself; then set
-licenseAgent.serviceAccount.create=false and .name to your ServiceAccount.
+Set licensingAgent.rbac.create=false to wire both yourself; then set
+licensingAgent.serviceAccount.create=false and .name to your ServiceAccount.
 */ -}}
-{{- $la := .Values.licenseAgent -}}
-{{- $saName := include "cheese.licenseAgentServiceAccountName" . -}}
+{{- $la := .Values.licensingAgent -}}
+{{- $saName := include "cheese.licensingAgentServiceAccountName" . -}}
 {{- /* The Role/ClusterRole live OUTSIDE the release namespace, so their names are
        release-prefixed: two releases in one cluster must not collide. */ -}}
-{{- $rbacName := printf "%s-license-agent-fingerprint" .Release.Name -}}
+{{- $rbacName := printf "%s-licensing-agent-fingerprint" .Release.Name -}}
 {{- if not (has $la.rbac.scope (list "namespace" "cluster")) -}}
-{{- fail (printf "licenseAgent.rbac.scope %q is not supported (use 'namespace' or 'cluster')" $la.rbac.scope) -}}
+{{- fail (printf "licensingAgent.rbac.scope %q is not supported (use 'namespace' or 'cluster')" $la.rbac.scope) -}}
 {{- end -}}
 {{- if $la.serviceAccount.create }}
 apiVersion: v1
@@ -40,7 +40,7 @@ kind: ServiceAccount
 metadata:
   name: {{ $saName }}
   labels:
-    {{- include "cheese.componentLabels" (list . "license-agent") | nindent 4 }}
+    {{- include "cheese.componentLabels" (list . "licensing-agent") | nindent 4 }}
   {{- with $la.serviceAccount.annotations }}
   annotations:
     {{- toYaml . | nindent 4 }}
@@ -55,7 +55,7 @@ metadata:
   name: {{ $rbacName }}
   namespace: kube-system
   labels:
-    {{- include "cheese.componentLabels" (list . "license-agent") | nindent 4 }}
+    {{- include "cheese.componentLabels" (list . "licensing-agent") | nindent 4 }}
 rules:
   - apiGroups: [""]
     resources: ["namespaces"]
@@ -68,7 +68,7 @@ metadata:
   name: {{ $rbacName }}
   namespace: kube-system
   labels:
-    {{- include "cheese.componentLabels" (list . "license-agent") | nindent 4 }}
+    {{- include "cheese.componentLabels" (list . "licensing-agent") | nindent 4 }}
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: Role
@@ -84,7 +84,7 @@ kind: ClusterRole
 metadata:
   name: {{ $rbacName }}
   labels:
-    {{- include "cheese.componentLabels" (list . "license-agent") | nindent 4 }}
+    {{- include "cheese.componentLabels" (list . "licensing-agent") | nindent 4 }}
 rules:
   - apiGroups: [""]
     resources: ["namespaces"]
@@ -96,7 +96,7 @@ kind: ClusterRoleBinding
 metadata:
   name: {{ $rbacName }}
   labels:
-    {{- include "cheese.componentLabels" (list . "license-agent") | nindent 4 }}
+    {{- include "cheese.componentLabels" (list . "licensing-agent") | nindent 4 }}
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: ClusterRole

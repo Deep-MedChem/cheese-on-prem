@@ -166,29 +166,29 @@ podAntiAffinity:
 Resolved name of the licence-agent secret holding `licenseKey` (existingSecret-aware).
 Pass root context.
 */}}
-{{- define "cheese.licenseAgentSecretName" -}}
-{{- include "cheese.secretName" (list .Values.licenseAgent.secret.existingSecret "cheese-license-key") -}}
+{{- define "cheese.licensingAgentSecretName" -}}
+{{- include "cheese.secretName" (list .Values.licensingAgent.secret.existingSecret "dmch-license-key") -}}
 {{- end -}}
 
 {{/* ServiceAccount the licence agent runs as. Pass root context. */}}
-{{- define "cheese.licenseAgentServiceAccountName" -}}
-{{- $sa := .Values.licenseAgent.serviceAccount -}}
-{{- if $sa.name }}{{ $sa.name }}{{ else }}cheese-license-agent{{ end -}}
+{{- define "cheese.licensingAgentServiceAccountName" -}}
+{{- $sa := .Values.licensingAgent.serviceAccount -}}
+{{- if $sa.name }}{{ $sa.name }}{{ else }}dmch-licensing-agent{{ end -}}
 {{- end -}}
 
 {{/*
 Licence-file location the agent WRITES, as a path relative to data.mountPath.
-licenseAgent.licenseFile wins; otherwise it is inherited from the readers
+licensingAgent.licenseFile wins; otherwise it is inherited from the readers
 (database, then orchestrator) so writer and readers cannot drift apart.
 Leading "/" is stripped: the product images resolve CHEESE_LICENSE_FILE as
 "<DATA_ROOT>/<value lstripped of '/'>", so an "absolute" value is in fact
 relative to the mount too. Pass root context.
 */}}
 {{- define "cheese.licenseFileRelPath" -}}
-{{- $v := .Values.licenseAgent.licenseFile -}}
+{{- $v := .Values.licensingAgent.licenseFile -}}
 {{- if not $v }}{{- $v = .Values.database.secret.cheeseLicenseFile -}}{{- end -}}
 {{- if not $v }}{{- $v = .Values.orchestrator.secret.cheeseLicenseFile -}}{{- end -}}
-{{- if not $v }}{{- fail "licenseAgent.enabled=true but no licence filename is set: set licenseAgent.licenseFile (or database.secret.cheeseLicenseFile)" -}}{{- end -}}
+{{- if not $v }}{{- fail "licensingAgent.enabled=true but no licence filename is set: set licensingAgent.licenseFile (or database.secret.cheeseLicenseFile)" -}}{{- end -}}
 {{- trimPrefix "/" $v -}}
 {{- end -}}
 

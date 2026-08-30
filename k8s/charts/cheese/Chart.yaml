@@ -11,7 +11,7 @@ description: |
   Optional: cheese-synthongpt, ketcher (self-hosted molecule editor),
             inference (electrostatics), alignment (conformer alignment),
             supabase (in-cluster auth + per-user spaces), oauth2-proxy (SSO stub),
-            licenseAgent (v1 licensing: renews the licence file onto /data daily).
+            licensingAgent (v1 licensing: renews the licence file onto /data daily).
 
   Environment is selected with `deployment.target` (local | aws); azure is
   deprecated. Secrets support an `existingSecret` per component for external
