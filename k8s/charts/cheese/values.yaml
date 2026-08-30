@@ -476,8 +476,10 @@ orchestrator:
     #                 the engine reads CONFIG_FILE, so DIM and the search limits
     #                 come from config.yaml. Compose never sets PRODUCTION at
     #                 all, so this is also the compose behaviour.
-    #   "OUR_SECRET"  SaaS / unlicensed dev mode — the per-call licence check
-    #                 becomes a no-op, CONFIG_FILE is ignored, and DIM=256 /
+    #   "OUR_SECRET"  SaaS / dev mode — the per-call licence check becomes a
+    #                 no-op (a released on-prem image still verifies the licence
+    #                 at import; a locally built one has no other check at all),
+    #                 CONFIG_FILE is ignored, and DIM=256 /
     #                 MAX_NEIGHBORS=100 / search batch cap=10 are hardcoded
     #                 (that cap surfaces to users as "Provide fewer than 10
     #                 molecules"). Wrong for a customer install on both counts.
