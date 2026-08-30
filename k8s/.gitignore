@@ -13,7 +13,7 @@ cheese_license_file.json
 *license*.json
 *license*.yaml
 # …but the chart's licence-agent templates are chart SOURCE, not licences.
-!charts/cheese/templates/license-agent-*.yaml
+!charts/cheese/templates/licensing-agent-*.yaml
 
 # Build outputs
 dist/

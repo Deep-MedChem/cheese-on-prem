@@ -5,7 +5,7 @@ The chart can run a small **licence agent** next to the stack. It exchanges the
 onto the shared `/data` PVC at exactly the path the product containers read, and
 renews it daily — so nobody has to hand-install or refresh a licence file.
 
-It is **optional and off by default** (`licenseAgent.enabled: false`). With it
+It is **optional and off by default** (`licensingAgent.enabled: false`). With it
 off, the chart behaves exactly as before: you place a licence file on the PVC
 yourself.
 
@@ -84,16 +84,16 @@ the cluster.
 ### With your own secret store <kbd>recommended</kbd>
 
 ```bash
-kubectl -n cheese create secret generic cheese-license-key \
+kubectl -n cheese create secret generic dmch-license-key \
   --from-literal=licenseKey='DMCH-…'
 ```
 
 ```yaml
-licenseAgent:
+licensingAgent:
   enabled: true
   serverUrl: https://licensing.deepmedchem.com
   secret:
-    existingSecret: cheese-license-key      # any Secret with a `licenseKey` key
+    existingSecret: dmch-license-key      # any Secret with a `licenseKey` key
 ```
 
 `existingSecret` is the same convention the other components use, so Vault,
@@ -103,10 +103,10 @@ The chart then renders **no** Secret of its own.
 ### Self-contained (inline)
 
 ```yaml
-licenseAgent:
+licensingAgent:
   enabled: true
   secret:
-    licenseKey: "DMCH-…"        # rendered into Secret `cheese-license-key`
+    licenseKey: "DMCH-…"        # rendered into Secret `dmch-license-key`
 ```
 
 Keep that in your gitignored secrets values file (see
@@ -116,10 +116,10 @@ Keep that in your gitignored secrets values file (see
 
 | Object | Namespace | Purpose |
 |---|---|---|
-| `Deployment/cheese-license-agent` | release ns | 1 replica, `Recreate` — single writer of the licence file |
-| `ServiceAccount/cheese-license-agent` | release ns | identity used to read the fingerprint |
-| `Secret/cheese-license-key` | release ns | only when `secret.existingSecret` is empty |
-| `Role` + `RoleBinding` `<release>-license-agent-fingerprint` | **`kube-system`** | the single API permission (see below) |
+| `Deployment/dmch-licensing-agent` | release ns | 1 replica, `Recreate` — single writer of the licence file |
+| `ServiceAccount/dmch-licensing-agent` | release ns | identity used to read the fingerprint |
+| `Secret/dmch-license-key` | release ns | only when `secret.existingSecret` is empty |
+| `Role` + `RoleBinding` `<release>-licensing-agent-fingerprint` | **`kube-system`** | the single API permission (see below) |
 
 No Service and no ingress: the agent takes no inbound traffic.
 
@@ -155,7 +155,7 @@ If your cluster policy forbids creating objects inside `kube-system`, switch to
 an equally narrow cluster-scoped grant:
 
 ```yaml
-licenseAgent:
+licensingAgent:
   rbac:
     scope: cluster        # ClusterRole + ClusterRoleBinding, resourceNames: [kube-system]
 ```
@@ -164,7 +164,7 @@ licenseAgent:
 listing either. To wire RBAC entirely yourself:
 
 ```yaml
-licenseAgent:
+licensingAgent:
   rbac: { create: false }
   serviceAccount: { create: false, name: my-own-sa }
 ```
@@ -201,30 +201,30 @@ recursively chowns the whole volume on every pod start — a non-starter for a
 multi-terabyte `/data`.
 
 If you would rather pre-create and chown the directory out of band, turn the
-initContainer off with `licenseAgent.prepareDataDir.enabled: false`.
+initContainer off with `licensingAgent.prepareDataDir.enabled: false`.
 
 If you would rather not have `/data` itself group-writable, put the licence in a
 subdirectory and point the readers at it — the initContainer then prepares only
 that subdirectory:
 
 ```yaml
-licenseAgent:   { enabled: true, licenseFile: licensing/cheese_license_file.json }
+licensingAgent:   { enabled: true, licenseFile: licensing/cheese_license_file.json }
 database:       { secret: { cheeseLicenseFile: licensing/cheese_license_file.json } }
 orchestrator:   { secret: { cheeseLicenseFile: licensing/cheese_license_file.json } }
 alignment:      { secret: { cheeseLicenseFile: licensing/cheese_license_file.json } }
 ```
 
-Leave `licenseAgent.licenseFile` empty (the default) and the agent inherits
+Leave `licensingAgent.licenseFile` empty (the default) and the agent inherits
 `database.secret.cheeseLicenseFile`, so the writer and the readers cannot drift
 apart by accident.
 
 ## Operating it
 
 ```bash
-kubectl -n cheese logs deploy/cheese-license-agent -c agent
+kubectl -n cheese logs deploy/dmch-licensing-agent -c agent
 # 2026-08-28 11:39:24 INFO license file renewed: expires 2026-09-27 (contract 2027-08-28)
 
-kubectl -n cheese port-forward deploy/cheese-license-agent 8080:8080
+kubectl -n cheese port-forward deploy/dmch-licensing-agent 8080:8080
 curl -s localhost:8080 | jq
 # {"state":"ok","activation_id":"act_…","license_expires_at":"2026-09-27", …}
 ```
@@ -245,34 +245,48 @@ of the licence file.
 
 | Symptom | Cause | Fix |
 |---|---|---|
-| `403 … /api/v1/namespaces/kube-system` in the log | the Role/RoleBinding is missing or the pod uses a different ServiceAccount | check `licenseAgent.rbac.create` / `serviceAccount.name`; try `rbac.scope: cluster` |
+| `403 … /api/v1/namespaces/kube-system` in the log | the Role/RoleBinding is missing or the pod uses a different ServiceAccount | check `licensingAgent.rbac.create` / `serviceAccount.name`; try `rbac.scope: cluster` |
 | `401 partner_token_not_a_license_key` | a `DMCH-PTN-…` partner token was used as the licence key | use the `DMCH-…` key; mint one for the end-customer with the partner token |
 | `activation limit reached` / `409` | `max_activations` slots are all in use | the log prints the live activations; release the stale one, or ask for more slots |
 | `licensing server unreachable (grace continues)` | no outbound HTTPS, or the server is down | no immediate impact — the licence on disk is valid for ~30 days; fix egress |
 | `Permission denied` writing the licence file | `prepareDataDir.enabled: false` and the directory was never prepared | re-enable it, or `chgrp 0` + `chmod g+rwxs` the directory yourself |
 | product still reports a licence error | that image predates the v1 verifier — see the status box at the top | run a verifier-branch image, or keep using the v0 file |
-| `ImagePullBackOff` | the agent image is not published to any registry yet | build it from `dmch-licensing` and side-load it (below) |
+| `ImagePullBackOff` | nothing has been published to the agent's ECR repository yet | build it from `dmch-licensing` and side-load it (below) |
 
-## The image is not published yet
+## The image
 
-There is no registry copy of `cheese-license-agent`. Build it from the (private)
-`dmch-licensing` repo and side-load it:
+The agent is published to its own, **product-agnostic** namespace:
+
+```
+815935788477.dkr.ecr.us-east-1.amazonaws.com/on-prem/licensing/dmch-licensing-agent
+```
+
+Not `on-prem/cheese/…` like every other image this chart pulls. There is one
+agent for all DeepMedChem on-prem products, so it sits beside them rather than
+inside CHEESE's namespace, and every product's customer pull role is granted
+`on-prem/licensing/*` on top of its own namespace. Channel tags follow the same
+convention as the product images — `:develop` and `:latest`, selected with
+`onprem.imageTag` — plus an immutable `:<short-sha>` for tracing a running pod
+back to a commit.
+
+> **⚠️ Nothing is published there yet.** The repository is created by
+> [terraform-deepmedchem#82](https://github.com/Deep-MedChem/terraform-deepmedchem/pull/82)
+> and filled by `publish-agent-image.yml` in `dmch-licensing`. Until that
+> Terraform is **applied** and the first build has run, `source: ecr` gets
+> `ImagePullBackOff`. Build and side-load instead:
 
 ```bash
 # in dmch-licensing/
-docker build -f licensing/agent/Dockerfile -t cheese-license-agent:dev .
-kind load docker-image cheese-license-agent:dev --name <cluster>   # or push to your own registry
+docker build -f licensing/agent/Dockerfile -t dmch-licensing-agent:dev .
+kind load docker-image dmch-licensing-agent:dev --name <cluster>   # or push to your own registry
 ```
 
 ```yaml
-licenseAgent:
+licensingAgent:
   image:
     source: local
-    local: { repository: cheese-license-agent, tag: dev, pullPolicy: Never }
+    local: { repository: dmch-licensing-agent, tag: dev, pullPolicy: Never }
 ```
-
-The `ecr` block in `values.yaml` records the name the image would take once
-it is published; that repository does not exist yet, so it is not pullable.
 
 ## Verify without a cluster
 
@@ -280,19 +294,19 @@ it is published; that repository does not exist yet, so it is not pullable.
 cd k8s
 helm lint charts/cheese
 # nothing agent-shaped may render by default
-helm template cheese charts/cheese | grep -c license-agent          # → 0
+helm template cheese charts/cheese | grep -c licensing-agent          # → 0
 # inline key
-helm template cheese charts/cheese --set licenseAgent.enabled=true \
-  --set licenseAgent.secret.licenseKey=DMCH-EXAMPLE \
-  --show-only templates/license-agent-deployment.yaml
+helm template cheese charts/cheese --set licensingAgent.enabled=true \
+  --set licensingAgent.secret.licenseKey=DMCH-EXAMPLE \
+  --show-only templates/licensing-agent-deployment.yaml
 # external secret — must render NO Secret and reference yours
-helm template cheese charts/cheese --set licenseAgent.enabled=true \
-  --set licenseAgent.secret.existingSecret=cheese-license-key
+helm template cheese charts/cheese --set licensingAgent.enabled=true \
+  --set licensingAgent.secret.existingSecret=dmch-license-key
 # cluster-scoped RBAC variant, and the aws target
-helm template cheese charts/cheese --set licenseAgent.enabled=true \
-  --set licenseAgent.secret.licenseKey=DMCH-EXAMPLE --set licenseAgent.rbac.scope=cluster
-helm template cheese charts/cheese --set licenseAgent.enabled=true \
-  --set licenseAgent.secret.licenseKey=DMCH-EXAMPLE --set deployment.target=aws
+helm template cheese charts/cheese --set licensingAgent.enabled=true \
+  --set licensingAgent.secret.licenseKey=DMCH-EXAMPLE --set licensingAgent.rbac.scope=cluster
+helm template cheese charts/cheese --set licensingAgent.enabled=true \
+  --set licensingAgent.secret.licenseKey=DMCH-EXAMPLE --set deployment.target=aws
 ```
 
 > **Rendering and applying by hand?** `helm template` does not stamp a namespace
@@ -312,5 +326,5 @@ helm template cheese charts/cheese --set licenseAgent.enabled=true \
 - Off-cluster (Compose, bare metal) the same agent binary uses a persisted UUID
   as its fingerprint instead of the namespace UID; that path is documented in
   the Compose install docs, not here.
-- `licenseAgent.fingerprintOverride` exists for tests only. Setting it in a real
+- `licensingAgent.fingerprintOverride` exists for tests only. Setting it in a real
   install burns an activation slot on a fingerprint you cannot reproduce.

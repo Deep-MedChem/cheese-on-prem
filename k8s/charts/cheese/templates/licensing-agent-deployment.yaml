@@ -1,4 +1,4 @@
-{{- if .Values.licenseAgent.enabled -}}
+{{- if .Values.licensingAgent.enabled -}}
 {{- /*
 Licence agent (v1 "call home" licensing).
 
@@ -8,7 +8,7 @@ containers read (CHEESE_LICENSE_FILE). One replica, Recreate: it is the single
 writer of that file.
 
 The installation fingerprint is the kube-system Namespace UID, so ONE licence
-covers the whole cluster and nodes may come and go — see license-agent-rbac.yaml
+covers the whole cluster and nodes may come and go — see licensing-agent-rbac.yaml
 for the permission that makes that read possible, and k8s/docs/licensing-v1-agent.md
 for the licensing model and its current (pre-enforcement) status.
 
@@ -16,29 +16,29 @@ The CHEESE_* variable names are the product's client-side contract and are
 deliberately NOT renamed to DMCH_LICENSING_* (that rename applies to the server).
 */ -}}
 {{- $root := . -}}
-{{- $la := .Values.licenseAgent -}}
-{{- $laSecret := include "cheese.licenseAgentSecretName" . -}}
+{{- $la := .Values.licensingAgent -}}
+{{- $laSecret := include "cheese.licensingAgentSecretName" . -}}
 {{- $licPath := include "cheese.licenseFileAbsPath" . -}}
 {{- $statePath := printf "%s/%s" (trimSuffix "/" .Values.data.mountPath) (trimPrefix "/" $la.statePath) -}}
 {{- $dirs := list (dir $licPath) (dir $statePath) | uniq -}}
 {{- /* Guards: each of these otherwise surfaces as an opaque crash-loop or a 401. */ -}}
 {{- if not $la.serverUrl -}}
-{{- fail "licenseAgent.enabled=true requires licenseAgent.serverUrl (the licensing server base URL)" -}}
+{{- fail "licensingAgent.enabled=true requires licensingAgent.serverUrl (the licensing server base URL)" -}}
 {{- end -}}
 {{- if not $la.secret.existingSecret -}}
 {{- if not $la.secret.licenseKey -}}
-{{- fail "licenseAgent.enabled=true requires either licenseAgent.secret.existingSecret or licenseAgent.secret.licenseKey" -}}
+{{- fail "licensingAgent.enabled=true requires either licensingAgent.secret.existingSecret or licensingAgent.secret.licenseKey" -}}
 {{- end -}}
 {{- if hasPrefix "DMCH-PTN-" $la.secret.licenseKey -}}
-{{- fail "licenseAgent.secret.licenseKey looks like a DMCH-PTN-… partner token. A partner token is NOT a licence key: it issues keys for end-customers via /partner/v1/licenses. Using it here fails with 401 partner_token_not_a_license_key." -}}
+{{- fail "licensingAgent.secret.licenseKey looks like a DMCH-PTN-… partner token. A partner token is NOT a licence key: it issues keys for end-customers via /partner/v1/licenses. Using it here fails with 401 partner_token_not_a_license_key." -}}
 {{- end -}}
 {{- end -}}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: cheese-license-agent
+  name: dmch-licensing-agent
   labels:
-    {{- include "cheese.componentLabels" (list $root "license-agent") | nindent 4 }}
+    {{- include "cheese.componentLabels" (list $root "licensing-agent") | nindent 4 }}
 spec:
   {{- /* Single writer of the licence file: never scale, never roll two at once. */}}
   replicas: 1
@@ -46,7 +46,7 @@ spec:
     type: Recreate
   selector:
     matchLabels:
-      {{- include "cheese.componentSelectorLabels" (list $root "license-agent") | nindent 6 }}
+      {{- include "cheese.componentSelectorLabels" (list $root "licensing-agent") | nindent 6 }}
   template:
     metadata:
       {{- with $la.podAnnotations }}
@@ -54,10 +54,10 @@ spec:
         {{- toYaml . | nindent 8 }}
       {{- end }}
       labels:
-        {{- include "cheese.componentSelectorLabels" (list $root "license-agent") | nindent 8 }}
+        {{- include "cheese.componentSelectorLabels" (list $root "licensing-agent") | nindent 8 }}
     spec:
       {{- include "cheese.imagePullSecrets" (list $ $la.image) | nindent 6 }}
-      serviceAccountName: {{ include "cheese.licenseAgentServiceAccountName" $root }}
+      serviceAccountName: {{ include "cheese.licensingAgentServiceAccountName" $root }}
       {{- /* The projected SA token IS the fingerprint source — must stay mounted. */}}
       automountServiceAccountToken: true
       securityContext:
