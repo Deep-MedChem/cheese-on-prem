@@ -65,11 +65,6 @@ deployment:
 # Licensed images come from DeepMedChem's registry. `latest` is the released
 # channel and is the chart default; pin a specific tag if you want reproducible
 # rollouts.
-#
-# ⚠️ An ECR pull token is valid for 12 HOURS. A static pull Secret WILL stop
-# working the next time a pod is rescheduled. Refresh it — a CronJob,
-# external-secrets, or (on EKS) a node role with the ECR credential provider.
-# See k8s/README.md, "Images".
 onprem:
   imageTag: latest
   pullSecret: cheese-ecr-pull              # « SET THIS » if you named your pull Secret differently

@@ -22,8 +22,6 @@
 #   orchestrator:
 #     image: { source: ecr }
 #
-# An ECR pull token is valid for 12 HOURS only, so the pull Secret must be
-# refreshed — see k8s/README.md, "Images".
 # ── DATABASES ON THE VOLUME ──────────────────────────────────────────────────
 # Nothing else in the chart puts data on the volume, so enable this to have the
 # databases fetched from DeepMedChem's S3 with the same AWS key that pulls the

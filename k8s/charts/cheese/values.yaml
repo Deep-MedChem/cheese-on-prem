@@ -58,10 +58,7 @@ onprem:
   # channel, which not every image publishes — pin a component's own ecr.tag if
   # the channel you pick does not exist for it.
   imageTag: latest
-  # Secret the kubelet pulls with. NOTE: an ECR docker-login token is valid for
-  # only 12 HOURS, so a static Secret stops working the next time a pod is
-  # rescheduled. Refresh it (a CronJob, external-secrets, or an EKS node role
-  # with the ECR credential provider) — see k8s/README.md, "Images".
+  # Name of the image-pull Secret the kubelet uses for the ecr images.
   pullSecret: cheese-ecr-pull
 
 data:
