@@ -56,7 +56,7 @@ spec:
       labels:
         {{- include "cheese.componentSelectorLabels" (list $root "license-agent") | nindent 8 }}
     spec:
-      {{- include "cheese.imagePullSecrets" $la.image | nindent 6 }}
+      {{- include "cheese.imagePullSecrets" (list $ $la.image) | nindent 6 }}
       serviceAccountName: {{ include "cheese.licenseAgentServiceAccountName" $root }}
       {{- /* The projected SA token IS the fingerprint source — must stay mounted. */}}
       automountServiceAccountToken: true
@@ -74,8 +74,8 @@ spec:
              Never a recursive chown of /data — that would be a multi-TB no-go. */}}
       initContainers:
         - name: prepare-license-dir
-          image: {{ include "cheese.image" $la.image | quote }}
-          imagePullPolicy: {{ include "cheese.imagePullPolicy" $la.image }}
+          image: {{ include "cheese.image" (list $ $la.image) | quote }}
+          imagePullPolicy: {{ include "cheese.imagePullPolicy" (list $ $la.image) }}
           securityContext:
             runAsUser: 0
             runAsNonRoot: false
@@ -105,8 +105,8 @@ spec:
         - name: agent
           securityContext:
             {{- toYaml $la.securityContext | nindent 12 }}
-          image: {{ include "cheese.image" $la.image | quote }}
-          imagePullPolicy: {{ include "cheese.imagePullPolicy" $la.image }}
+          image: {{ include "cheese.image" (list $ $la.image) | quote }}
+          imagePullPolicy: {{ include "cheese.imagePullPolicy" (list $ $la.image) }}
           env:
             - name: CHEESE_LICENSING_URL
               value: {{ $la.serverUrl | quote }}

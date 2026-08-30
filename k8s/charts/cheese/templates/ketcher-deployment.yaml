@@ -21,15 +21,15 @@ spec:
       labels:
         {{- include "cheese.componentSelectorLabels" (list $root "ketcher") | nindent 8 }}
     spec:
-      {{- include "cheese.imagePullSecrets" $k.image | nindent 6 }}
+      {{- include "cheese.imagePullSecrets" (list $ $k.image) | nindent 6 }}
       securityContext:
         {{- toYaml $k.podSecurityContext | nindent 8 }}
       containers:
         - name: ketcher
           securityContext:
             {{- toYaml $k.securityContext | nindent 12 }}
-          image: {{ include "cheese.image" $k.image | quote }}
-          imagePullPolicy: {{ include "cheese.imagePullPolicy" $k.image }}
+          image: {{ include "cheese.image" (list $ $k.image) | quote }}
+          imagePullPolicy: {{ include "cheese.imagePullPolicy" (list $ $k.image) }}
           ports:
             - name: http
               containerPort: {{ $k.containerPort }}

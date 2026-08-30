@@ -21,7 +21,7 @@ spec:
       labels:
         {{- include "cheese.componentSelectorLabels" (list $root "alignment") | nindent 8 }}
     spec:
-      {{- include "cheese.imagePullSecrets" $al.image | nindent 6 }}
+      {{- include "cheese.imagePullSecrets" (list $ $al.image) | nindent 6 }}
       securityContext:
         {{- toYaml $al.podSecurityContext | nindent 8 }}
       volumes:
@@ -32,8 +32,8 @@ spec:
         - name: alignment
           securityContext:
             {{- toYaml $al.securityContext | nindent 12 }}
-          image: {{ include "cheese.image" $al.image | quote }}
-          imagePullPolicy: {{ include "cheese.imagePullPolicy" $al.image }}
+          image: {{ include "cheese.image" (list $ $al.image) | quote }}
+          imagePullPolicy: {{ include "cheese.imagePullPolicy" (list $ $al.image) }}
           ports:
             - name: http
               containerPort: {{ $al.containerPort }}

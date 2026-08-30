@@ -24,7 +24,7 @@ spec:
       labels:
         {{- include "cheese.componentSelectorLabels" (list $root "synthongpt") | nindent 8 }}
     spec:
-      {{- include "cheese.imagePullSecrets" $sg.image | nindent 6 }}
+      {{- include "cheese.imagePullSecrets" (list $ $sg.image) | nindent 6 }}
       securityContext:
         {{- toYaml $sg.podSecurityContext | nindent 8 }}
       volumes:
@@ -35,8 +35,8 @@ spec:
         - name: synthongpt
           securityContext:
             {{- toYaml $sg.securityContext | nindent 12 }}
-          image: {{ include "cheese.image" $sg.image | quote }}
-          imagePullPolicy: {{ include "cheese.imagePullPolicy" $sg.image }}
+          image: {{ include "cheese.image" (list $ $sg.image) | quote }}
+          imagePullPolicy: {{ include "cheese.imagePullPolicy" (list $ $sg.image) }}
           {{- /* Image ENTRYPOINT is `python synthon_api.py`; SYNTHONGPT_DATA_ROOT
                  seeds the defaults for --checkpoint, --synthon-index, etc. */}}
           args:
