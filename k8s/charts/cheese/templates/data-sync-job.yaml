@@ -120,8 +120,13 @@ spec:
                   key: {{ $ds.secret.secretAccessKeyKey }}
             - name: AWS_CONFIG_FILE
               value: /tmp/aws/config
-            - name: AWS_PROFILE
-              value: onprem
+            {{- /* Deliberately NO AWS_PROFILE here: it would not work. botocore
+                   drops the environment credential provider only when the profile
+                   is set EXPLICITLY (--profile / Session(profile=)); AWS_PROFILE
+                   does not count. With static keys in the environment the env
+                   provider wins outright, credential_source below never runs, and
+                   every call goes out as the bare user — which has no S3 rights.
+                   So the profile is passed on the command line instead. */}}
             - name: AWS_DEFAULT_REGION
               value: {{ $ds.region | quote }}
             - name: AWS_EC2_METADATA_DISABLED
@@ -142,12 +147,23 @@ spec:
               s3 =
                   max_concurrent_requests = {{ $ds.maxConcurrentRequests }}
               EOF
-              echo "Identity: $(aws sts get-caller-identity --query Arn --output text)"
+              {{- /* --profile is load-bearing on BOTH calls; see the note on the
+                     env block above. The identity line is the check: it must read
+                     assumed-role/…/cheese-data-sync, never user/…. */}}
+              id="$(aws --profile onprem sts get-caller-identity --query Arn --output text)"
+              echo "Identity: $id"
+              case "$id" in
+                *:assumed-role/*) : ;;
+                *) echo "FATAL: the pull role was not assumed — got '$id'. Every" >&2
+                   echo "  request would go out as the bare user, which holds only" >&2
+                   echo "  sts:AssumeRole and no S3 rights, and fail as AccessDenied." >&2
+                   exit 1 ;;
+              esac
               root={{ include "cheese.dataSyncRoot" $root | quote }}
               rc=0
               for db in {{ range $selected }}{{ . | quote }} {{ end }}; do
                 echo "=== $db ==="
-                if aws s3 sync "s3://{{ $ds.bucket }}/$db/" "$root/$db" {{ $ds.syncArgs }}; then
+                if aws --profile onprem s3 sync "s3://{{ $ds.bucket }}/$db/" "$root/$db" {{ $ds.syncArgs }}; then
                   echo "  ok: $db"
                 else
                   echo "  FAILED: $db" >&2
