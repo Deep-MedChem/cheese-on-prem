@@ -21,15 +21,15 @@ spec:
       labels:
         {{- include "cheese.componentSelectorLabels" (list $root "inference") | nindent 8 }}
     spec:
-      {{- include "cheese.imagePullSecrets" $inf.image | nindent 6 }}
+      {{- include "cheese.imagePullSecrets" (list $ $inf.image) | nindent 6 }}
       securityContext:
         {{- toYaml $inf.podSecurityContext | nindent 8 }}
       containers:
         - name: inference
           securityContext:
             {{- toYaml $inf.securityContext | nindent 12 }}
-          image: {{ include "cheese.image" $inf.image | quote }}
-          imagePullPolicy: {{ include "cheese.imagePullPolicy" $inf.image }}
+          image: {{ include "cheese.image" (list $ $inf.image) | quote }}
+          imagePullPolicy: {{ include "cheese.imagePullPolicy" (list $ $inf.image) }}
           ports:
             - name: http
               containerPort: {{ $inf.containerPort }}
