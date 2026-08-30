@@ -117,7 +117,8 @@ you only choose the source and the channel:
 
 ```yaml
 onprem:
-  imageTag: develop            # or `latest`; a component's ecr.tag overrides it
+  imageTag: latest             # released channel (default); `develop` tracks
+                               # development. A component's ecr.tag overrides it.
 
 database:
   image:

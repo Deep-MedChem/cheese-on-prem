@@ -49,8 +49,13 @@ deployment:
 # These two settings apply to all of them.
 onprem:
   # Tag pulled for every ecr image; a component's own ecr.tag overrides it.
-  # `develop` tracks the development channel, `latest` the released one.
-  imageTag: develop
+  # `latest` is the released channel and is the right default for a deployment:
+  # it mirrors what a `main` checkout of this repo gets on the compose path
+  # (scripts/_compose-env maps main -> latest). Point it at `develop` only to
+  # track the development channel, and note that ketcher and the electrostatics
+  # inference image are published on `latest` ONLY — selecting `develop`
+  # globally makes those two components fail to pull.
+  imageTag: latest
   # Secret the kubelet pulls with. NOTE: an ECR docker-login token is valid for
   # only 12 HOURS, so a static Secret stops working the next time a pod is
   # rescheduled. Refresh it (a CronJob, external-secrets, or an EKS node role
