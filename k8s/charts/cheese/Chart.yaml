@@ -19,8 +19,8 @@ description: |
   Storage likewise: `data.existingClaim` mounts a volume you provisioned, else
   the chart provisions one from `deployment.storage`.
 
-  Profiles: values-production.yaml (real install), values-minimal.yaml (kind
-  harness).
+  Profiles: values-minimal.yaml (smallest real install), values-quickstart.yaml
+  (kind harness).
 type: application
-version: 0.5.0
+version: 0.6.0
 appVersion: "0.0.1"

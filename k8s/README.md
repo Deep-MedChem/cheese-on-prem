@@ -288,10 +288,9 @@ helm install cheese charts/cheese -n cheese --create-namespace \
   -f charts/cheese/values-secrets.yaml \
   -f local-profile.yaml          # see "Profiles" below (or use --set flags)
 #
-# No profile of your own yet? charts/cheese/values-minimal.yaml is checked in
-# and is the one profile that gets tested end to end (see "Profiles") — but it
-# is API-only: it leaves the search UI and SynthonGPT off, and its paths are
-# examples. Read it before layering it in.
+# No profile of your own yet? charts/cheese/values-quickstart.yaml is the kind
+# harness (see "Profiles"). It is API-only — search UI and SynthonGPT off — and
+# its paths are examples. Read it before layering it in.
 
 # 5. Wait for rollouts (SynthonGPT loads checkpoints — give it ~10m)
 kubectl -n cheese get pods
@@ -304,34 +303,23 @@ real hostnames via the ingress values for anything non-local).
 
 ## Profiles
 
-The single `values.yaml` defaults are the minimal headless stack on local images —
-useful for trying the chart out, not for deploying. Layer a profile file (or
-`--set` flags) on top. Two are checked in: `values-minimal.yaml` (kind harness)
-and `values-production.yaml` (real install).
+`values.yaml` is the reference: every key, with defaults. Its defaults are the
+minimal headless stack on **local** images — readable, not deployable. Layer a
+profile on top. Two are checked in:
 
-**minimal / API-only** (`charts/cheese/values-minimal.yaml`) — the only profile
-checked into the repo, and the one the kind bring-up is tested against: database +
-orchestrator, real DB folders under `database.databasesRoot`, canonical database
-names. Everything else stays off.
+| Profile | For |
+|---|---|
+| `values-minimal.yaml` | the smallest real install — licensed images, v1 licence, the API behind an ingress |
+| `values-quickstart.yaml` | a kind harness for trying the chart out. Not for deploying. |
 
-```bash
-helm install cheese charts/cheese -n cheese --create-namespace \
-  -f charts/cheese/values-minimal.yaml
-```
-
-Site-specific values in it (`databasesRoot`, the absolute `cheeseLicenseFile`
-paths, the enabled database list) are examples — edit them for the site. Keep it
-in step with `values.yaml`: same keys, same notes, machine-specific values only.
-
-**production** (`charts/cheese/values-production.yaml`) — the shape of a real
-install: ECR images on the released channel, the v1 licence agent, the API behind
-an ingress, dataSync populating the volume. Checked in, but **not drop-in** —
-every value marked `« SET THIS »` is site-specific and the chart fails fast if
-the licence key is missing.
+**minimal** (`charts/cheese/values-minimal.yaml`) — carries only the keys a site
+must set; everything else stays on the `values.yaml` default. **Not drop-in**:
+values marked `« SET THIS »` have no sensible default, and the chart fails fast
+if the licence key is missing.
 
 ```bash
 helm install cheese charts/cheese -n cheese --create-namespace \
-  -f charts/cheese/values-production.yaml \
+  -f charts/cheese/values-minimal.yaml \
   -f my-site.yaml            # your « SET THIS » values — keep them out of the chart
 ```
 
@@ -371,7 +359,7 @@ ketcher:
     hosts: [{ host: cheese-ketcher.localtest.me }]
 ```
 
-**With the web UI** — layer this on top of `values-production.yaml`. The UI needs
+**With the web UI** — layer this on top of `values-minimal.yaml`. The UI needs
 its own hostname and an auth story; publishing it without one exposes your
 licensed data:
 
@@ -484,7 +472,7 @@ helm template cheese charts/cheese --set supabase.enabled=true \
   --set supabase.secret.anonKey=x --set supabase.secret.serviceRoleKey=x
 helm template cheese charts/cheese --set deployment.target=aws       # storage gp3 / ingress alb, no local PV
 helm template cheese charts/cheese --set orchestrator.secret.existingSecret=my-sec
-helm template cheese charts/cheese -f charts/cheese/values-minimal.yaml   # the shipped profile
+helm template cheese charts/cheese -f charts/cheese/values-quickstart.yaml   # the kind profile
 # licensing mode: the two PRODUCTION values must match, or the render fails
 helm template cheese charts/cheese | grep -A1 "name: PRODUCTION"          # orchestrator value must be ""
 helm template cheese charts/cheese --set orchestrator.env.production=OUR_SECRET  # → fails, by design

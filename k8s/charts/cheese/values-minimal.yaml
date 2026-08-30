@@ -1,168 +1,112 @@
-# Minimal profile: cheese-database + cheese-orchestrator (CHEESE API only).
-#   helm install cheese . -n cheese --create-namespace -f values-minimal.yaml
+# Minimal real install: the CHEESE API on licensed images with a v1 licence.
 #
-# ⚠️ This is a kind / laptop HARNESS for trying the chart out against databases
-# already on the host — local images, a hand-placed v0 licence, localtest.me
-# hostnames, a hostPath volume. It is not an install profile. For a real
-# deployment use values-production.yaml, which pulls licensed images, runs the
-# v1 licence agent, and lets you point the stack at a volume you provisioned
-# yourself (data.existingClaim).
+#   helm install cheese . -n cheese --create-namespace \
+#     -f values-minimal.yaml -f my-site.yaml
 #
-# On kind, the database folders live under database.databasesRoot, which must
-# also be bind-mounted into the node — see ../../kind/cluster.local.yaml.
+# Only keys a site MUST set are here; everything else stays on the values.yaml
+# default. Values marked « SET THIS » have no sensible default — put yours in
+# my-site.yaml so a chart upgrade cannot overwrite them.
+#
+# values-quickstart.yaml is the other profile: a kind harness. Not for deploying.
 
-# ── REGISTRY — where the licensed product images come from ───────────────────
-# Left on the chart default (source: local, i.e. images already on the node) for
-# kind work. To pull the real images instead:
+# ── 1. STORAGE ──────────────────────────────────────────────────────────────
+# The databases run from under 1 GB to ~1.3 TB each. Decide this first.
 #
-#   onprem:
-#     imageTag: latest               # released channel (chart default)
-#   database:
-#     image: { source: ecr }
-#   orchestrator:
-#     image: { source: ecr }
+# A — bring your own volume (recommended). You provision it, the chart mounts
+#     it and provisions nothing; the deployment.storage block is ignored.
+#       data: { existingClaim: cheese-data }
+# B — the chart provisions it. Leave existingClaim empty and set a class + size.
 #
-# An ECR pull token is valid for 12 HOURS only, so the pull Secret must be
-# refreshed — see k8s/README.md, "Images".
-# ── DATABASES ON THE VOLUME ──────────────────────────────────────────────────
-# Nothing else in the chart puts data on the volume, so enable this to have the
-# databases fetched from DeepMedChem's S3 with the same AWS key that pulls the
-# images. Off here because the kind profile points at databases already on the
-# host. Sizes run from under 1 GB to ~1.3 TB each — check disk first.
-#
-# dataSync:
-#   enabled: true
-#   # folders default to the ENABLED entries under database.databases below,
-#   # so what you sync and what the engine reads cannot drift apart.
-#
-# The Secret it reads is the one `cheese aws-auth --target k8s` writes.
+# Either way: ReadWriteOnce minimum, ReadWriteMany to run database replicas
+# across nodes.
+data:
+  existingClaim: ""                        # « SET THIS » for A, empty for B
 
+deployment:
+  target: aws                              # local | aws — selects storage/ingress class names
+  storage:
+    createLocalPV: false                   # never a hostPath volume in production
+    className: ""                          # « SET THIS » for B — your storage class
+    size: 10Ti                             # « SET THIS » for B — fit the databases below
+
+# ── 2. LICENCE ──────────────────────────────────────────────────────────────
+# The agent renews a 30-day licence file onto the volume, fingerprinted on the
+# cluster's kube-system UID. Needs outbound HTTPS to the licensing server.
+licensingAgent:
+  enabled: true
+  image: { source: ecr }
+  secret:
+    # Pre-create it; keep the key out of any values file:
+    #   kubectl create secret generic dmch-license-key -n cheese \
+    #     --from-literal=licenseKey=DMCH-...
+    existingSecret: ""                     # « SET THIS »
+
+# ── 3. DATABASES ────────────────────────────────────────────────────────────
+# `source: ecr` is required on every licensed component — the chart default is
+# `local`. Channel and pull-Secret name come from values.yaml.
 database:
-  # ── ROOT LOCATION — set ONCE. Every DB path = <databasesRoot>/<folder>. ──────
-  databasesRoot: "/mnt/DATA/cheese-databases"
+  image: { source: ecr }
+
+  databasesRoot: "cheese-databases"        # « SET THIS » — root on the volume; each DB is <root>/<output_directory>
 
   config:
     DIM: "256"
-    DEVICE: "cpu"
-    MODELS_DIRECTORY: ""              # on-prem: models decrypted from the image via licence; MUST stay empty
+    DEVICE: "cpu"                          # "cuda" if the nodes have GPUs
+    MODELS_DIRECTORY: ""                   # on-prem: decrypted from the image via the licence — keep empty
     PROPERTY_MODELS_PATH: ""
     TRANSFORMERS:
       morgan: "tanimoto"
       espsim_electrostatic: "espsim"
       espsim_shape: "shapesim"
 
-  # ── DATABASES — listed are some examples, this list will be expanded on the prod. ───
-  # flip `enabled` to toggle each. 
-  # Keys are canonical names (scripts/_engine-config); output_directory is the
-  # folder under databasesRoot; all are clustered indices.
+  # « SET THIS » — only what you are licensed for and have disk for. Keys are
+  # canonical names; dataSync fetches exactly the enabled entries.
   databases:
     test:
-      enabled: false                 # chart default stub — off (path not on the drive)
-    ENAMINE-AA:
-      enabled: true
-      output_directory: "enamine_amino_acids"
-      index_type: "clustered"
-      delimiter: ","
-    MCULE-IN-STOCK:
-      enabled: true
-      output_directory: "mcule_purchasable_in_stock_240717_clustered"
-      index_type: "clustered"
-      delimiter: ","
-    MOLPORT:
-      enabled: false                 # incomplete build on the drive (missing smiles_clusters/)
-      output_directory: "molport_10_25"
-      index_type: "clustered"
-      delimiter: ","
+      enabled: false                       # chart stub — always off here
     ZINC15:
       enabled: true
       output_directory: "zinc15"
       index_type: "clustered"
       delimiter: ","
+    MCULE-IN-STOCK:
+      enabled: false
+      output_directory: "mcule_purchasable_in_stock_240717_clustered"
+      index_type: "clustered"
+      delimiter: ","
+    ENAMINE-AA:
+      enabled: false
+      output_directory: "enamine_amino_acids"
+      index_type: "clustered"
+      delimiter: ","
 
-  # NB: VISUALIZATION is pinned off in the chart template (not part of the serving
-  # product) — do not re-add it here; it would duplicate the env and break upgrades.
+# ── 4. FILL THE VOLUME ──────────────────────────────────────────────────────
+# Nothing else puts data on the volume. Skip only if it already holds the
+# databases. `aws s3 sync` is incremental, so an interrupted run resumes.
+# Reads the Secret `cheese aws-auth --target k8s` writes.
+dataSync:
+  enabled: true
 
-  secret:
-    # Licensing mode. NOTE: on kind the licence is validated against the
-    # kind-control-plane container's DMI (product_name="kind"), NOT this host, so
-    # this licence will NOT validate. Regenerate a node licence (see
-    # k8s/local-dev/docs/kind-bringup-log.md step 4) or set `production: "OUR_SECRET"`
-    # HERE AND on orchestrator.env.production — the chart requires the pair to
-    # match. What that pair actually switches off depends on the image: in a
-    # released on-prem image the licence is still verified at import (that check
-    # is unconditional), so it only drops the per-call re-check; in a locally
-    # built image (plain Dockerfile, no enable_licensing.py — which is what
-    # image.source: local means here) the per-call check is the ONLY licence
-    # mechanism, so the pair removes licensing outright. Either way it also
-    # drops the orchestrator to a hardcoded DIM=256 and a 10-molecule search
-    # cap, so never leave it set for anything a customer or a benchmark touches.
-    # NOTE: THIS WILL BE CHANGED IN THE NEAR FUTURE TO A PROPER SYSTEM!
-    #
-    # A PLAIN FILENAME, not a host path. The products resolve this as
-    # ${DATA_ROOT:-/data}/<value with any leading slash stripped>, so an absolute
-    # host path like /home/you/.config/cheese/... silently becomes
-    # /data/home/you/.config/cheese/... inside the container and the licence is
-    # never found. Stage the file at the root of the data volume instead.
-    cheeseLicenseFile: "cheese_license_file.json"
-    production: ""
-
+# ── 5. THE API ──────────────────────────────────────────────────────────────
 orchestrator:
-  env:
-    production: ""                   # must match database.secret.production (chart default is "" too)
-  secret:
-    # Plain filename, and it must match database.secret.cheeseLicenseFile —
-    # see the note there for why an absolute host path does not work.
-    cheeseLicenseFile: "cheese_license_file.json"
+  image: { source: ecr }
   ingress:
     public:
       enabled: true
       hosts:
-        - host: cheese-api.localtest.me
+        - host: cheese-api.example.com     # « SET THIS »
           paths:
             - path: /
               pathType: Prefix
+      # « SET THIS » — do not publish this in plaintext.
+      # tls:
+      #   - secretName: cheese-api-tls
+      #     hosts: [cheese-api.example.com]
 
-# ===========================================================================
-# licence agent — v1 ("call home") licensing. Mirrors values.yaml; only the
-# site-specific values live here. See values.yaml for the full key set and the
-# v0-vs-v1 explanation, and k8s/docs/licensing-agent.md for the model.
-# ===========================================================================
-licensingAgent:
-  # OFF here because this profile uses the hand-placed v0 licence file above.
-  # v1 is the better choice on kind and needs no DMI workaround: the fingerprint
-  # is the cluster's own kube-system namespace UID, which is perfectly valid
-  # there. To switch, flip this to true and point the two cheeseLicenseFile
-  # values back at a plain PVC-relative filename (e.g.
-  # "cheese_license_file.json") — the agent writes there, and the absolute host
-  # paths used above are a v0-only local hack.
-  enabled: false
-
-  # Site value: the licence key issued for THIS installation. Prefer
-  # secret.existingSecret and keep the key out of any values file.
-  # A DMCH-PP-… value is a partner token, NOT a licence key.
-  secret:
-    existingSecret: ""                     # e.g. dmch-license-key, created with kubectl/Vault/ESO
-    licenseKey: ""                         # DMCH-…
-
-  # Machine-specific: side-loading, so a local build can be iterated on without
-  # a registry round-trip:
-  #   docker build -f licensing/agent/Dockerfile -t dmch-licensing-agent:dev .   # in dmch-licensing
-  #   kind load docker-image dmch-licensing-agent:dev --name <cluster>
-  # The published image works here too — drop this block and set
-  # `image: { source: ecr }` to pull on-prem/licensing/dmch-licensing-agent.
-  # No ecr: block on purpose — this overlay carries machine-specific values, and
-  # the registry path is a chart default, not a site one.
-  image:
-    source: local
-    local:
-      repository: dmch-licensing-agent     # side-load: docker build -f licensing/agent/Dockerfile -t dmch-licensing-agent:dev .
-      tag: dev
-      pullPolicy: Never                    # side-loaded into the kind node; never pull
-
-  # NOTE, and this is the good news versus v0: on kind the v1 fingerprint is the
-  # kind cluster's own kube-system namespace UID, which is a perfectly valid
-  # fingerprint. Unlike the v0 DMI licence (which the kind node fakes as
-  # product_name="kind"), nothing here needs a per-node workaround.
-  rbac:
-    create: true
-    scope: namespace                       # Role in kube-system — least privilege
+# ── OPTIONAL ────────────────────────────────────────────────────────────────
+# searchUi (web UI, needs its own host + auth), ketcher (editor the UI embeds),
+# electrostatics, alignment — all off by default in values.yaml. Not every
+# optional image supports the v1 licence; check before enabling one.
+#
+# `cheese-inference`, the index-builder, is deliberately not in this chart: it
+# is a one-shot job over a custom database, not a service.
