@@ -1,0 +1,34 @@
+# The database catalogue must never offer more than the hosted service serves.
+#
+# It is a hand-maintained file with no other guard, and it drifted from
+# production within two days of being created — two retired ChemSpace-10B
+# databases (~2.6 TB combined) stayed selectable, and two MCULE rebuilds were
+# offered with no canonical name to key them by. A customer who picks one of
+# those spends hours downloading something we cannot support.
+#
+# Scheduled as well as on-push: the catalogue goes stale when the SERVED list
+# changes, which happens in another repo entirely and touches nothing here.
+name: assert-catalog-subset
+
+on:
+  push:
+    paths:
+      - "config/databases.catalog"
+      - "scripts/_engine-config"
+      - "scripts/assert-catalog-subset.sh"
+      - ".github/workflows/assert-catalog-subset.yml"
+  pull_request:
+    paths:
+      - "config/databases.catalog"
+      - "scripts/_engine-config"
+  schedule:
+    - cron: "17 6 * * 1"        # Mondays, catches drift originating elsewhere
+  workflow_dispatch:
+
+jobs:
+  assert:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Catalogue is a subset of what we serve
+        run: ./scripts/assert-catalog-subset.sh

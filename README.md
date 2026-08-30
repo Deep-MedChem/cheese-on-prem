@@ -57,8 +57,8 @@ committing to a download.
 
 | | Size |
 |---|---|
-| The whole catalogue (20 databases) | **≈ 8 TB** |
-| Largest single database (`10B_Beyond_RO5_chunks`) | ≈ 1.3 TB |
+| The whole catalogue (16 databases) | **≈ 5.4 TB** |
+| Largest single database (`enamine_new`) | ≈ 1.2 TB |
 | Smallest single database (`enamine_amino_acids`) | ≈ 625 MB |
 | A typical useful starting set (e.g. ZINC15 + MCULE in-stock + MolPort) | ≈ 135 GB |
 | Bundled test database | a few MB, ships with this repo |

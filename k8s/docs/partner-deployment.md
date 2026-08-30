@@ -26,7 +26,7 @@ images and databases you are already licensed for.
 ## What you provide
 
 - A **PersistentVolume** the chart binds as `cheese-data-pvc`. Size it for the
-  databases you choose — they run from under 1 GB to about 1.3 TB each, ~8 TB for
+  databases you choose — they run from under 1 GB to about 1.2 TB each, ~5.4 TB for
   the whole catalogue. Add ~10% headroom.
 - Outbound **HTTPS to AWS `us-east-1`** (ECR for images, S3 for databases) and to
   the licensing service. Nothing inbound.

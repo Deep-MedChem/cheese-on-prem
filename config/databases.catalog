@@ -16,11 +16,20 @@
 # is published here. `cheese configure-dbs` checks every entry against the bucket,
 # so a stale line shows up as "NOT AVAILABLE" rather than a silent gap.
 #
+# ⚠️ THIS LIST MUST BE A SUBSET OF WHAT THE HOSTED SERVICE SERVES.
+# We never offer on-prem a database we do not serve online — fewer is fine, more
+# is not. The authoritative list is:
+#
+#     curl -s https://cheese.deepmedchem.com/api/available_dbs
+#
+# which returns CANONICAL names; map them to the folders below with the
+# DB_CANONICAL_NAME table in scripts/_engine-config. A folder with no canonical
+# name cannot be offered at all — there is nothing for a customer to key it by.
+# scripts/assert-catalog-subset.sh checks this and runs in CI.
+#
 # Keep in sync with: the cheese-onprem-db-read IAM policy (which enumerates the
 # same prefixes) and the DB_CANONICAL_NAME table in scripts/_engine-config.
 
-10B_Beyond_RO5_chunks|1468300143549|600097
-10B_RO5_chunks|1353503755056|600045
 M1|18544518713|49483
 Synple-4B|699761755234|375689
 chemriya|205168393046|227333
@@ -33,9 +42,7 @@ eXplore_Enumerated_55M|16657402467|44443
 enamine_amino_acids|655413295|5518
 enamine_new|1341478027174|586598
 mcule_purchasable_full_240610|14864150943|38959
-mcule_purchasable_full_260509_canonical_clustered|67248589919|107514
 mcule_purchasable_in_stock_240717_clustered|5206914984|14653
-mcule_purchasable_in_stock_260510_canonical_clustered|7036769094|24152
 molport_10_25|5129686171|14603
 xtalpi-09-03-2026|827556122397|614206
 zinc15|132797810659|158430

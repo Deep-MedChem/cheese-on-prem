@@ -48,7 +48,7 @@ flowchart TB
 
 | | What | Where it goes | Notes |
 |---|---|---|---|
-| 💾 | **Storage** | a PersistentVolume the chart binds as `cheese-data-pvc` at `/data` | Holds the databases *and* the licence file. Size it for the databases you pick — they run from under 1 GB to 1.3 TB each. Stage the contents owned by `2112:0`. Layout and staging commands: [docs/pvc-data-runbook.md](docs/pvc-data-runbook.md). |
+| 💾 | **Storage** | a PersistentVolume the chart binds as `cheese-data-pvc` at `/data` | Holds the databases *and* the licence file. Size it for the databases you pick — they run from under 1 GB to 1.2 TB each, ~5.4 TB for the whole catalogue. Stage the contents owned by `2112:0`. Layout and staging commands: [docs/pvc-data-runbook.md](docs/pvc-data-runbook.md). |
 | 🔑 | **Registry credential** | a Secret the kubelet uses to pull the images | One access key from DeepMedChem. It is read-only and its only right is pulling what you are licensed for. |
 | 📄 | **Licence key** | a Secret the licence agent reads | A `DMCH-…` key. The agent exchanges it for a 30-day licence file, writes that to `/data`, and renews it daily — so the licence covers the whole cluster and nodes can come and go. |
 
