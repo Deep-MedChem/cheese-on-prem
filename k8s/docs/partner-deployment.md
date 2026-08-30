@@ -12,7 +12,6 @@ the sequence.
 | | What | Used for |
 |---|---|---|
 | 🔑 | An **AWS access key** (`AKIA…` + secret) | pulling the images **and** downloading the databases — one key does both |
-| 🏷️ | A **customer slug** | your segment of the image paths, `on-prem/<image>/<your-slug>` |
 | 📄 | A **licence key** (`DMCH-…`) | the licence agent exchanges it for a licence file and keeps it renewed |
 
 The access key carries no permissions of its own — its only right is assuming a
@@ -74,8 +73,7 @@ kubectl create secret docker-registry cheese-ecr-pull -n cheese \
 ```yaml
 # my-values.yaml
 onprem:
-  customer: your-slug            # from DeepMedChem
-  imageTag: develop              # or `latest`
+  imageTag: develop              # or `latest`; the channel for the CHEESE images
 
 database:
   image:
@@ -101,7 +99,8 @@ dataSync:
 licensingAgent:
   enabled: true
   image:
-    source: ecr
+    source: ecr                  # tag is pinned by the chart; it does NOT
+                                 # follow onprem.imageTag
   secret:
     licenseKey: "DMCH-…"         # or secret.existingSecret: <your-secret>
 ```
@@ -156,15 +155,12 @@ the orchestrator's ingress.
 
 ## ⚠️ Current limitations
 
-- **No released product image verifies a v1 licence yet.** The licence agent will
-  activate and renew correctly, but nothing enforces it — and a v1 licence *file*
-  handed to a current image is rejected by its v0 verifier with a misleading
-  "signature does not match". Talk to us before relying on licence enforcement.
-- **The licence agent image is not published yet.** `licensingAgent.image.source:
-  ecr` composes the right path, but until the image is pushed you need
-  `source: local` with the image side-loaded onto your nodes. Ask us for the
-  current status.
+- **Two optional components cannot run on a v1 licence yet.**
+  `cheese-inference` and `conformer-alignment-api` still verify v0 only; their
+  verifier ports are open. The two components you actually need
+  (`cheese-database`, `cheese-orchestrator`) enforce v1 and are unaffected.
 - **Three optional images have no `:develop` tag** (`ketcher`, `cheese-inference`,
   `cheese-electrostatics-inference`). With `onprem.imageTag: develop` they will
   not resolve — pin them to `latest` with their own `ecr.tag` if you enable them.
-  The two components you actually need are unaffected.
+  The licence agent is unaffected: its tag is pinned by the chart and does not
+  follow `onprem.imageTag` at all.

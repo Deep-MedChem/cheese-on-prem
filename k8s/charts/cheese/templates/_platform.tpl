@@ -5,8 +5,9 @@ values change rather than hand-edited overlays.
 
   local : kind / bare-metal dev. hostPath PV (storageClass cheese-local-manual),
           nginx ingress.
-  aws   : SCAFFOLD ONLY (no AWS sources/images yet). gp3 (RWO) or efs-sc (RWX)
-          storage, alb ingress. Untested placeholder seam.
+  aws   : SCAFFOLD ONLY. gp3 (RWO) or efs-sc (RWX) storage, alb ingress —
+          class names only, never deployed or tested. Images are unaffected:
+          they come from ECR on every target.
 
 azure is deprecated and intentionally unsupported.
 
