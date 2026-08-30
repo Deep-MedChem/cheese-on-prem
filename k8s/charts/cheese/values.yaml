@@ -3,7 +3,7 @@
 # ONE values.yaml drives everything. Every component is toggled with a
 # top-level `.enabled` key. Defaults give the MINIMAL headless profile —
 # cheese-database + cheese-orchestrator only, auth off, local-source images;
-# everything else (licenseAgent, searchUi, ketcher, synthongpt, inference,
+# everything else (licensingAgent, searchUi, ketcher, synthongpt, inference,
 # alignment, supabase, oauth2Proxy) is opt-in. Site-required parameters live in
 # values-minimal.yaml. Resource names are hardcoded
 # (`cheese-database-app`, `cheese-orchestrator`, `cheese-search-ui`,
@@ -81,7 +81,7 @@ data:
 # of enforcement: a v1 file handed to a current image is rejected by its v0
 # verifier as "signature does not match". See k8s/docs/licensing-v1-agent.md.
 # ===========================================================================
-licenseAgent:
+licensingAgent:
   enabled: false
 
   image:
@@ -96,11 +96,6 @@ licenseAgent:
     # product-agnostic — one image shared by every DeepMedChem on-prem product —
     # so it sits in its own namespace, which every product's customer pull role
     # is granted. Everything else in this file comes from on-prem/cheese.
-    #
-    # Renamed from cheese-license-agent (the tag earlier side-load notes use)
-    # to match the published artifact and the DMCH_LICENSING_* de-CHEESE-ing:
-    # `docker tag cheese-license-agent:dev dmch-licensing-agent:dev` if you
-    # already have the old one on the node.
     source: local                          # local | ecr
     local:
       repository: dmch-licensing-agent
@@ -130,7 +125,7 @@ licenseAgent:
 
   # Agent bookkeeping (activation id + fingerprint), same PVC, relative to
   # data.mountPath. Survives restarts so the install keeps its activation slot.
-  statePath: ".cheese-license-agent.json"
+  statePath: ".dmch-licensing-agent.json"
 
   # Health endpoint (readiness only): 200 when a fresh licence is on disk, 503
   # while activating / renewing / unreachable. 0 disables the server entirely.
@@ -147,7 +142,7 @@ licenseAgent:
 
   serviceAccount:
     create: true
-    name: ""                               # "" → cheese-license-agent
+    name: ""                               # "" → dmch-licensing-agent
     annotations: {}
 
   # The agent's ONLY cluster permission: `get` the kube-system Namespace object,

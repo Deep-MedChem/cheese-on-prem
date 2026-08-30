@@ -98,7 +98,7 @@ dataSync:
   enabled: true
 
 # Keep the licence fresh.
-licenseAgent:
+licensingAgent:
   enabled: true
   image:
     source: ecr
@@ -125,7 +125,7 @@ optional and off.
 ```bash
 kubectl -n cheese get pods
 kubectl -n cheese logs -f job/cheese-cheese-data-sync     # database download
-kubectl -n cheese logs -f deploy/cheese-license-agent     # licence activation
+kubectl -n cheese logs -f deploy/dmch-licensing-agent     # licence activation
 ```
 
 **The database pods will restart until the sync finishes.** That is expected: the
@@ -160,7 +160,7 @@ the orchestrator's ingress.
   activate and renew correctly, but nothing enforces it — and a v1 licence *file*
   handed to a current image is rejected by its v0 verifier with a misleading
   "signature does not match". Talk to us before relying on licence enforcement.
-- **The licence agent image is not published yet.** `licenseAgent.image.source:
+- **The licence agent image is not published yet.** `licensingAgent.image.source:
   ecr` composes the right path, but until the image is pushed you need
   `source: local` with the image side-loaded onto your nodes. Ask us for the
   current status.

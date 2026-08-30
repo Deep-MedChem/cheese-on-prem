@@ -95,7 +95,7 @@ step-by-step, including the secrets, is in [Quick start](#quick-start) below.
 | **Alignment** | `alignment.enabled` | off | conformer alignment, license-gated |
 | **Supabase** | `supabase.enabled` | off | in-cluster auth + per-user spaces (test profile) |
 | **oauth2-proxy** | `oauth2Proxy.enabled` | off | SSO stub (alternate to Supabase) |
-| **Licence agent** | `licenseAgent.enabled` | off | v1 licensing: renews the licence file onto `/data` daily ([docs](docs/licensing-agent.md)) |
+| **Licence agent** | `licensingAgent.enabled` | off | v1 licensing: renews the licence file onto `/data` daily ([docs](docs/licensing-agent.md)) |
 
 ## Images
 
@@ -176,7 +176,7 @@ An explicit `deployment.storage.className` / `deployment.ingress.className` alwa
 ## Secrets
 
 Each secret-producing component (`database`, `orchestrator`, `searchUi`, `supabase`,
-`licenseAgent`) accepts `secret.existingSecret: <name>`:
+`licensingAgent`) accepts `secret.existingSecret: <name>`:
 
 - **Set it** → reference your own pre-created Secret (Vault / External Secrets
   Operator / SealedSecrets / `kubectl create secret`). The chart renders no inline
@@ -340,11 +340,11 @@ registers is the **cluster's `kube-system` namespace UID**, so one licence cover
 the whole installation and nodes may come and go.
 
 ```yaml
-licenseAgent:
+licensingAgent:
   enabled: true                                  # off by default
   serverUrl: https://licensing.deepmedchem.com
   secret:
-    existingSecret: cheese-license-key           # a Secret with a `licenseKey` key
+    existingSecret: dmch-license-key           # a Secret with a `licenseKey` key
     # licenseKey: "DMCH-…"                       # …or inline, for self-contained installs
 ```
 
@@ -376,11 +376,11 @@ helm template cheese charts/cheese -f charts/cheese/values-minimal.yaml   # the 
 helm template cheese charts/cheese | grep -A1 "name: PRODUCTION"          # orchestrator value must be ""
 helm template cheese charts/cheese --set orchestrator.env.production=OUR_SECRET  # → fails, by design
 # licence agent: nothing may render by default, then inline key / external secret
-helm template cheese charts/cheese | grep -c license-agent            # → 0
-helm template cheese charts/cheese --set licenseAgent.enabled=true \
-  --set licenseAgent.secret.licenseKey=DMCH-EXAMPLE
-helm template cheese charts/cheese --set licenseAgent.enabled=true \
-  --set licenseAgent.secret.existingSecret=cheese-license-key
+helm template cheese charts/cheese | grep -c licensing-agent            # → 0
+helm template cheese charts/cheese --set licensingAgent.enabled=true \
+  --set licensingAgent.secret.licenseKey=DMCH-EXAMPLE
+helm template cheese charts/cheese --set licensingAgent.enabled=true \
+  --set licensingAgent.secret.existingSecret=dmch-license-key
 ```
 
 ## Repo layout
@@ -397,7 +397,7 @@ k8s/
 │       ├── data-pvc.yaml  data-pv-local.yaml
 │       ├── database-* orchestrator-* synthongpt-* search-ui-*
 │       ├── ketcher-* inference-* alignment-*
-│       ├── license-agent-*         # v1 licensing agent (deployment / rbac / secret), off by default
+│       ├── licensing-agent-*         # v1 licensing agent (deployment / rbac / secret), off by default
 │       └── supabase/   # db / auth / rest / meta / studio / gateway / sql-configmap / init-job
 ├── docs/                           # pvc-data-runbook, architecture, headless-variant, licensing-agent
 ├── manifests/base/                 # namespace.yaml, image-pull-secret.example.yaml

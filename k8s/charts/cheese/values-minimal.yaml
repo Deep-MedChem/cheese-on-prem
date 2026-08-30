@@ -121,7 +121,7 @@ orchestrator:
 # v0-vs-v1 explanation and the ⚠️ status note (no released product image
 # verifies a v1 licence yet), and k8s/docs/licensing-v1-agent.md for the model.
 # ===========================================================================
-licenseAgent:
+licensingAgent:
   # OFF here on purpose: this profile still uses the hand-placed v0 licence
   # file above. Flip to true only together with the two cheeseLicenseFile
   # values, which must then point back at a plain PVC-relative filename
@@ -133,7 +133,7 @@ licenseAgent:
   # secret.existingSecret and keep the key out of any values file.
   # A DMCH-PTN-… value is a partner token, NOT a licence key.
   secret:
-    existingSecret: ""                     # e.g. cheese-license-key, created with kubectl/Vault/ESO
+    existingSecret: ""                     # e.g. dmch-license-key, created with kubectl/Vault/ESO
     licenseKey: ""                         # DMCH-…
 
   # Machine-specific: nothing has been published to
@@ -146,7 +146,7 @@ licenseAgent:
   image:
     source: local
     local:
-      repository: dmch-licensing-agent     # renamed from cheese-license-agent; retag if you have the old one
+      repository: dmch-licensing-agent     # side-load: docker build -f licensing/agent/Dockerfile -t dmch-licensing-agent:dev .
       tag: dev
       pullPolicy: Never                    # side-loaded into the kind node; never pull
 
