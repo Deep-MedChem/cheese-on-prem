@@ -7,7 +7,7 @@
 # The smallest thing that proves the product works: the database service, the
 # orchestrator (the API you integrate against), and ONE ~625 MB database pulled
 # from S3. Nothing else in the chart is enabled — no UI, no ketcher, no
-# inference, no auth.
+# electrostatics, no auth.
 #
 # THROWAWAY profile for a local kind cluster. Do not carry it to a real cluster:
 # the PV is a hostPath inside the kind node and dies with it.

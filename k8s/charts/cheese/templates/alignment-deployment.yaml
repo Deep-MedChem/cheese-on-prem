@@ -27,7 +27,7 @@ spec:
       volumes:
         - name: data
           persistentVolumeClaim:
-            claimName: {{ $root.Values.data.pvcName }}
+            claimName: {{ include "cheese.dataClaimName" $root }}
       containers:
         - name: alignment
           securityContext:

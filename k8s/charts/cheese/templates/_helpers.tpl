@@ -207,6 +207,22 @@ a bare name), so it gets a prefixed one.
 {{- end -}}
 
 {{/*
+Name of the shared data-plane PVC every component mounts at data.mountPath.
+
+`data.existingClaim` is the bring-your-own-volume path: a site that has already
+provisioned its storage (an existing PVC bound to an NFS/CSI/pre-seeded volume,
+often one that ALREADY holds the databases) sets it, and the chart then neither
+creates a PVC nor renders the local hostPath PV — it only mounts what is there.
+Left empty, the chart provisions its own PVC from deployment.storage.
+
+This is the same idiom as `secret.existingSecret` elsewhere in the chart: the
+chart's own object is skipped whenever the site supplies one.
+*/}}
+{{- define "cheese.dataClaimName" -}}
+{{- .Values.data.existingClaim | default .Values.data.pvcName -}}
+{{- end -}}
+
+{{/*
 Absolute in-container directory the data-sync Job writes database folders into.
 
 It MUST land where the database expects them, or the sync silently populates a

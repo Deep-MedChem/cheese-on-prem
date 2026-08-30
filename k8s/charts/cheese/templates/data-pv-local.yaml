@@ -6,7 +6,7 @@ this is not rendered there. Replaces manifests/base/persistent-volume.local-exam
 On kind, hostPath resolves INSIDE the kind-control-plane container — stage data
 with `docker cp ... kind-control-plane:/data/...` (see k8s/docs/pvc-data-runbook.md).
 */ -}}
-{{- if and (eq .Values.deployment.target "local") .Values.deployment.storage.createLocalPV -}}
+{{- if and (not .Values.data.existingClaim) (eq .Values.deployment.target "local") .Values.deployment.storage.createLocalPV -}}
 apiVersion: v1
 kind: PersistentVolume
 metadata:

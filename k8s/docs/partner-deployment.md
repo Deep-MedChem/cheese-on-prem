@@ -159,15 +159,16 @@ the orchestrator's ingress.
   change. Kubernetes uses the agent-renewed v1 licence, which needs a daily
   check-in with ~29 days of margin.
 
-## ⚠️ Current limitations
+## ⚠️ Before you enable the optional components
 
-- **Two optional components cannot run on a v1 licence yet.**
-  `cheese-inference` and `conformer-alignment-api` still verify v0 only; their
-  verifier ports are open. The two components you actually need
-  (`cheese-database`, `cheese-orchestrator`) enforce v1 and are unaffected.
-- **Three optional images are published on `:latest` only** (`ketcher`,
-  `cheese-inference`, `cheese-electrostatics-inference`). The chart default
-  (`onprem.imageTag: latest`) resolves them fine; if you switch the channel to
-  `develop`, pin those three back to `latest` with their own `ecr.tag` or they
-  will not resolve. The licence agent is unaffected: its tag is pinned by the
-  chart and does not follow `onprem.imageTag` at all.
+- **Not every optional image supports the v1 licence scheme.** The two
+  components a working install needs — `cheese-database` and
+  `cheese-orchestrator` — do. For the optional ones, confirm with DeepMedChem
+  before enabling them on a v1 licence: an image that predates the scheme
+  rejects the agent's licence file as *"signature does not match license
+  content"*.
+- **Not every image publishes every channel.** The chart default
+  (`onprem.imageTag: latest`) is the released channel and is the one to use. If
+  you point the channel somewhere else and a component fails to pull, pin that
+  component back with its own `ecr.tag`. The licence agent is unaffected — its
+  tag is pinned by the chart and does not follow `onprem.imageTag`.

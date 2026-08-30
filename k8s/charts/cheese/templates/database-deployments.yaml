@@ -39,7 +39,7 @@ spec:
       volumes:
         - name: data
           persistentVolumeClaim:
-            claimName: {{ $root.Values.data.pvcName }}
+            claimName: {{ include "cheese.dataClaimName" $root }}
         - name: config
           configMap:
             name: cheese-database-config

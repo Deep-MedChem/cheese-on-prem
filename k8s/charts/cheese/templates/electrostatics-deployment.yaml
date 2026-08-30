@@ -1,0 +1,63 @@
+{{- if .Values.electrostatics.enabled -}}
+{{- $root := . -}}
+{{- $es := .Values.electrostatics -}}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: cheese-electrostatics
+  labels:
+    {{- include "cheese.componentLabels" (list $root "electrostatics") | nindent 4 }}
+spec:
+  replicas: {{ $es.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "cheese.componentSelectorLabels" (list $root "electrostatics") | nindent 6 }}
+  template:
+    metadata:
+      {{- with $es.podAnnotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      labels:
+        {{- include "cheese.componentSelectorLabels" (list $root "electrostatics") | nindent 8 }}
+    spec:
+      {{- include "cheese.imagePullSecrets" (list $ $es.image) | nindent 6 }}
+      securityContext:
+        {{- toYaml $es.podSecurityContext | nindent 8 }}
+      containers:
+        - name: electrostatics
+          securityContext:
+            {{- toYaml $es.securityContext | nindent 12 }}
+          image: {{ include "cheese.image" (list $ $es.image) | quote }}
+          imagePullPolicy: {{ include "cheese.imagePullPolicy" (list $ $es.image) }}
+          ports:
+            - name: http
+              containerPort: {{ $es.containerPort }}
+              protocol: TCP
+          readinessProbe:
+            tcpSocket:
+              port: http
+            initialDelaySeconds: 15
+            periodSeconds: 15
+          livenessProbe:
+            tcpSocket:
+              port: http
+            initialDelaySeconds: 30
+            periodSeconds: 30
+          resources:
+            {{- toYaml $es.resources | nindent 12 }}
+      {{- with $es.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with $es.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      affinity:
+      {{- if $es.affinity }}
+        {{- $es.affinity | toYaml | nindent 8 }}
+      {{- else }}
+        {{- include "cheese.affinityPreset" (list $root "electrostatics" $es) | nindent 8 }}
+      {{- end }}
+{{- end }}
