@@ -199,7 +199,9 @@ Prerequisites: a Kubernetes cluster (≥ 1.28) with an ingress controller,
 #    kubectl apply. Layout + staging commands: docs/pvc-data-runbook.md.
 
 # 2. Images — apply the registry pull secret; with image.source: ecr the
-#    kubelet pulls <registry>/on-prem/cheese/<svc>:<tag> at install:
+#    kubelet pulls <registry>/on-prem/cheese/<svc>:<tag> at install. (The
+#    optional licence agent is the one exception: it is product-agnostic and
+#    lives at <registry>/on-prem/licensing/dmch-licensing-agent.)
 cp manifests/base/image-pull-secret.example.yaml manifests/base/image-pull-secret.yaml
 $EDITOR manifests/base/image-pull-secret.yaml      # fill in real registry creds
 kubectl create namespace cheese

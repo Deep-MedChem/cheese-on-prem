@@ -85,17 +85,29 @@ licenseAgent:
   enabled: false
 
   image:
-    # ⚠️ NOT PUBLISHED YET — the repository below does not exist, so source: ecr
-    # will not resolve. Build the agent from the dmch-licensing repo
-    # (`docker build -f licensing/agent/Dockerfile -t cheese-license-agent:dev .`)
-    # and side-load it.
+    # ⚠️ source: ecr is not usable YET. The repository below is real but EMPTY —
+    # it is created by terraform-deepmedchem#82 and filled by
+    # publish-agent-image.yml in the dmch-licensing repo (develop -> :develop,
+    # main -> :latest). Until that Terraform is applied and the first build has
+    # run, a pull gets ImagePullBackOff. Build and side-load it instead:
+    #   docker build -f licensing/agent/Dockerfile -t dmch-licensing-agent:dev .
+    #
+    # Note the namespace: on-prem/LICENSING, not on-prem/cheese. The agent is
+    # product-agnostic — one image shared by every DeepMedChem on-prem product —
+    # so it sits in its own namespace, which every product's customer pull role
+    # is granted. Everything else in this file comes from on-prem/cheese.
+    #
+    # Renamed from cheese-license-agent (the tag earlier side-load notes use)
+    # to match the published artifact and the DMCH_LICENSING_* de-CHEESE-ing:
+    # `docker tag cheese-license-agent:dev dmch-licensing-agent:dev` if you
+    # already have the old one on the node.
     source: local                          # local | ecr
     local:
-      repository: cheese-license-agent
+      repository: dmch-licensing-agent
       tag: dev
       pullPolicy: IfNotPresent
     ecr:
-      repository: 815935788477.dkr.ecr.us-east-1.amazonaws.com/on-prem/cheese/cheese-license-agent
+      repository: 815935788477.dkr.ecr.us-east-1.amazonaws.com/on-prem/licensing/dmch-licensing-agent
       tag: ""                                # empty -> onprem.imageTag
       pullPolicy: IfNotPresent
 

@@ -251,28 +251,50 @@ of the licence file.
 | `licensing server unreachable (grace continues)` | no outbound HTTPS, or the server is down | no immediate impact — the licence on disk is valid for ~30 days; fix egress |
 | `Permission denied` writing the licence file | `prepareDataDir.enabled: false` and the directory was never prepared | re-enable it, or `chgrp 0` + `chmod g+rwxs` the directory yourself |
 | product still reports a licence error | that image predates the v1 verifier — see the status box at the top | run a verifier-branch image, or keep using the v0 file |
-| `ImagePullBackOff` | the agent image is not published to any registry yet | build it from `dmch-licensing` and side-load it (below) |
+| `ImagePullBackOff` | nothing has been published to the agent's ECR repository yet | build it from `dmch-licensing` and side-load it (below) |
 
-## The image is not published yet
+## The image
 
-There is no registry copy of `cheese-license-agent`. Build it from the (private)
-`dmch-licensing` repo and side-load it:
+The agent is published to its own, **product-agnostic** namespace:
+
+```
+815935788477.dkr.ecr.us-east-1.amazonaws.com/on-prem/licensing/dmch-licensing-agent
+```
+
+Not `on-prem/cheese/…` like every other image this chart pulls. There is one
+agent for all DeepMedChem on-prem products, so it sits beside them rather than
+inside CHEESE's namespace, and every product's customer pull role is granted
+`on-prem/licensing/*` on top of its own namespace. Channel tags follow the same
+convention as the product images — `:develop` and `:latest`, selected with
+`onprem.imageTag` — plus an immutable `:<short-sha>` for tracing a running pod
+back to a commit.
+
+> **⚠️ Nothing is published there yet.** The repository is created by
+> [terraform-deepmedchem#82](https://github.com/Deep-MedChem/terraform-deepmedchem/pull/82)
+> and filled by `publish-agent-image.yml` in `dmch-licensing`. Until that
+> Terraform is **applied** and the first build has run, `source: ecr` gets
+> `ImagePullBackOff`. Build and side-load instead:
 
 ```bash
 # in dmch-licensing/
-docker build -f licensing/agent/Dockerfile -t cheese-license-agent:dev .
-kind load docker-image cheese-license-agent:dev --name <cluster>   # or push to your own registry
+docker build -f licensing/agent/Dockerfile -t dmch-licensing-agent:dev .
+kind load docker-image dmch-licensing-agent:dev --name <cluster>   # or push to your own registry
 ```
 
 ```yaml
 licenseAgent:
   image:
     source: local
-    local: { repository: cheese-license-agent, tag: dev, pullPolicy: Never }
+    local: { repository: dmch-licensing-agent, tag: dev, pullPolicy: Never }
 ```
 
-The `ecr` block in `values.yaml` records the name the image would take once
-it is published; that repository does not exist yet, so it is not pullable.
+> **Renamed.** The side-load tag was `cheese-license-agent` and is now
+> `dmch-licensing-agent`, matching the published artifact and the ongoing
+> `CHEESE_LICENSING_*` → `DMCH_LICENSING_*` rename. If you have the old image on
+> a node, `docker tag cheese-license-agent:dev dmch-licensing-agent:dev` (and
+> reload it) — or just set `local.repository` back in your own values file. The
+> in-cluster object names (`Deployment/cheese-license-agent` and friends) are
+> **unchanged**; only the image tag moved.
 
 ## Verify without a cluster
 
