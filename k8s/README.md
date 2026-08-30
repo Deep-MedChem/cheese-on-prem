@@ -102,6 +102,8 @@ step-by-step, including the secrets, is in [Quick start](#quick-start) below.
 > **Partner deploying on your own cluster?** [docs/partner-deployment.md](docs/partner-deployment.md)
 > is the end-to-end sequence — credentials, database download, licence, one
 > `helm install`. The rest of this section is the image-resolution detail behind it.
+> Moving from a test cluster to production afterwards:
+> [docs/production-checklist.md](docs/production-checklist.md).
 
 
 Every component picks its registry with `image.source`:
