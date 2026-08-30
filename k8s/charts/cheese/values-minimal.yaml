@@ -53,14 +53,23 @@ database:
     # Licensing mode. NOTE: on kind the licence is validated against the
     # kind-control-plane container's DMI (product_name="kind"), NOT this host, so
     # this licence will NOT validate. Regenerate a node licence (see
-    # k8s/local-dev/docs/kind-bringup-log.md step 4) or set `production: "OUR_SECRET"`.
+    # k8s/local-dev/docs/kind-bringup-log.md step 4) or set `production: "OUR_SECRET"`
+    # HERE AND on orchestrator.env.production — the chart requires the pair to
+    # match. What that pair actually switches off depends on the image: in a
+    # released on-prem image the licence is still verified at import (that check
+    # is unconditional), so it only drops the per-call re-check; in a locally
+    # built image (plain Dockerfile, no enable_licensing.py — which is what
+    # image.source: local means here) the per-call check is the ONLY licence
+    # mechanism, so the pair removes licensing outright. Either way it also
+    # drops the orchestrator to a hardcoded DIM=256 and a 10-molecule search
+    # cap, so never leave it set for anything a customer or a benchmark touches.
     # NOTE: THIS WILL BE CHANGED IN THE NEAR FUTURE TO A PROPER SYSTEM!
     cheeseLicenseFile: "/home/katja/.config/cheese/cheese_license_file.json"
     production: ""
 
 orchestrator:
   env:
-    production: ""                   # must match database.secret.production
+    production: ""                   # must match database.secret.production (chart default is "" too)
   secret:
     cheeseLicenseFile: "/home/katja/.config/cheese/cheese_license_file.json"
   ingress:
