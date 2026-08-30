@@ -9,7 +9,7 @@ description: |
             cheese-orchestrator (the API the UI calls),
             cheese-search-ui (public frontend).
   Optional: cheese-synthongpt, ketcher (self-hosted molecule editor),
-            inference (electrostatics), alignment (conformer alignment),
+            electrostatics (inference server), alignment (conformer alignment),
             supabase (in-cluster auth + per-user spaces), oauth2-proxy (SSO stub),
             licensingAgent (v1 licensing: renews the licence file onto /data daily).
 

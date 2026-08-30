@@ -91,7 +91,7 @@ step-by-step, including the secrets, is in [Quick start](#quick-start) below.
 | Search UI | `searchUi.enabled` | off | public frontend |
 | SynthonGPT | `synthongpt.enabled` | off | synthon model server |
 | **Ketcher** | `ketcher.enabled` | off | self-hosted molecule editor (UI iframes it) |
-| **Inference** | `inference.enabled` | off | electrostatics; UI degrades gracefully if absent |
+| **Electrostatics** | `electrostatics.enabled` | off | electrostatics inference; UI degrades gracefully if absent |
 | **Alignment** | `alignment.enabled` | off | conformer alignment, license-gated |
 | **Supabase** | `supabase.enabled` | off | in-cluster auth + per-user spaces (test profile) |
 | **oauth2-proxy** | `oauth2Proxy.enabled` | off | SSO stub (alternate to Supabase) |
@@ -448,9 +448,10 @@ The agent runs as UID 2112, not root.
   key baked into the image; they never call the licensing server. Only the agent
   talks to it. If the server is unreachable the stack keeps running — the file has
   a 30-day TTL renewed daily, so roughly 29 days of margin.
-- **Enforcement is live** on `cheese-database` and `cheese-orchestrator`, the two
-  components a headless install needs. `cheese-inference` and the alignment API
-  still verify v0 only; both are off by default.
+- **Not every image understands v1.** `cheese-database` and
+  `cheese-orchestrator` — the two components a headless install needs — do. For
+  the optional components, confirm with DeepMedChem before enabling them on a v1
+  licence; all of them are off by default.
 - **One licence per cluster, not per release.** Several Helm releases in one
   cluster share its fingerprint. Separate tenants at the application layer, not
   with extra licences.
@@ -508,7 +509,7 @@ k8s/
 │       ├── _helpers.tpl  _platform.tpl
 │       ├── data-pvc.yaml  data-pv-local.yaml
 │       ├── database-* orchestrator-* synthongpt-* search-ui-*
-│       ├── ketcher-* inference-* alignment-*
+│       ├── ketcher-* electrostatics-* alignment-*
 │       ├── licensing-agent-*         # v1 licensing agent (deployment / rbac / secret), off by default
 │       └── supabase/   # db / auth / rest / meta / studio / gateway / sql-configmap / init-job
 ├── docs/                           # pvc-data-runbook, architecture, headless-variant, licensing-agent
@@ -522,11 +523,12 @@ k8s/
 ## Conventions
 
 - **Image source.** Each app component accepts `image.source: local | ecr`.
-- **Shared PVC at `/data`.** database / orchestrator / synthongpt / alignment mount
-  `cheese-data-pvc` (RWO by default; set `deployment.storage.accessMode: ReadWriteMany`
+- **Shared volume at `/data`.** database / orchestrator / synthongpt / alignment mount
+  it — either a claim you supply (`data.existingClaim`) or `cheese-data-pvc` provisioned
+  by the chart (RWO by default; set `deployment.storage.accessMode: ReadWriteMany`
   on a cloud target to scale the search role across nodes). Supabase uses its own PVC.
 - **UID 2112 group 0.** Pods touching `/data` run as that identity; stage files `chown -R 2112:0`.
-- **Stable resource names.** `cheese-database-app`, `cheese-orchestrator`, `cheese-inference`,
+- **Stable resource names.** `cheese-database-app`, `cheese-orchestrator`, `cheese-electrostatics`,
   `cheese-alignment-app`, `cheese-ketcher`, `supabase-*` — so in-cluster service URLs work out of the box.
 
 ## Teardown

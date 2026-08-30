@@ -54,11 +54,10 @@ deployment:
     className: ""                          # "" → target default (aws: alb, otherwise: nginx)
 
 # ⚠️ deployment.target selects storage + ingress CLASS NAMES only; the images are
-# the same on every target. `aws` is scaffolding — the gp3/efs-sc and alb class
-# names are not exercised by us. On any other platform set
-# deployment.target: local, then override storage.className and
-# ingress.className with your own and set storage.createLocalPV: false, which is
-# what this profile already does.
+# the same on every target. On a platform neither target covers, set
+# deployment.target: local and override storage.className and ingress.className
+# with your own, keeping storage.createLocalPV: false — which is what this
+# profile already does.
 
 # ═══════════════════════════════════════════════════════════════════════════
 # 2. IMAGES
@@ -230,9 +229,14 @@ ketcher:
   image:
     source: ecr
 
-# ⚠️ These two still verify v0 licences only — they do NOT work with the v1
-# agent above. Leave them off unless DeepMedChem has told you otherwise.
-inference:
+# Electrostatics and conformer alignment. Not every optional image supports the
+# v1 licence scheme the agent above writes — check with DeepMedChem before
+# enabling one on a v1 install.
+#
+# (`cheese-inference`, the index-builder, is NOT here on purpose: it is a
+# one-shot batch job you run once over a custom database, not a cluster
+# service.)
+electrostatics:
   enabled: false
 alignment:
   enabled: false

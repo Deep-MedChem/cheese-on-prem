@@ -11,17 +11,17 @@ yourself.
 
 > ### ⚠️ Read this before you rely on it
 >
-> **v1 is enforced by the two core images, and only those.** As of 2026-08-30
-> `cheese-database` (#155) and `cheese-orchestrator` (#179) verify v1 licences
-> and are published to `on-prem/cheese/*` as `:develop` and `:latest`. They
-> dispatch on the licence's `schema` field and leave the v0 path untouched, so
-> a hand-placed v0 file and an agent-written v1 file both verify.
+> **Not every image understands v1.** An image that supports it dispatches on
+> the licence's `schema` field and leaves the v0 path untouched, so a
+> hand-placed v0 file and an agent-written v1 file both verify. An image that
+> predates the scheme rejects a v1 file as **"signature does not match license
+> content"** — the signature is fine, the image simply cannot read that schema.
 >
-> Two components are still **v0-only**, their verifier ports still open:
-> `cheese-inference` (#7) and `conformer-alignment-api` (#10). A v1 file handed
-> to either is rejected as **"signature does not match license content"** — the
-> signature is fine, the image simply predates the scheme. Both are off by
-> default; if you enable them, they cannot run on a v1 licence yet.
+> The two core components the chart enables by default (`cheese-database`,
+> `cheese-orchestrator`) support v1. The optional ones may lag. Which release of
+> which image supports v1 changes as images ship, so confirm with DeepMedChem
+> for the components you intend to enable rather than assuming — this document
+> is not the place that tracks it.
 >
 > **The agent's image tag is pinned by the chart** and deliberately does not
 > follow `onprem.imageTag`: the agent versions independently of the CHEESE
@@ -262,16 +262,16 @@ The agent is published to its own, **product-agnostic** namespace:
 Not `on-prem/cheese/…` like every other image this chart pulls. There is one
 agent for all DeepMedChem on-prem products, so it sits beside them rather than
 inside CHEESE's namespace, and every product's customer pull role is granted
-`on-prem/licensing/*` on top of its own namespace. Channel tags follow the same
-convention as the product images — `:develop` and `:latest`, selected with
-`onprem.imageTag` — plus an immutable `:<short-sha>` for tracing a running pod
-back to a commit.
+`on-prem/licensing/*` on top of its own namespace. Alongside the released tag
+there is an immutable `:<short-sha>` for tracing a running pod back to a commit.
 
-> **⚠️ Nothing is published there yet.** The repository is created by
-> [terraform-deepmedchem#82](https://github.com/Deep-MedChem/terraform-deepmedchem/pull/82)
-> and filled by `publish-agent-image.yml` in `dmch-licensing`. Until that
-> Terraform is **applied** and the first build has run, `source: ecr` gets
-> `ImagePullBackOff`. Build and side-load instead:
+The agent's tag is **pinned in the chart** and is not taken from
+`onprem.imageTag`: that value selects the CHEESE product channel, and the agent
+versions on its own schedule. Setting `licensingAgent.image.ecr.tag` to `""`
+would fall back to the product channel and ask for an agent build that need not
+exist.
+
+To iterate on a locally built agent instead of pulling one, side-load it:
 
 ```bash
 # in dmch-licensing/

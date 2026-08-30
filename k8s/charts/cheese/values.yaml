@@ -3,11 +3,11 @@
 # ONE values.yaml drives everything. Every component is toggled with a
 # top-level `.enabled` key. Defaults give the MINIMAL headless profile —
 # cheese-database + cheese-orchestrator only, auth off, local-source images;
-# everything else (licensingAgent, searchUi, ketcher, synthongpt, inference,
-# alignment, supabase, oauth2Proxy) is opt-in. Site-required parameters live in
+# everything else (licensingAgent, searchUi, ketcher, synthongpt,
+# electrostatics, alignment, supabase, oauth2Proxy) is opt-in. Site-required parameters live in
 # values-minimal.yaml. Resource names are hardcoded
 # (`cheese-database-app`, `cheese-orchestrator`, `cheese-search-ui`,
-# `cheese-ketcher`, `cheese-inference`, `cheese-alignment-app`, …) so the
+# `cheese-ketcher`, `cheese-electrostatics`, `cheese-alignment-app`, …) so the
 # orchestrator/UI in-cluster service URLs work out of the box.
 #
 # Environment is selected with `deployment.target` (local | aws) — there are no
@@ -44,7 +44,7 @@ deployment:
 
 # --- Shared data plane -----------------------------------------------------
 # Single PVC mounted at /data by database, orchestrator, synthongpt, alignment.
-# Search UI / ketcher / inference are stateless and don't mount it.
+# Search UI / ketcher / electrostatics are stateless and don't mount it.
 # ===========================================================================
 # On-prem images (source: ecr)
 # ===========================================================================
@@ -52,12 +52,11 @@ deployment:
 # These two settings apply to all of them.
 onprem:
   # Tag pulled for every ecr image; a component's own ecr.tag overrides it.
-  # `latest` is the released channel and is the right default for a deployment:
-  # it mirrors what a `main` checkout of this repo gets on the compose path
-  # (scripts/_compose-env maps main -> latest). Point it at `develop` only to
-  # track the development channel, and note that ketcher and the electrostatics
-  # inference image are published on `latest` ONLY — selecting `develop`
-  # globally makes those two components fail to pull.
+  # `latest` is the released channel and the right default for a deployment: it
+  # mirrors what a `main` checkout of this repo gets on the compose path
+  # (scripts/_compose-env maps main -> latest). `develop` tracks the development
+  # channel, which not every image publishes — pin a component's own ecr.tag if
+  # the channel you pick does not exist for it.
   imageTag: latest
   # Secret the kubelet pulls with. NOTE: an ECR docker-login token is valid for
   # only 12 HOURS, so a static Secret stops working the next time a pod is
@@ -87,45 +86,54 @@ data:
   mountPath: /data
 
 # ===========================================================================
-# licence agent — v1 ("call home") licensing. NON-CORE, OFF by default.
+# licence agent — v1 ("call home") licensing. OFF by default, but a real
+# Kubernetes install NEEDS IT: see "which scheme" below.
 #
 # What it does: exchanges the DMCH-… licence key for a signed 30-day licence
-# file and rewrites it daily onto the shared /data PVC, at exactly the path the
-# product containers read (database/orchestrator/alignment
-# `secret.cheeseLicenseFile`). Without it the chart still works — you place a
-# licence file on the PVC by hand, which is the v0 path.
+# file and rewrites it daily onto the shared data volume, at exactly the path
+# the product containers read (database/orchestrator/alignment
+# `secret.cheeseLicenseFile`).
 #
+# ── Which scheme, and why v1 on Kubernetes ──────────────────────────────────
 #   v1 = this agent. Server-issued file, 30-day TTL, renewed daily. The
 #        fingerprint is the CLUSTER's kube-system namespace UID, so ONE licence
-#        authorises the whole installation and nodes may come and go.
-#   v0 = long-lived offline RSA file bound to ONE machine's DMI hardware id.
-#        Docker Compose / single host only; unusable on a cluster.
+#        authorises the whole installation and nodes may come and go. This is
+#        the supported scheme for a Kubernetes deployment.
+#   v0 = long-lived offline RSA file, bound to ONE machine's DMI hardware id.
+#        Built for Docker Compose on a single host.
+#
+# The chart will start with the agent off and a v0 file placed on the volume by
+# hand, and that is what values-minimal.yaml does — but understand what you are
+# accepting: a v0 licence is valid only on the machine whose DMI it was issued
+# for, so it authorises ONE node. Any pod that lands elsewhere fails licence
+# verification, which makes it unusable on a multi-node cluster and fragile on a
+# single-node one (on kind the node reports product_name="kind" and a host
+# licence does not validate at all without a node-level workaround).
+#
+# So: v1 for anything real, v0 only for a single-node test box you control.
+# Air-gapped clusters that cannot reach the licensing server are the one case
+# where v0 is the answer — talk to DeepMedChem first.
 #   (Older notes call the agent "v2". That numbering is wrong.)
 #
-# ⚠️ STATUS (2026-08-30): v1 is ENFORCED by the two core images. cheese-database
-# (#155) and cheese-orchestrator (#179) are merged and published to
-# on-prem/cheese/* as :develop and :latest. They dispatch on the licence's
-# `schema` field and keep the v0 path untouched, so both schemes verify.
-#
-# Still v0-only, verifier ports still OPEN: cheese-inference (#7),
-# conformer-alignment-api (#10). Handing a v1 file to either is rejected as
-# "signature does not match" — the signature is fine, the image predates the
-# scheme. Those two components are off by default.
-# See k8s/docs/licensing-agent.md.
+# A product image verifies v1 by dispatching on the licence's `schema` field,
+# and the v0 path is untouched where it does, so an image that understands v1
+# accepts both. An image that predates the scheme rejects a v1 file as
+# "signature does not match" — the signature is fine, the image simply cannot
+# read that schema. Which images are on which scheme is release information, not
+# chart configuration: see k8s/docs/licensing-agent.md.
 # ===========================================================================
 licensingAgent:
+  # Turn this ON for a production install (values-production.yaml does). Left
+  # off by default so the minimal/kind profile stays self-contained.
   enabled: false
 
   image:
-    # PUBLISHED as of 2026-08-30. publish-agent-image.yml in the dmch-licensing
-    # repo builds it: develop -> :develop, main -> :latest, plus an immutable
-    # :<short-sha> so a running pod traces back to a commit.
-    #
     # The tag below is PINNED, not inherited: this is the agent's own release
     # channel and it has nothing to do with the CHEESE product channel that
     # onprem.imageTag selects. The two version independently, so an inherited
-    # `develop` would ask for an agent build that need not exist — which is
-    # exactly the state today (only :latest is published).
+    # tag would ask for an agent build that need not exist. An immutable
+    # :<short-sha> tag is published alongside the channel tag if you want a
+    # running pod to trace back to a specific commit.
     #
     # Note the namespace: on-prem/LICENSING, not on-prem/cheese. The agent is
     # product-agnostic — one image shared by every DeepMedChem on-prem product —
@@ -489,8 +497,6 @@ synthongpt:
   enabled: false
 
   image:
-    # ⚠️ NOT PUBLISHED YET — the repository below does not exist, so this stays
-    # on local; source: ecr would 404.
     source: local                          # local | ecr
     local:
       repository: cheese-synthongpt-local
@@ -729,7 +735,7 @@ searchUi:
     KETCHER_ORIGIN: ""                     # self-hosted ketcher origin; auto-set when ketcher.enabled (see _helpers/runtime wiring in configmap)
     SUPABASE_PUBLIC_URL: ""               # browser-reachable Supabase origin (on-prem); auto-set when supabase.enabled
     # Server-side optional service URLs (UI 503s gracefully if the service is absent).
-    ELECTROSTATICS_API: "http://cheese-inference.cheese.svc.cluster.local:8000"
+    ELECTROSTATICS_API: "http://cheese-electrostatics.cheese.svc.cluster.local:8000"
     ALIGNMENT_API: "http://cheese-alignment-app.cheese.svc.cluster.local:8001"
 
   secret:
@@ -813,17 +819,21 @@ ketcher:
     topologyKey: kubernetes.io/hostname
 
 # ===========================================================================
-# inference — electrostatics inference server. NON-CORE, OFF by default. The UI
-# calls it via ELECTROSTATICS_API and degrades gracefully (503) when absent.
-# Service name MUST be cheese-inference
-# (the UI server's default ELECTROSTATICS_API host).
+# electrostatics — electrostatics inference server. NON-CORE, OFF by default.
+# The UI calls it via ELECTROSTATICS_API and degrades gracefully (503) when
+# absent. Service name must match the ELECTROSTATICS_API host set on the
+# orchestrator and the search UI (both default to cheese-electrostatics).
+#
+# NOT to be confused with `cheese-inference`, the index-builder: that one is a
+# one-shot batch job you run once over a custom database, not a service, and it
+# is deliberately not part of this chart.
 # ===========================================================================
-inference:
+electrostatics:
   enabled: false
   image:
     source: local
     local:
-      repository: cheese-inference-local
+      repository: cheese-electrostatics-local
       tag: dev
       pullPolicy: IfNotPresent
     ecr:
