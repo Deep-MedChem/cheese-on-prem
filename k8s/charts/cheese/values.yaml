@@ -201,8 +201,8 @@ licensingAgent:
 # `aws s3 sync` is incremental, so an interrupted run resumes and adding a
 # database later fetches only the new one.
 #
-# ⚠️ SIZE: under 1 GB to ~1.3 TB each, ~8 TB for the full catalogue. Check disk
-# before enabling.
+# ⚠️ SIZE: from under 1 GB to ~1.3 TiB per database, ~5.4 TiB for everything
+# CHEESE delivers. Per-database sizes are listed under database.databases.
 dataSync:
   enabled: false
 
@@ -299,11 +299,116 @@ database:
   # Each entry produces parallel keys in OUTPUT_DIRECTORIES, INDEX_TYPES,
   # DELIMITERS in the rendered config.yaml. Toggle a dataset with `enabled`.
   # With databasesRoot set, output_directory is just the folder name.
+  #
+  # Every database delivered on-prem is listed here — the same set as
+  # config/databases.catalog, which the compose CLI reads. Only the fixture and
+  # the smallest useful database are on by default; the rest are off behind a
+  # divider so that no install pulls terabytes it did not ask for. To use one,
+  # flip `enabled: true` in YOUR values file rather than editing this one;
+  # dataSync then fetches exactly the entries you enabled, so the data on the
+  # volume and the engine's configuration cannot disagree.
+  #
+  # Keys are the CANONICAL database names, which is not cosmetic: the
+  # orchestrator's db_names enum and the UI's database cards are keyed by them,
+  # so a database registered under its folder name instead answers no searches
+  # and renders as an unstyled card.
+  #
+  # Sizes are the download size, from config/databases.catalog. Check free space
+  # on the volume before enabling anything.
   databases:
-    test:
+    test:                                  # in-repo fixture; not part of the delivery
       enabled: true
       output_directory: "test_database"    # relative to /data
-      index_type: "Flat"
+      index_type: "in_memory"
+      delimiter: ","
+    MOLPORT:                               # 4.8 GiB
+      enabled: true
+      output_directory: "molport_10_25"
+      index_type: "clustered"
+      delimiter: ","
+
+    # ==========================================================================
+    # OFF ON PURPOSE — do not flip anything below in THIS file.
+    #
+    # With dataSync enabled, `enabled: true` starts a download: from a few GiB to
+    # 1.2 TiB for a single database. Turning one on here would silently opt in
+    # every install that layers a profile on this file. Enable what you want in
+    # YOUR values file, where the disk it lands on is yours to check.
+    # ==========================================================================
+    ENAMINE-AA:                            # 625 MiB
+      enabled: false
+      output_directory: "enamine_amino_acids"
+      index_type: "clustered"
+      delimiter: ","
+    CHEMSPACE-SCREENING:                   # 5.9 GiB
+      enabled: false
+      output_directory: "chemspace_screening"
+      index_type: "clustered"
+      delimiter: ","
+    MCULE-IN-STOCK:                        # 6.6 GiB
+      enabled: false
+      output_directory: "mcule_purchasable_in_stock_260510_canonical_clustered"
+      index_type: "clustered"
+      delimiter: ","
+    EXPLORE-DIVERSE:                       # 7.7 GiB
+      enabled: false
+      output_directory: "eXplore_Diverse_12M"
+      index_type: "clustered"
+      delimiter: ","
+    EXPLORE-ENUMERATED:                    # 15.5 GiB
+      enabled: false
+      output_directory: "eXplore_Enumerated_55M"
+      index_type: "clustered"
+      delimiter: ","
+    MOLECULE-ONE:                          # 17.3 GiB
+      enabled: false
+      output_directory: "M1"
+      index_type: "clustered"
+      delimiter: ","
+    MCULE-FULL:                            # 62.6 GiB
+      enabled: false
+      output_directory: "mcule_purchasable_full_260509_canonical_clustered"
+      index_type: "clustered"
+      delimiter: ","
+    ZINC15:                                # 123.7 GiB
+      enabled: false
+      output_directory: "zinc15"
+      index_type: "clustered"
+      delimiter: ","
+    CHEMRIYA:                              # 191.1 GiB
+      enabled: false
+      output_directory: "chemriya"
+      index_type: "clustered"
+      delimiter: ","
+    SYNPLE-4B:                             # 651.7 GiB
+      enabled: false
+      output_directory: "Synple-4B"
+      index_type: "clustered"
+      delimiter: ","
+    XTALPI:                                # 770.7 GiB
+      enabled: false
+      output_directory: "xtalpi-09-03-2026"
+      index_type: "clustered"
+      delimiter: ","
+    CHEMSPACE-5B-RO5:                      # 775.3 GiB
+      enabled: false
+      output_directory: "chemspace_5B_Rule_of_5"
+      index_type: "clustered"
+      delimiter: ","
+    CHEMSPACE-5B-BEYOND-RO5:               # 783.9 GiB
+      enabled: false
+      output_directory: "chemspace_5B_Beyond_Rule_of_5"
+      index_type: "clustered"
+      delimiter: ","
+    CHEMSPACE-5B-FREEDOM:                  # 871.0 GiB
+      enabled: false
+      output_directory: "chemspace_5B_Freedom_5_fvn"
+      index_type: "clustered"
+      delimiter: ","
+    ENAMINE-REAL:                          # 1.2 TiB
+      enabled: false
+      output_directory: "enamine_new"
+      index_type: "clustered"
       delimiter: ","
 
   secret:

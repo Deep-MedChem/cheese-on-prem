@@ -27,25 +27,23 @@
 
 # ── Distribution folder → canonical DB name ──────────────────────────────────
 # Databases are delivered as S3 folders whose names are raw/dated (e.g.
-# mcule_purchasable_in_stock_240717_clustered), but the rest of CHEESE is keyed by
-# CANONICAL names (MCULE-IN-STOCK): the orchestrator's db_names enum, the
-# search-ui database cards (databases_ui_config.json) and the shipped metadata
+# mcule_purchasable_in_stock_260510_canonical_clustered), but the rest of CHEESE
+# is keyed by CANONICAL names (MCULE-IN-STOCK): the orchestrator's db_names enum,
+# the search-ui database cards (databases_ui_config.json) and the shipped metadata
 # catalog (databases_info.json). If the engine config keys a DB by its raw folder
 # name, none of that matches — search 422s on the listed name and the UI renders
 # an unstyled, overflowing card with no vendor flair or molecule count.
 #
-# So register downloaded folders under their canonical name. This table mirrors
-# prod's source of truth, cheese-database/cheese_production/cheese_config_file.yaml
-# (canonical key -> /cheese-databases/<folder>); keep it in sync when a database is
-# re-indexed under a new folder name. A folder with no entry falls back to its own
-# name — still searchable, just without canonical metadata/flair.
+# So register downloaded folders under their canonical name. A folder with no
+# entry here falls back to its own name — still searchable, just without the
+# canonical metadata and vendor styling.
 declare -A DB_CANONICAL_NAME=(
   [enamine_new]="ENAMINE-REAL"
   [chemriya]="CHEMRIYA"
   [eXplore_Diverse_12M]="EXPLORE-DIVERSE"
   [eXplore_Enumerated_55M]="EXPLORE-ENUMERATED"
-  [mcule_purchasable_full_240610]="MCULE-FULL"
-  [mcule_purchasable_in_stock_240717_clustered]="MCULE-IN-STOCK"
+  [mcule_purchasable_full_260509_canonical_clustered]="MCULE-FULL"
+  [mcule_purchasable_in_stock_260510_canonical_clustered]="MCULE-IN-STOCK"
   [molport_10_25]="MOLPORT"
   [M1]="MOLECULE-ONE"
   [chemspace_screening]="CHEMSPACE-SCREENING"
@@ -320,7 +318,7 @@ validate_engine_config() {
   grep -qE "^OUTPUT_DIRECTORIES:" "$cfg" || { return 1; }
 
   # Canonical-name migration: a DB keyed by its raw distribution-folder name
-  # (e.g. mcule_purchasable_in_stock_240717_clustered) doesn't match the
+  # (e.g. mcule_purchasable_in_stock_260510_canonical_clustered) doesn't match the
   # orchestrator's db_names, the UI database cards, or the metadata catalog —
   # all of which are keyed by canonical names (MCULE-IN-STOCK) — so search 422s
   # and the card renders unstyled/overflowing with no count. Rename such keys to
