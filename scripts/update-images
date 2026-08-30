@@ -3,9 +3,8 @@
 set -e
 
 echo Downloading CHEESE images...
-# Registry (2026-07 AWS migration): AWS ECR is the only registry — the legacy
-# Azure ACR (cheese.azurecr.io) account is retired. An explicit CHEESE_REGISTRY
-# in cheese-env-file.conf still overrides (e.g. a future mirror).
+# An explicit CHEESE_REGISTRY in cheese-env-file.conf overrides the default
+# (e.g. a mirror).
 CHEESE_REGISTRY="${CHEESE_REGISTRY:-815935788477.dkr.ecr.us-east-1.amazonaws.com}"
 REGISTRY="$CHEESE_REGISTRY"
 REPO_NAME="${REGISTRY}/on-prem"
@@ -62,7 +61,7 @@ image_repo() {
 if [ -z "${CHEESE_AWS_ACCESS_KEY_ID:-}" ] || [ -z "${CHEESE_AWS_SECRET_ACCESS_KEY:-}" ]; then
   echo "ERROR: registry $REGISTRY needs CHEESE_AWS_ACCESS_KEY_ID and CHEESE_AWS_SECRET_ACCESS_KEY"
   echo "in ~/.config/cheese/cheese-env-file.conf. Ask the DeepMedChem team for your keys."
-  echo "(The old CHEESE_PASSWORD no longer works: the Azure registry has been retired.)"
+  echo "(CHEESE_PASSWORD is obsolete and no longer works.)"
   exit 1
 fi
 ecr_token=$(docker run --rm --entrypoint /bin/sh \
