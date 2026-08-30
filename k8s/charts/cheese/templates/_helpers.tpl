@@ -45,16 +45,13 @@ Call it with the root context so `source: ecr` can compose paths from the shared
     {{ include "cheese.image" (list $ .Values.database.image) }}
 
 A bare image block still works (`include "cheese.image" $db.image`) for callers
-that predate this, but then `source: ecr` has nothing to compose from and fails
+that predate this, but then `source: ecr` cannot read onprem.imageTag and fails
 with an explicit message rather than rendering a half-built reference.
 
 Sources:
   local — an image already on the node (kind dev). Used verbatim.
-  ecr   — DeepMedChem's registry. Composed as
-          <onprem.registry>/on-prem/cheese/<ecr.image>:<tag>
-          One repository per product image and no customer segment: the images
-          are customer-agnostic, and a tailored build is a tag rather than a
-          repository. Per-component ecr.tag wins over onprem.imageTag.
+  ecr   — DeepMedChem's registry. ecr.repository is the full path; the tag
+          comes from onprem.imageTag unless the component sets its own ecr.tag.
   acr   — GONE. The Azure registry was retired and its values blocks are
           deleted. Setting it fails at render, naming the replacement, so an
           un-migrated values.yaml can't quietly render an unpullable path.
@@ -73,20 +70,20 @@ Sources:
 {{- $image := $ctx.img -}}
 {{- $src := $image.source -}}
 {{- if eq $src "acr" -}}
-{{- fail "image.source: acr is gone — the Azure registry was retired and the acr block has been removed from values.yaml. Use source: ecr; the images now live at on-prem/cheese/<image> and need no customer segment (see k8s/README.md, \"Images\")." -}}
+{{- fail "image.source: acr is gone — the Azure registry was retired and the acr block has been removed from values.yaml. Use source: ecr (see k8s/README.md, \"Images\")." -}}
 {{- end -}}
 {{- $sel := index $image $src -}}
 {{- if eq $src "ecr" -}}
 {{- $root := $ctx.root -}}
 {{- if not $root -}}
-{{- fail "source: ecr needs the root context — call this helper as (list $ <image block>), not with the image block alone." -}}
+{{- fail "source: ecr needs the root context for onprem.imageTag — call this helper as (list $ <image block>), not with the image block alone." -}}
 {{- end -}}
 {{- $op := $root.Values.onprem -}}
-{{- if not $sel.image -}}
-{{- fail (printf "source: ecr requires ecr.image (the <image> in on-prem/cheese/<image>) on this component") -}}
+{{- if not $sel.repository -}}
+{{- fail (printf "source: ecr requires ecr.repository (the full image path) on this component") -}}
 {{- end -}}
 {{- $tag := $sel.tag | default $op.imageTag | default "latest" -}}
-{{- printf "%s/on-prem/cheese/%s:%s" (trimSuffix "/" $op.registry) $sel.image $tag -}}
+{{- printf "%s:%s" $sel.repository $tag -}}
 {{- else -}}
 {{- printf "%s:%s" $sel.repository (default "latest" $sel.tag) -}}
 {{- end -}}

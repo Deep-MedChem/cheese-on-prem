@@ -41,18 +41,13 @@ deployment:
 # Single PVC mounted at /data by database, orchestrator, synthongpt, alignment.
 # Search UI / ketcher / inference are stateless and don't mount it.
 # ===========================================================================
-# On-prem registry (source: ecr)
+# On-prem images (source: ecr)
 # ===========================================================================
-# DeepMedChem publishes the licensed product images as
-#   <registry>/on-prem/cheese/<image>:<tag>
-# One repository per product image, with no customer segment: the images are
-# customer-agnostic, and a build tailored to you is a tag rather than a separate
-# repository. Every component with `image.source: ecr` composes its own path
-# from the settings here.
+# Each component carries its own full repository under image.ecr.repository.
+# These two settings apply to all of them.
 onprem:
-  registry: 815935788477.dkr.ecr.us-east-1.amazonaws.com
-  # Default tag for every ecr image; a component's own ecr.tag overrides it.
-  # `develop` tracks the development channel, `latest` tracks main.
+  # Tag pulled for every ecr image; a component's own ecr.tag overrides it.
+  # `develop` tracks the development channel, `latest` the released one.
   imageTag: develop
   # Secret the kubelet pulls with. NOTE: an ECR docker-login token is valid for
   # only 12 HOURS, so a static Secret stops working the next time a pod is
@@ -90,18 +85,17 @@ licenseAgent:
   enabled: false
 
   image:
-    # ⚠️ NOT PUBLISHED ANYWHERE YET. The agent image is built from the private
-    # dmch-licensing repo (`docker build -f licensing/agent/Dockerfile -t
-    # cheese-license-agent:dev .`) and side-loaded. The ecr block below records
-    # the name it would take once it is published; the repository does not exist
-    # yet, so source: ecr will not resolve.
+    # ⚠️ NOT PUBLISHED YET — the repository below does not exist, so source: ecr
+    # will not resolve. Build the agent from the dmch-licensing repo
+    # (`docker build -f licensing/agent/Dockerfile -t cheese-license-agent:dev .`)
+    # and side-load it.
     source: local                          # local | ecr
     local:
       repository: cheese-license-agent
       tag: dev
       pullPolicy: IfNotPresent
     ecr:
-      image: cheese-license-agent
+      repository: 815935788477.dkr.ecr.us-east-1.amazonaws.com/on-prem/cheese/cheese-license-agent
       tag: ""                                # empty -> onprem.imageTag
       pullPolicy: IfNotPresent
 
@@ -214,7 +208,7 @@ database:
       tag: dev
       pullPolicy: IfNotPresent
     ecr:
-      image: cheese-database
+      repository: 815935788477.dkr.ecr.us-east-1.amazonaws.com/on-prem/cheese/cheese-database
       tag: ""                                # empty -> onprem.imageTag
       pullPolicy: IfNotPresent
       # pullSecret: ""                       # empty -> onprem.pullSecret
@@ -376,15 +370,15 @@ synthongpt:
   enabled: false
 
   image:
-    # cheese-synthongpt has no published on-prem repository, so this stays on
-    # local until one exists — source: ecr would resolve to a path that 404s.
+    # ⚠️ NOT PUBLISHED YET — the repository below does not exist, so this stays
+    # on local; source: ecr would 404.
     source: local                          # local | ecr
     local:
       repository: cheese-synthongpt-local
       tag: dev
       pullPolicy: IfNotPresent
     ecr:
-      image: cheese-synthongpt
+      repository: 815935788477.dkr.ecr.us-east-1.amazonaws.com/on-prem/cheese/cheese-synthongpt
       tag: ""                                # empty -> onprem.imageTag
       pullPolicy: IfNotPresent
       # pullSecret: ""                       # empty -> onprem.pullSecret
@@ -447,7 +441,7 @@ orchestrator:
       tag: dev
       pullPolicy: IfNotPresent
     ecr:
-      image: cheese-orchestrator
+      repository: 815935788477.dkr.ecr.us-east-1.amazonaws.com/on-prem/cheese/cheese-orchestrator
       tag: ""                                # empty -> onprem.imageTag
       pullPolicy: IfNotPresent
       # pullSecret: ""                       # empty -> onprem.pullSecret
@@ -549,7 +543,7 @@ searchUi:
       tag: dev
       pullPolicy: IfNotPresent
     ecr:
-      image: cheese-search-ui
+      repository: 815935788477.dkr.ecr.us-east-1.amazonaws.com/on-prem/cheese/cheese-search-ui
       tag: ""                                # empty -> onprem.imageTag
       pullPolicy: IfNotPresent
       # pullSecret: ""                       # empty -> onprem.pullSecret
@@ -648,7 +642,7 @@ ketcher:
       tag: dev
       pullPolicy: IfNotPresent
     ecr:
-      image: ketcher
+      repository: 815935788477.dkr.ecr.us-east-1.amazonaws.com/on-prem/cheese/ketcher
       tag: ""                                # empty -> onprem.imageTag
       pullPolicy: IfNotPresent
       # pullSecret: ""                       # empty -> onprem.pullSecret
@@ -691,7 +685,7 @@ inference:
       tag: dev
       pullPolicy: IfNotPresent
     ecr:
-      image: cheese-electrostatics-inference
+      repository: 815935788477.dkr.ecr.us-east-1.amazonaws.com/on-prem/cheese/cheese-electrostatics-inference
       tag: ""                                # empty -> onprem.imageTag
       pullPolicy: IfNotPresent
       # pullSecret: ""                       # empty -> onprem.pullSecret
@@ -728,7 +722,7 @@ alignment:
       tag: dev
       pullPolicy: IfNotPresent
     ecr:
-      image: cheese-alignment-service
+      repository: 815935788477.dkr.ecr.us-east-1.amazonaws.com/on-prem/cheese/cheese-alignment-service
       tag: ""                                # empty -> onprem.imageTag
       pullPolicy: IfNotPresent
       # pullSecret: ""                       # empty -> onprem.pullSecret

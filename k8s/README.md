@@ -107,14 +107,11 @@ Every component picks its registry with `image.source`:
 | `ecr` | DeepMedChem's registry |
 | `acr` | **GONE.** The Azure registry was retired and its values blocks are deleted. Setting it fails at render with a message naming the replacement, rather than quietly rendering an unpullable path. |
 
-Licensed images are published as `<registry>/on-prem/cheese/<image>:<tag>` — one
-repository per product image, with no customer segment. The images are
-customer-agnostic, and a build tailored to you is a tag rather than a separate
-repository. Every component composes its own path:
+Each component already carries its full repository in `image.ecr.repository`;
+you only choose the source and the channel:
 
 ```yaml
 onprem:
-  customer: your-slug          # issued by DeepMedChem with your access key
   imageTag: develop            # or `latest`; a component's ecr.tag overrides it
 
 database:
@@ -125,11 +122,11 @@ orchestrator:
     source: ecr
 ```
 
-which renders, for `customer: testpartner`:
+which renders:
 
 ```
-815935788477.dkr.ecr.us-east-1.amazonaws.com/on-prem/cheese-database/testpartner:develop
-815935788477.dkr.ecr.us-east-1.amazonaws.com/on-prem/cheese-orchestrator/testpartner:develop
+815935788477.dkr.ecr.us-east-1.amazonaws.com/on-prem/cheese/cheese-database:develop
+815935788477.dkr.ecr.us-east-1.amazonaws.com/on-prem/cheese/cheese-orchestrator:develop
 ```
 
 Pin one component to a different build with its own `ecr.tag` — useful for
@@ -142,10 +139,6 @@ orchestrator:
     ecr:
       tag: develop-v1lic
 ```
-
-Rendering fails with an explicit message if `onprem.customer` is empty while any
-component uses `source: ecr`, so a half-built image reference can never reach the
-cluster.
 
 ### ⚠️ The pull Secret expires every 12 hours
 
