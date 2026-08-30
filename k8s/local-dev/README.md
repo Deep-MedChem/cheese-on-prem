@@ -59,6 +59,12 @@ LOAD="cheese-orchestrator-local" ./scripts/load-kind-images.sh
 kubectl -n cheese rollout restart deploy/cheese-orchestrator
 ```
 
+> `cheese-orchestrator` and `cheese-database` are **mandatory** — the chart
+> enables both by default and nothing works without them, so both scripts add
+> them back if a `BUILD`/`LOAD` override leaves one out, and say so on stderr.
+> The two commands above therefore also build/load `cheese-database`. Pass the
+> pair explicitly when you mean only the core stack.
+
 The upstream repos (`cheese-orchestrator`, `cheese-database`, `cheese-search-ui`,
 `synthongpt-prod`) are expected as **siblings of the `cheese-on-prem` checkout**;
 override with `SOURCES_ROOT=/path/to/repos` if they live elsewhere. Then flip
