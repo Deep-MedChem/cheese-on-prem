@@ -30,6 +30,9 @@
 # azure is DEPRECATED and unsupported.
 deployment:
   target: local                            # local | aws
+  # Storage for the shared /data volume THE CHART PROVISIONS. If you already
+  # have a volume, ignore this whole block and set `data.existingClaim` instead —
+  # the chart then provisions nothing and these settings do not apply.
   storage:
     className: ""                          # "" → target default (local: cheese-local-manual; aws: gp3/efs-sc)
     size: 10Ti
@@ -63,7 +66,24 @@ onprem:
   pullSecret: cheese-ecr-pull
 
 data:
+  # BRING YOUR OWN VOLUME. Set this to a PVC you created yourself and the chart
+  # will mount it and provision NOTHING — no PVC, no local PV — ignoring every
+  # deployment.storage setting below. This is the right choice when your storage
+  # is already provisioned (an existing NFS/CSI claim, or a volume that already
+  # holds the databases), which is the normal case on a real cluster.
+  #
+  #   data:
+  #     existingClaim: cheese-data          # must exist in the release namespace
+  #
+  # The claim must be at least ReadWriteOnce, and ReadWriteMany if you intend to
+  # run database replicas across nodes. Leave empty to have the chart provision
+  # a PVC from deployment.storage instead.
+  existingClaim: ""
+  # Name of the PVC the chart provisions when existingClaim is empty. Ignored
+  # when it is set.
   pvcName: cheese-data-pvc
+  # Where the volume is mounted inside every container that reads it. The
+  # products resolve their paths against this, so changing it is not cosmetic.
   mountPath: /data
 
 # ===========================================================================
@@ -561,8 +581,14 @@ orchestrator:
       tls: []
     public:
       enabled: false
-      className: nginx
+      # "" → deployment target default (local: nginx; aws: alb), same as the
+      # searchUi and ketcher ingresses. Hardcoding a class here would bypass
+      # deployment.target and publish an Ingress no controller on the cluster
+      # claims. Set it explicitly for a controller the target does not cover.
+      className: ""
       annotations:
+        # nginx-specific; ignored by other controllers, which have their own
+        # timeout annotation. Searches are long — set the equivalent for yours.
         nginx.ingress.kubernetes.io/proxy-read-timeout: "300"
       hosts: []
       tls: []

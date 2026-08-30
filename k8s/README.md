@@ -48,7 +48,7 @@ flowchart TB
 
 | | What | Where it goes | Notes |
 |---|---|---|---|
-| 💾 | **Storage** | a PersistentVolume the chart binds as `cheese-data-pvc` at `/data` | Holds the databases *and* the licence file. Size it for the databases you pick — they run from under 1 GB to 1.2 TB each, ~5.4 TB for the whole catalogue. Stage the contents owned by `2112:0`. Layout and staging commands: [docs/pvc-data-runbook.md](docs/pvc-data-runbook.md). |
+| 💾 | **Storage** | a volume mounted at `/data` — either one you provide (`data.existingClaim`) or one the chart provisions as `cheese-data-pvc` | Holds the databases *and* the licence file. Size it for the databases you pick — they run from under 1 GB to 1.2 TB each, ~5.4 TB for the whole catalogue. Stage the contents owned by `2112:0`. Layout and staging commands: [docs/pvc-data-runbook.md](docs/pvc-data-runbook.md). |
 | 🔑 | **Registry credential** | a Secret the kubelet uses to pull the images | One access key from DeepMedChem. It is read-only and its only right is pulling what you are licensed for. |
 | 📄 | **Licence key** | a Secret the licence agent reads | A `DMCH-…` key. The agent exchanges it for a 30-day licence file, writes that to `/data`, and renews it daily — so the licence covers the whole cluster and nodes can come and go. |
 
@@ -304,8 +304,10 @@ real hostnames via the ingress values for anything non-local).
 
 ## Profiles
 
-The single `values.yaml` defaults are production-leaning (target=local but supabase
-off, etc.). Layer a tiny profile file (or `--set` flags) for each environment.
+The single `values.yaml` defaults are the minimal headless stack on local images —
+useful for trying the chart out, not for deploying. Layer a profile file (or
+`--set` flags) on top. Two are checked in: `values-minimal.yaml` (kind harness)
+and `values-production.yaml` (real install).
 
 **minimal / API-only** (`charts/cheese/values-minimal.yaml`) — the only profile
 checked into the repo, and the one the kind bring-up is tested against: database +
@@ -320,6 +322,34 @@ helm install cheese charts/cheese -n cheese --create-namespace \
 Site-specific values in it (`databasesRoot`, the absolute `cheeseLicenseFile`
 paths, the enabled database list) are examples — edit them for the site. Keep it
 in step with `values.yaml`: same keys, same notes, machine-specific values only.
+
+**production** (`charts/cheese/values-production.yaml`) — the shape of a real
+install: ECR images on the released channel, the v1 licence agent, the API behind
+an ingress, dataSync populating the volume. Checked in, but **not drop-in** —
+every value marked `« SET THIS »` is site-specific and the chart fails fast if
+the licence key is missing.
+
+```bash
+helm install cheese charts/cheese -n cheese --create-namespace \
+  -f charts/cheese/values-production.yaml \
+  -f my-site.yaml            # your « SET THIS » values — keep them out of the chart
+```
+
+Its first decision is where the data lives, because everything else follows from
+it:
+
+| | `data.existingClaim` | What the chart does |
+|---|---|---|
+| **A — bring your own volume** *(recommended)* | set to a PVC you created | mounts it; provisions no PVC and no PV; ignores `deployment.storage` entirely |
+| **B — chart provisions** | left empty | creates `cheese-data-pvc` from `deployment.storage` (class, size, access mode) |
+
+Use A when the storage already exists — an NFS export, a CSI claim, or a volume
+that already holds the databases. Either way the claim must be `ReadWriteOnce`
+at minimum, and `ReadWriteMany` to run database replicas across nodes.
+
+For secrets, point each component at a pre-created Secret rather than inlining:
+`database`, `orchestrator`, `searchUi` and `licensingAgent` all take
+`secret.existingSecret`.
 
 **local / test** (`local-profile.yaml`) — in-cluster Supabase auth, local storage:
 
@@ -341,24 +371,24 @@ ketcher:
     hosts: [{ host: cheese-ketcher.localtest.me }]
 ```
 
-**prod (aws scaffold)** (`prod-profile.yaml`) — external secrets, no in-cluster Supabase:
+**With the web UI** — layer this on top of `values-production.yaml`. The UI needs
+its own hostname and an auth story; publishing it without one exposes your
+licensed data:
 
 ```yaml
-deployment:
-  target: aws                       # scaffold; storageClass/ingress are stubs until AWS images exist
-  storage:
-    accessMode: ReadWriteMany       # efs-sc — required to scale the search role across nodes
-database:   { secret: { existingSecret: cheese-database } }
-orchestrator: { secret: { existingSecret: cheese-orchestrator } }
-searchUi:   { secret: { existingSecret: cheese-search-ui-secret } }
-supabase:   { enabled: false }
-inference:  { enabled: true }
-alignment:  { enabled: true }
 searchUi:
+  enabled: true
+  image:  { source: ecr }
+  secret: { existingSecret: cheese-search-ui-secret }
   config:
     FRONTEND_URL: https://cheese.example.com
     KETCHER_ORIGIN: https://ketcher.example.com
-    SUPABASE_PUBLIC_URL: https://supabase.example.com
+ketcher:
+  enabled: true
+  image: { source: ecr }
+  ingress:                          # the ketcher origin must be browser-reachable
+    enabled: true
+    hosts: [{ host: ketcher.example.com }]
 ```
 
 ## Headless (API-only)
