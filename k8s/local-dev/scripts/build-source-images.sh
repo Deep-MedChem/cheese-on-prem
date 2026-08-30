@@ -2,18 +2,18 @@
 #
 # Rebuild the four <svc>-local:dev images from upstream source. Use this
 # only when you actually need to iterate on the components — for plain
-# deploys, leave image.source: acr (the chart default) and let kubelet pull
-# cheese.azurecr.io/.../cheese-customer:latest directly.
+# deploys, set image.source: ecr and let kubelet pull
+# <registry>/on-prem/cheese/<svc>:<tag> directly.
 #
-# All four runtime images live in cheese.azurecr.io/on-prem/<svc>/cheese-customer
-# — that's what kubelet pulls when image.source: acr. The detail this script
-# cares about is the Dockerfile FROM line for local rebuilds:
-#   - cheese-orchestrator/Dockerfile-on-prem: FROM cheese.azurecr.io/...:base
-#   - cheese-database/Dockerfile-on-prem:     FROM cheese.azurecr.io/...:base
+# All four runtime images are published to on-prem/cheese/<svc> — that's what
+# kubelet pulls when image.source: ecr. The detail this script cares about is
+# the Dockerfile FROM line for local rebuilds:
+#   - cheese-orchestrator/Dockerfile-on-prem: FROM <ecr>/cheese-orchestrator:base
+#   - cheese-database/Dockerfile-on-prem:     FROM <ecr>/cheese-database:base
 #   - synthongpt-prod/Dockerfile:             FROM public Docker Hub
 #   - cheese-search-ui/Dockerfile:            FROM public Docker Hub
-# So rebuilding orchestrator/database needs `docker login cheese.azurecr.io`
-# (preflight below). synthongpt/search-ui build without ACR auth.
+# So rebuilding orchestrator/database needs a docker login against ECR
+# (preflight below). synthongpt/search-ui build without registry auth.
 #
 # Override which components to build:
 #   BUILD="cheese-search-ui" ./scripts/build-source-images.sh
@@ -63,11 +63,13 @@ ensure_mandatory() {
 BUILD="${BUILD:-cheese-orchestrator cheese-database cheese-synthongpt cheese-search-ui}"
 BUILD="$(ensure_mandatory "$BUILD" "$MANDATORY_IMAGES")"
 
-# Fail fast if we're about to build a service whose Dockerfile bases on
-# cheese.azurecr.io but the user can't reach/authenticate to that registry.
-# A bare `docker build` would only fail mid-way with an opaque pull error.
-preflight_acr_auth() {
-  local probe="cheese.azurecr.io/cheese-orchestrator:base"
+# Fail fast if we're about to build a service whose Dockerfile bases on an ECR
+# image but the user can't reach/authenticate to the registry. A bare
+# `docker build` would only fail mid-way with an opaque pull error.
+ECR_REGISTRY="${ECR_REGISTRY:-815935788477.dkr.ecr.us-east-1.amazonaws.com}"
+AWS_REGION="${AWS_REGION:-us-east-1}"
+preflight_registry_auth() {
+  local probe="${ECR_REGISTRY}/cheese-orchestrator:base"
   if docker manifest inspect "${probe}" >/dev/null 2>&1; then
     return 0
   fi
@@ -75,20 +77,20 @@ preflight_acr_auth() {
 ==> ERROR: cannot reach ${probe}.
 
 This script rebuilds <svc>-local:dev images from source. The on-prem
-Dockerfiles for cheese-orchestrator and cheese-database inherit FROM
-cheese.azurecr.io base images, so docker build needs network access and
-credentials for cheese.azurecr.io. Try:
+Dockerfiles for cheese-orchestrator and cheese-database inherit FROM base
+images in ECR, so docker build needs network access and credentials. Try:
 
-    docker login cheese.azurecr.io
+    aws ecr get-login-password --region ${AWS_REGION} \
+      | docker login --username AWS --password-stdin ${ECR_REGISTRY}
 
-If you don't need to rebuild from source, you don't need this script —
-the chart now defaults to image.source: acr. Apply the image-pull-secret
+If you don't need to rebuild from source, you don't need this script — set
+image.source: ecr, apply the image-pull-secret
 (manifests/base/image-pull-secret.yaml) and helm install: kubelet pulls
-cheese.azurecr.io/on-prem/<svc>/cheese-customer:latest directly when pods
-schedule. See docs/install-order.md §2.
+${ECR_REGISTRY}/on-prem/cheese/<svc>:<tag> directly when pods schedule.
+See docs/install-order.md §2.
 
-If you only want to build the components that don't need ACR (synthongpt,
-search-ui), re-run with:
+If you only want to build the components that need no registry auth
+(synthongpt, search-ui), re-run with:
     BUILD="cheese-synthongpt cheese-search-ui" $0
 EOF
   exit 1
@@ -96,7 +98,7 @@ EOF
 
 for svc in ${BUILD}; do
   case "${svc}" in
-    cheese-orchestrator|cheese-database) preflight_acr_auth; break ;;
+    cheese-orchestrator|cheese-database) preflight_registry_auth; break ;;
   esac
 done
 

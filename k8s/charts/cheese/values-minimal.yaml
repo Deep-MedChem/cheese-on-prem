@@ -6,11 +6,11 @@
 
 # ── REGISTRY — where the licensed product images come from ───────────────────
 # Left on the chart default (source: local, i.e. images already on the node) for
-# kind work. To pull the real images instead, set your customer slug here and
-# flip the two components to source: ecr:
+# kind work. To pull the real images instead, flip the two components to
+# source: ecr — they resolve to on-prem/cheese/<image>, which needs no customer
+# segment:
 #
 #   onprem:
-#     customer: <your-slug>          # the <customer> in on-prem/<image>/<customer>
 #     imageTag: develop              # or latest
 #   database:
 #     image: { source: ecr }
@@ -20,7 +20,6 @@
 # An ECR pull token is valid for 12 HOURS only, so the pull Secret must be
 # refreshed — see k8s/README.md, "Images".
 # onprem:
-#   customer: ""
 #   imageTag: develop
 
 database:

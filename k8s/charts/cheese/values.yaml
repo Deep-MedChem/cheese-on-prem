@@ -43,18 +43,14 @@ deployment:
 # ===========================================================================
 # On-prem registry (source: ecr)
 # ===========================================================================
-# DeepMedChem publishes the licensed product images per customer, as
-#   <registry>/on-prem/<image>/<customer>:<tag>
-# Set `customer` once here and every component with `image.source: ecr` composes
-# its own path — the slug is not repeated per component, so onboarding a new
-# customer is a one-line change.
+# DeepMedChem publishes the licensed product images as
+#   <registry>/on-prem/cheese/<image>:<tag>
+# One repository per product image, with no customer segment: the images are
+# customer-agnostic, and a build tailored to you is a tag rather than a separate
+# repository. Every component with `image.source: ecr` composes its own path
+# from the settings here.
 onprem:
   registry: 815935788477.dkr.ecr.us-east-1.amazonaws.com
-  # The per-customer segment. REQUIRED when any component uses source: ecr;
-  # rendering fails with an explicit message if it is empty. DeepMedChem issues
-  # this slug along with your access key. (The old `cheese-customer` value was
-  # Azure-era notation, not a real per-customer identity.)
-  customer: ""
   # Default tag for every ecr image; a component's own ecr.tag overrides it.
   # `develop` tracks the development channel, `latest` tracks main.
   imageTag: develop
@@ -96,18 +92,18 @@ licenseAgent:
   image:
     # ⚠️ NOT PUBLISHED ANYWHERE YET. The agent image is built from the private
     # dmch-licensing repo (`docker build -f licensing/agent/Dockerfile -t
-    # cheese-license-agent:dev .`) and side-loaded. The `acr` block below is a
-    # placeholder path, not a pullable reference — do not expect it to resolve.
-    source: local                          # local | acr
+    # cheese-license-agent:dev .`) and side-loaded. The ecr block below records
+    # the name it would take once it is published; the repository does not exist
+    # yet, so source: ecr will not resolve.
+    source: local                          # local | ecr
     local:
       repository: cheese-license-agent
       tag: dev
       pullPolicy: IfNotPresent
-    acr:
-      repository: cheese.azurecr.io/on-prem/cheese-license-agent/cheese-customer
-      tag: latest
+    ecr:
+      image: cheese-license-agent
+      tag: ""                                # empty -> onprem.imageTag
       pullPolicy: IfNotPresent
-      pullSecret: cheese-acr-pull
 
   # Licensing server base URL (DeepMedChem-hosted).
   serverUrl: "https://licensing.deepmedchem.com"
@@ -212,7 +208,7 @@ database:
   enabled: true
 
   image:
-    source: local                            # local | ecr  (acr is RETIRED: fails at render)
+    source: local                            # local | ecr
     local:
       repository: cheese-database-local
       tag: dev
@@ -222,11 +218,6 @@ database:
       tag: ""                                # empty -> onprem.imageTag
       pullPolicy: IfNotPresent
       # pullSecret: ""                       # empty -> onprem.pullSecret
-    acr:
-      repository: cheese.azurecr.io/on-prem/cheese-database/cheese-customer
-      tag: latest
-      pullPolicy: IfNotPresent
-      pullSecret: cheese-acr-pull
 
   # Base config rendered into ConfigMap `cheese-database-config` as config.yaml.
   # Consumed by cheese_database.cheese_core.set_config().
@@ -385,7 +376,9 @@ synthongpt:
   enabled: false
 
   image:
-    source: ecr                            # local | ecr  (acr is RETIRED: fails at render)
+    # cheese-synthongpt has no published on-prem repository, so this stays on
+    # local until one exists — source: ecr would resolve to a path that 404s.
+    source: local                          # local | ecr
     local:
       repository: cheese-synthongpt-local
       tag: dev
@@ -395,11 +388,6 @@ synthongpt:
       tag: ""                                # empty -> onprem.imageTag
       pullPolicy: IfNotPresent
       # pullSecret: ""                       # empty -> onprem.pullSecret
-    acr:
-      repository: cheese.azurecr.io/on-prem/cheese-synthongpt/cheese-customer
-      tag: latest
-      pullPolicy: IfNotPresent
-      pullSecret: cheese-acr-pull
 
   replicaCount: 1
   containerPort: 8000
@@ -453,7 +441,7 @@ orchestrator:
   enabled: true
 
   image:
-    source: local                            # local | ecr  (acr is RETIRED: fails at render)
+    source: local                            # local | ecr
     local:
       repository: cheese-orchestrator-local
       tag: dev
@@ -463,11 +451,6 @@ orchestrator:
       tag: ""                                # empty -> onprem.imageTag
       pullPolicy: IfNotPresent
       # pullSecret: ""                       # empty -> onprem.pullSecret
-    acr:
-      repository: cheese.azurecr.io/on-prem/cheese-orchestrator/cheese-customer
-      tag: latest
-      pullPolicy: IfNotPresent
-      pullSecret: cheese-acr-pull
 
   replicaCount: 1
   containerPort: 8001
@@ -560,7 +543,7 @@ searchUi:
   enabled: false
 
   image:
-    source: local                            # local | ecr  (acr is RETIRED: fails at render)
+    source: local                            # local | ecr
     local:
       repository: cheese-search-ui-local
       tag: dev
@@ -570,11 +553,6 @@ searchUi:
       tag: ""                                # empty -> onprem.imageTag
       pullPolicy: IfNotPresent
       # pullSecret: ""                       # empty -> onprem.pullSecret
-    acr:
-      repository: cheese.azurecr.io/on-prem/cheese-search-ui/cheese-customer
-      tag: latest
-      pullPolicy: IfNotPresent
-      pullSecret: cheese-acr-pull
 
   replicaCount: 1
   containerPort: 3001
@@ -664,7 +642,7 @@ searchUi:
 ketcher:
   enabled: false
   image:
-    source: local                            # local | ecr  (acr is RETIRED: fails at render)
+    source: local                            # local | ecr
     local:
       repository: cheese-ketcher-local
       tag: dev
@@ -674,11 +652,6 @@ ketcher:
       tag: ""                                # empty -> onprem.imageTag
       pullPolicy: IfNotPresent
       # pullSecret: ""                       # empty -> onprem.pullSecret
-    acr:
-      repository: cheese.azurecr.io/on-prem/ketcher/cheese-customer
-      tag: latest
-      pullPolicy: IfNotPresent
-      pullSecret: cheese-acr-pull
   replicaCount: 1
   containerPort: 80
   service:
@@ -722,11 +695,6 @@ inference:
       tag: ""                                # empty -> onprem.imageTag
       pullPolicy: IfNotPresent
       # pullSecret: ""                       # empty -> onprem.pullSecret
-    acr:
-      repository: cheese.azurecr.io/on-prem/cheese-electrostatics-inference/cheese-customer
-      tag: latest                          # this image has no per-branch tag upstream; always latest
-      pullPolicy: IfNotPresent
-      pullSecret: cheese-acr-pull
   replicaCount: 1
   containerPort: 8000
   service:
@@ -764,11 +732,6 @@ alignment:
       tag: ""                                # empty -> onprem.imageTag
       pullPolicy: IfNotPresent
       # pullSecret: ""                       # empty -> onprem.pullSecret
-    acr:
-      repository: cheese.azurecr.io/on-prem/cheese-alignment-service/cheese-customer
-      tag: latest
-      pullPolicy: IfNotPresent
-      pullSecret: cheese-acr-pull
   replicaCount: 1
   containerPort: 8001
   service:

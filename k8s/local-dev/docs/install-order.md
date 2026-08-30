@@ -54,7 +54,7 @@ kubectl apply -f manifests/base/persistent-volume-claim.yaml
 kubectl -n cheese get pvc cheese-data-pvc          # STATUS: Bound
 ```
 
-If `image.source: acr` for any component, also apply the pull secret (after
+If `image.source: ecr` for any component, also apply the pull secret (after
 filling in real credentials):
 
 ```bash
@@ -85,9 +85,9 @@ will crashloop.
 
 ## 4. Images
 
-Default path — `image.source: acr` for every component. Nothing to build:
+Default path — `image.source: ecr` for every component. Nothing to build:
 once the image-pull-secret from §2 is applied, kubelet pulls
-`cheese.azurecr.io/on-prem/<svc>/cheese-customer:latest` at install time.
+`<registry>/on-prem/cheese/<svc>:<tag>` at install time.
 Skip the rest of this section.
 
 Alternative — rebuild from source. Flip `image.source: local` in
@@ -106,14 +106,13 @@ local-dev/scripts/build-source-images.sh
 local-dev/scripts/load-kind-images.sh
 ```
 
-`build-source-images.sh` calls `docker manifest inspect` against the ACR
+`build-source-images.sh` calls `docker manifest inspect` against the ECR
 base image before building orchestrator/database, since their
-`Dockerfile-on-prem` does `FROM cheese.azurecr.io/...:base`. If you haven't
-run `docker login cheese.azurecr.io` it bails early with a clear error
-rather than failing mid-build. synthongpt and search-ui base on public
-images (`python:3.11-slim`, `node:23-alpine`), so they build with no ACR
-auth — the preflight only runs when orchestrator or database is in the
-`BUILD` set.
+`Dockerfile-on-prem` does `FROM <registry>/<svc>:base`. If you haven't logged
+in to ECR it bails early with a clear error rather than failing mid-build.
+synthongpt and search-ui base on public images (`python:3.11-slim`,
+`node:23-alpine`), so they build with no registry auth — the preflight only
+runs when orchestrator or database is in the `BUILD` set.
 
 Subset a single component when iterating:
 

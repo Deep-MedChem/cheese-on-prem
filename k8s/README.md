@@ -104,12 +104,13 @@ Every component picks its registry with `image.source`:
 | `source` | Where the image comes from |
 |---|---|
 | `local` | already on the node — kind / local-dev only (`local-dev/README.md`) |
-| `ecr` | DeepMedChem's registry, per customer |
-| `acr` | **RETIRED.** The Azure account was shut down in July 2026. Rendering fails with a message telling you to use `ecr`, rather than leaving you with an unexplainable `ImagePullBackOff`. |
+| `ecr` | DeepMedChem's registry |
+| `acr` | **GONE.** The Azure registry was retired and its values blocks are deleted. Setting it fails at render with a message naming the replacement, rather than quietly rendering an unpullable path. |
 
-Licensed images are published per customer as
-`<registry>/on-prem/<image>/<customer>:<tag>`. Set the customer slug **once** and
-every component composes its own path:
+Licensed images are published as `<registry>/on-prem/cheese/<image>:<tag>` — one
+repository per product image, with no customer segment. The images are
+customer-agnostic, and a build tailored to you is a tag rather than a separate
+repository. Every component composes its own path:
 
 ```yaml
 onprem:
@@ -199,9 +200,8 @@ Prerequisites: a Kubernetes cluster (≥ 1.28) with an ingress controller,
 #    all chowned 2112:0. The chart creates the PV + PVC for you — no manual
 #    kubectl apply. Layout + staging commands: docs/pvc-data-runbook.md.
 
-# 2. Images — apply the registry pull secret; kubelet pulls
-#    cheese.azurecr.io/on-prem/<svc>/cheese-customer:latest at install
-#    (image.source: acr, the default):
+# 2. Images — apply the registry pull secret; with image.source: ecr the
+#    kubelet pulls <registry>/on-prem/cheese/<svc>:<tag> at install:
 cp manifests/base/image-pull-secret.example.yaml manifests/base/image-pull-secret.yaml
 $EDITOR manifests/base/image-pull-secret.yaml      # fill in real registry creds
 kubectl create namespace cheese
@@ -290,8 +290,8 @@ container, so keygen runs as a pod on that node:
 
 ```bash
 kubectl run -n cheese cheese-license-keygen --rm -it --restart=Never \
-  --image=cheese.azurecr.io/on-prem/cheese-database/cheese-customer:latest \
-  --overrides='{"spec":{"imagePullSecrets":[{"name":"cheese-acr-pull"}]}}' \
+  --image=815935788477.dkr.ecr.us-east-1.amazonaws.com/on-prem/cheese/cheese-database:latest \
+  --overrides='{"spec":{"imagePullSecrets":[{"name":"cheese-ecr-pull"}]}}' \
   --command -- python -c 'from generate_license_ID import main; main()'
 ```
 
@@ -386,7 +386,7 @@ k8s/
 
 ## Conventions
 
-- **Image source.** Each app component accepts `image.source: local | acr`.
+- **Image source.** Each app component accepts `image.source: local | ecr`.
 - **Shared PVC at `/data`.** database / orchestrator / synthongpt / alignment mount
   `cheese-data-pvc` (RWO by default; set `deployment.storage.accessMode: ReadWriteMany`
   on a cloud target to scale the search role across nodes). Supabase uses its own PVC.
