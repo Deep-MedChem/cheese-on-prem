@@ -18,6 +18,9 @@
 # Override which components to build:
 #   BUILD="cheese-search-ui" ./scripts/build-source-images.sh
 #   BUILD="cheese-orchestrator cheese-database" ./scripts/build-source-images.sh
+#
+# cheese-orchestrator and cheese-database are mandatory: they are added back if
+# an override leaves them out.
 
 set -euo pipefail
 
@@ -28,7 +31,37 @@ LOCAL_DEV_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 # Override with SOURCES_ROOT if yours live elsewhere.
 SOURCES_ROOT="${SOURCES_ROOT:-$(cd "${LOCAL_DEV_DIR}/../../.." && pwd)}"
 
+# cheese-orchestrator and cheese-database are the two components a CHEESE
+# deployment cannot run without (see k8s/README.md "Basic setup"): the chart
+# enables both by default and has no meaningful configuration with either
+# missing. So they are MANDATORY here — a BUILD override may add components but
+# may not drop these two. Silently honouring `BUILD="cheese-search-ui"` would
+# produce a cluster that pulls a UI and then fails on the images it actually
+# needs, which is a slow and confusing way to discover the requirement.
+MANDATORY_IMAGES="cheese-orchestrator cheese-database"
+
+# Print the given list with any missing mandatory component prepended, and say
+# so on stderr — the operator asked for something incomplete and should know it
+# was widened rather than wonder why extra builds ran.
+ensure_mandatory() {
+  local requested="$1" mandatory="$2" missing="" out=""
+  local m r found
+  for m in $mandatory; do
+    found=0
+    for r in $requested; do [ "$r" = "$m" ] && found=1 && break; done
+    [ "$found" -eq 0 ] && missing="${missing}${m} "
+  done
+  [ -n "$missing" ] && echo "==> Adding mandatory component(s): ${missing% }" >&2
+  # Mandatory first, then whatever else was asked for, de-duplicated.
+  out="$missing"
+  for r in $requested; do
+    case " $out " in *" $r "*) ;; *) out="${out}${r} " ;; esac
+  done
+  printf '%s' "${out% }"
+}
+
 BUILD="${BUILD:-cheese-orchestrator cheese-database cheese-synthongpt cheese-search-ui}"
+BUILD="$(ensure_mandatory "$BUILD" "$MANDATORY_IMAGES")"
 
 # Fail fast if we're about to build a service whose Dockerfile bases on
 # cheese.azurecr.io but the user can't reach/authenticate to that registry.
