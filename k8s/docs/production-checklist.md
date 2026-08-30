@@ -75,17 +75,21 @@ renders no Secret of its own and reads yours.
 
 ## <kbd>5</kbd> Databases
 
-- [ ] **Choose from `config/databases.catalog`.** A CHEESE licence entitles you to
-      all of them; the only question is disk.
-- [ ] **Key them by CANONICAL name, folder in `output_directory`:**
+- [ ] **Choose from `database.databases` in `charts/cheese/values.yaml`.** Every
+      database CHEESE delivers is listed there with its download size, all off but
+      the smallest. A licence entitles you to all of them; the only question is disk.
+- [ ] **Enable them in YOUR values file, by flipping the flag only:**
       ```yaml
       databases:
-        MCULE-IN-STOCK:                                            # canonical — the key
-          output_directory: "mcule_purchasable_in_stock_240717_clustered"   # folder
+        MOLPORT:
+          enabled: false     # on in values.yaml — turn it off if you don't want it
+        XTALPI:
+          enabled: true      # 770.7 GiB
       ```
-      Getting this wrong does not raise a clean error — you get broken database
-      cards, blank molecule counts, and `422` on search. The mapping is in
-      `scripts/_engine-config`.
+      Do not restate `output_directory`, `index_type` or `delimiter`: Helm merges
+      your file over the chart's, so the folder and index details are inherited and
+      cannot drift. Retyping the folder name is how you get broken database cards,
+      blank molecule counts and `422` on search.
 - [ ] **Leave `dataSync.enabled: true`.** Folders are derived from your enabled
       entries, so the data on the volume and the engine's config cannot drift.
 - [ ] Expect the database pods to **restart until the sync finishes**. The sync
