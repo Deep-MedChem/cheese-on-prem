@@ -145,6 +145,72 @@ orchestrator:
       tag: develop-v1lic
 ```
 
+### Your AWS credentials
+
+DeepMedChem issues **one** access key. It does both jobs — pulls the images *and*
+downloads the databases; there is no separate database credential.
+
+The key itself carries **no permissions**. Its only right is `sts:AssumeRole` on a
+read-only per-product role, so it must always be used through a profile that
+assumes that role — using it directly gets `AccessDenied`, not an image.
+
+`~/.aws/credentials` — the identity:
+
+```ini
+[pharmaco]
+aws_access_key_id     = AKIA…
+aws_secret_access_key = …
+```
+
+`~/.aws/config` — one entry per **product** you are entitled to:
+
+```ini
+[profile dmch-cheese]
+role_arn       = arn:aws:iam::815935788477:role/cheese-onprem-pull
+source_profile = pharmaco
+region         = us-east-1
+```
+
+The profile names are yours; only `source_profile` must match the credentials
+block. One profile *per product*, all sharing the one key — a second entitlement
+is another `role_arn` (e.g. `navigator-onprem-pull`) with the same
+`source_profile`, not another key.
+
+Verify before anything else:
+
+```bash
+aws sts get-caller-identity --profile dmch-cheese
+# Arn ends in :assumed-role/cheese-onprem-pull/…
+```
+
+> **Using a secret manager instead?** Most teams will. Nothing here requires files
+> under `~/.aws/` — `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` in the
+> environment work identically, and the two Kubernetes Secrets below can come from
+> Vault, External Secrets or SealedSecrets. The files are simply the smallest
+> thing that works, and the shape to hand a client who has not standardised yet.
+
+### The two Kubernetes Secrets take *different* credentials
+
+This catches people, because the same key backs both:
+
+| Secret | Takes | Why |
+|---|---|---|
+| `cheese-aws-credentials` — read by the dataSync Job | the **raw key** | the Job builds its own profile and assumes the role *inside* the container, so botocore refreshes the session itself — a multi-hour database sync outlives the 1-hour session a one-shot assume-role would give it |
+| `cheese-ecr-pull` — read by the kubelet | an **assumed-role token** | the kubelet cannot assume a role; it needs a docker-registry Secret holding a ready ECR password |
+
+```bash
+# dataSync — raw key, no profile
+kubectl -n cheese create secret generic cheese-aws-credentials \
+  --from-literal=AWS_ACCESS_KEY_ID=AKIA… \
+  --from-literal=AWS_SECRET_ACCESS_KEY='…'
+
+# image pull — note --profile: the token must come from the ASSUMED role
+kubectl -n cheese create secret docker-registry cheese-ecr-pull \
+  --docker-server=815935788477.dkr.ecr.us-east-1.amazonaws.com \
+  --docker-username=AWS \
+  --docker-password="$(aws ecr get-login-password --region us-east-1 --profile dmch-cheese)"
+```
+
 ### ⚠️ The pull Secret expires every 12 hours
 
 `onprem.pullSecret` (default `cheese-ecr-pull`) names the Secret the kubelet
