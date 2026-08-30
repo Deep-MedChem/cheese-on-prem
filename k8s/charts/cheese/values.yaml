@@ -1,38 +1,35 @@
 # cheese — single Helm chart for the on-prem stack.
 #
-# ONE values.yaml drives everything. Every component is toggled with a
-# top-level `.enabled` key. Defaults give the MINIMAL headless profile —
-# cheese-database + cheese-orchestrator only, auth off, local-source images;
-# everything else (licensingAgent, searchUi, ketcher, synthongpt,
-# electrostatics, alignment, supabase, oauth2Proxy) is opt-in. Site-required parameters live in
-# values-minimal.yaml. Resource names are hardcoded
-# (`cheese-database-app`, `cheese-orchestrator`, `cheese-search-ui`,
-# `cheese-ketcher`, `cheese-electrostatics`, `cheese-alignment-app`, …) so the
-# orchestrator/UI in-cluster service URLs work out of the box.
+# This file is the REFERENCE: every key, with defaults. Do not deploy it as-is —
+# the defaults are the minimal headless stack on local-source images, which is
+# useful for reading and for `helm template`, not for a real cluster. Layer a
+# profile on top:
 #
-# Environment is selected with `deployment.target` (local | aws) — there are no
-# per-environment overlay files. Install is the SAME for every target:
-#   helm install cheese cheese-k8s/charts/cheese -n cheese --create-namespace \
-#     -f my-values.yaml [-f my-secrets.yaml]
-# See k8s/README.md for the local and prod profile snippets.
+#   values-minimal.yaml     smallest real install (licensed images, v1 licence)
+#   values-quickstart.yaml  kind harness — not for deploying
 #
-# Secrets: each secret-producing component accepts `secret.existingSecret: <name>`
-# to reference a pre-created Secret (client-managed / Vault / ESO / SealedSecrets);
-# leave it empty for the inline self-contained path (values-secrets.yaml.example).
+#   helm install cheese charts/cheese -n cheese --create-namespace \
+#     -f charts/cheese/values-minimal.yaml -f my-site.yaml
+#
+# Every component is toggled with a top-level `.enabled`; only database and
+# orchestrator are on by default. Resource names are hardcoded
+# (`cheese-database-app`, `cheese-orchestrator`, `cheese-electrostatics`, …) so
+# in-cluster service URLs work out of the box.
+#
+# Secrets: every secret-producing component takes `secret.existingSecret: <name>`
+# to use a pre-created Secret (Vault / ESO / SealedSecrets / kubectl); leave it
+# empty for the inline path (values-secrets.yaml.example). Storage works the same
+# way — `data.existingClaim` for a volume you provisioned.
 
 # --- Deployment target -----------------------------------------------------
-# Selects storage class + ingress class via the cheese.storageClass /
-# cheese.ingressClass helpers (templates/_platform.tpl).
-#   local : kind / bare-metal dev — hostPath PV + nginx. Fully supported + tested.
-#   aws   : SCAFFOLD ONLY — gp3/efs-sc + alb class stubs, never deployed or
-#           tested. (The IMAGES are fine on any target: they come from ECR
-#           regardless. What is untested here is storage/ingress class wiring.)
-# azure is DEPRECATED and unsupported.
+# Picks storage + ingress CLASS NAMES only (templates/_platform.tpl); images are
+# the same either way. `local` = hostPath PV + nginx. `aws` = gp3/efs-sc + alb
+# class names, scaffold only. azure is deprecated. On anything else, use `local`
+# and override both class names.
 deployment:
   target: local                            # local | aws
-  # Storage for the shared /data volume THE CHART PROVISIONS. If you already
-  # have a volume, ignore this whole block and set `data.existingClaim` instead —
-  # the chart then provisions nothing and these settings do not apply.
+  # Only applies when the chart provisions the volume — ignored if
+  # data.existingClaim is set.
   storage:
     className: ""                          # "" → target default (local: cheese-local-manual; aws: gp3/efs-sc)
     size: 10Ti
@@ -43,8 +40,8 @@ deployment:
     className: ""                         # "" → target default (local: nginx; aws: alb)
 
 # --- Shared data plane -----------------------------------------------------
-# Single PVC mounted at /data by database, orchestrator, synthongpt, alignment.
-# Search UI / ketcher / electrostatics are stateless and don't mount it.
+# One volume at /data: database, orchestrator, synthongpt, alignment mount it;
+# search UI / ketcher / electrostatics are stateless and don't.
 # ===========================================================================
 # On-prem images (source: ecr)
 # ===========================================================================
@@ -62,80 +59,45 @@ onprem:
   pullSecret: cheese-ecr-pull
 
 data:
-  # BRING YOUR OWN VOLUME. Set this to a PVC you created yourself and the chart
-  # will mount it and provision NOTHING — no PVC, no local PV — ignoring every
-  # deployment.storage setting below. This is the right choice when your storage
-  # is already provisioned (an existing NFS/CSI claim, or a volume that already
-  # holds the databases), which is the normal case on a real cluster.
-  #
-  #   data:
-  #     existingClaim: cheese-data          # must exist in the release namespace
-  #
-  # The claim must be at least ReadWriteOnce, and ReadWriteMany if you intend to
-  # run database replicas across nodes. Leave empty to have the chart provision
-  # a PVC from deployment.storage instead.
+  # Bring your own volume: name a PVC you created (in the release namespace) and
+  # the chart mounts it and provisions nothing, ignoring deployment.storage.
+  # Empty → the chart provisions its own. RWO minimum, RWX for replicas.
   existingClaim: ""
-  # Name of the PVC the chart provisions when existingClaim is empty. Ignored
-  # when it is set.
-  pvcName: cheese-data-pvc
-  # Where the volume is mounted inside every container that reads it. The
-  # products resolve their paths against this, so changing it is not cosmetic.
-  mountPath: /data
+  pvcName: cheese-data-pvc                 # provisioned PVC; ignored if existingClaim is set
+  mountPath: /data                         # products resolve their paths against this
 
 # ===========================================================================
-# licence agent — v1 ("call home") licensing. OFF by default, but a real
-# Kubernetes install NEEDS IT: see "which scheme" below.
+# licence agent — v1 licensing. Off by default; a real cluster needs it.
 #
-# What it does: exchanges the DMCH-… licence key for a signed 30-day licence
-# file and rewrites it daily onto the shared data volume, at exactly the path
-# the product containers read (database/orchestrator/alignment
-# `secret.cheeseLicenseFile`).
+# Exchanges the DMCH-… key for a signed 30-day licence file and rewrites it
+# daily onto the volume, at the path the products read (`cheeseLicenseFile`).
 #
-# ── Which scheme, and why v1 on Kubernetes ──────────────────────────────────
-#   v1 = this agent. Server-issued file, 30-day TTL, renewed daily. The
-#        fingerprint is the CLUSTER's kube-system namespace UID, so ONE licence
-#        authorises the whole installation and nodes may come and go. This is
-#        the supported scheme for a Kubernetes deployment.
-#   v0 = long-lived offline RSA file, bound to ONE machine's DMI hardware id.
-#        Built for Docker Compose on a single host.
-#
-# The chart will start with the agent off and a v0 file placed on the volume by
-# hand, and that is what values-minimal.yaml does — but understand what you are
-# accepting: a v0 licence is valid only on the machine whose DMI it was issued
-# for, so it authorises ONE node. Any pod that lands elsewhere fails licence
-# verification, which makes it unusable on a multi-node cluster and fragile on a
-# single-node one (on kind the node reports product_name="kind" and a host
-# licence does not validate at all without a node-level workaround).
-#
-# So: v1 for anything real, v0 only for a single-node test box you control.
-# Air-gapped clusters that cannot reach the licensing server are the one case
-# where v0 is the answer — talk to DeepMedChem first.
+#   v1  this agent. Fingerprint is the CLUSTER's kube-system UID, so one licence
+#       covers the installation and nodes may come and go.
+#   v0  long-lived offline RSA file bound to ONE machine's DMI id. It authorises
+#       a single node, so pods landing elsewhere fail verification — fine for a
+#       single-node box you control, unusable on a real cluster. Air-gapped
+#       sites are the exception; talk to DeepMedChem.
 #   (Older notes call the agent "v2". That numbering is wrong.)
 #
-# A product image verifies v1 by dispatching on the licence's `schema` field,
-# and the v0 path is untouched where it does, so an image that understands v1
-# accepts both. An image that predates the scheme rejects a v1 file as
-# "signature does not match" — the signature is fine, the image simply cannot
-# read that schema. Which images are on which scheme is release information, not
-# chart configuration: see k8s/docs/licensing-agent.md.
+# An image that understands v1 dispatches on the licence's `schema` field and
+# still accepts v0; one that predates it rejects a v1 file as "signature does
+# not match". Which images are where is release information, not chart config —
+# see k8s/docs/licensing-agent.md.
 # ===========================================================================
 licensingAgent:
-  # Turn this ON for a production install (values-production.yaml does). Left
-  # off by default so the minimal/kind profile stays self-contained.
+  # On for a real install (values-minimal.yaml does); off so the quickstart
+  # profile stays self-contained.
   enabled: false
 
   image:
-    # The tag below is PINNED, not inherited: this is the agent's own release
-    # channel and it has nothing to do with the CHEESE product channel that
-    # onprem.imageTag selects. The two version independently, so an inherited
-    # tag would ask for an agent build that need not exist. An immutable
-    # :<short-sha> tag is published alongside the channel tag if you want a
-    # running pod to trace back to a specific commit.
+    # The tag is PINNED, not inherited from onprem.imageTag: the agent versions
+    # independently of the CHEESE images, so an inherited tag would ask for a
+    # build that need not exist. An immutable :<short-sha> is published too.
     #
-    # Note the namespace: on-prem/LICENSING, not on-prem/cheese. The agent is
-    # product-agnostic — one image shared by every DeepMedChem on-prem product —
-    # so it sits in its own namespace, which every product's customer pull role
-    # is granted. Everything else in this file comes from on-prem/cheese.
+    # Namespace is on-prem/LICENSING, not on-prem/cheese: one agent image is
+    # shared by every DeepMedChem product, and each product's pull role is
+    # granted it. Everything else in this file comes from on-prem/cheese.
     source: local                          # local | ecr
     local:
       repository: dmch-licensing-agent
@@ -187,36 +149,21 @@ licensingAgent:
     name: ""                               # "" → dmch-licensing-agent
     annotations: {}
 
-  # The agent's ONLY cluster permission: `get` the kube-system Namespace object,
-  # whose UID is the installation fingerprint. It reads no secrets, no pods, and
-  # no other namespace.
-  #   namespace (default) — Role + RoleBinding IN kube-system. Least privilege:
-  #       verified to grant 200 on kube-system and 403 on `list namespaces`, on
-  #       every other namespace, and on pods/secrets inside kube-system.
-  #   cluster — ClusterRole + ClusterRoleBinding narrowed with
-  #       resourceNames: [kube-system]. Same effect; use it when cluster policy
-  #       forbids creating objects in kube-system.
-  # create: false → you wire the Role/Binding yourself (also set
-  # serviceAccount.create: false and serviceAccount.name).
+  # The agent's ONLY permission: `get` the kube-system Namespace, whose UID is
+  # the fingerprint. No secrets, no pods, no other namespace.
+  #   namespace  Role + RoleBinding in kube-system. Least privilege.
+  #   cluster    ClusterRole narrowed with resourceNames: [kube-system]. Same
+  #              effect; use when policy forbids objects in kube-system.
+  # create: false → wire it yourself (also set serviceAccount.create/name).
   rbac:
     create: true
     scope: namespace                       # namespace | cluster
 
-  # The chart's /data PVC is ROOT-OWNED (docs/pvc-data-runbook.md), so an agent
-  # running as 2112 could not create or atomically replace a file there. Rather
-  # than run the agent as root (which the earlier hand-rolled manifests did, and
-  # which is not an acceptable shipped default), a root initContainer prepares
-  # ONLY the licence file's own directory, non-recursively:
-  #     mkdir -p <dir>; chgrp 0 <dir>; chmod g+rwxs <dir>
-  # That matches the chart's 2112:0 convention: the agent (2112:0) can write,
-  # setgid keeps new files in group 0, and the product containers (also 2112:0)
-  # can read. It uses the agent's own image — no extra image to pull — with
-  # capabilities reduced to CHOWN, FOWNER, DAC_OVERRIDE.
-  #
-  # Why not podSecurityContext.fsGroup: it is ignored on hostPath PVs (the
-  # `local` target) and on NFS/EFS, and where it IS honoured it recursively
-  # chowns the whole volume on every pod start — a non-starter for a multi-TB
-  # /data. Set enabled: false if you pre-chown the directory out of band.
+  # The volume root is root-owned, so a root initContainer prepares ONLY the
+  # licence file's own directory, non-recursively (chgrp 0 + g+rwxs), matching
+  # the chart's 2112:0 convention. Not fsGroup: it is ignored on hostPath and
+  # NFS/EFS, and where honoured it recursively chowns a multi-TB volume on every
+  # pod start. Disable if you pre-chown out of band.
   prepareDataDir:
     enabled: true
     resources:
@@ -247,17 +194,15 @@ licensingAgent:
 # ===========================================================================
 # dataSync — populate the data volume from DeepMedChem's S3
 # ===========================================================================
-# A Job that copies the indexed databases you are licensed for onto the shared
-# volume, using the SAME AWS access key that pulls the images (its only right is
-# assuming the read-only pull role). Nothing else in the chart puts data on that
-# volume, so without this the database pods start with nothing to serve.
+# A Job that copies the databases you are licensed for onto the volume, with the
+# same AWS key that pulls the images. Nothing else in the chart puts data there,
+# so without it the database pods have nothing to serve.
 #
-# `aws s3 sync` is incremental: re-running resumes rather than restarting, so an
-# interrupted or extended sync is cheap to retry, and adding a database later
-# only fetches the new one.
+# `aws s3 sync` is incremental, so an interrupted run resumes and adding a
+# database later fetches only the new one.
 #
-# ⚠️ SIZE. These databases are large — from under 1 GB to ~1.3 TB each, ~8 TB for
-# the full catalogue. Enable only what you have disk for; check sizes first.
+# ⚠️ SIZE: under 1 GB to ~1.3 TB each, ~8 TB for the full catalogue. Check disk
+# before enabling.
 dataSync:
   enabled: false
 
@@ -611,22 +556,13 @@ orchestrator:
     domain_url: "http://cheese-api.localtest.me"
     ui_url: "http://cheese-ui.localtest.me"
     cheese_env: "onprem"
-    # PRODUCTION is compared to the literal "OUR_SECRET" by the product, and
-    # that ONE value switches TWO things at once (cheese_orchestrator/cheese_core.py):
-    #   ""            customer install — per-call licence verification stays ON
-    #                 (the @check_license decorator on the core functions), and
-    #                 the engine reads CONFIG_FILE, so DIM and the search limits
-    #                 come from config.yaml. Compose never sets PRODUCTION at
-    #                 all, so this is also the compose behaviour.
-    #   "OUR_SECRET"  SaaS / dev mode — the per-call licence check becomes a
-    #                 no-op (a released on-prem image still verifies the licence
-    #                 at import; a locally built one has no other check at all),
-    #                 CONFIG_FILE is ignored, and DIM=256 /
-    #                 MAX_NEIGHBORS=100 / search batch cap=10 are hardcoded
-    #                 (that cap surfaces to users as "Provide fewer than 10
-    #                 molecules"). Wrong for a customer install on both counts.
-    # Must match database.secret.production — orchestrator-deployment.yaml
-    # fails the render if it does not.
+    # Compared to the literal "OUR_SECRET"; that one value switches two things.
+    #   ""            customer install: per-call licence check ON, engine reads
+    #                 CONFIG_FILE. Same as compose, which never sets it.
+    #   "OUR_SECRET"  SaaS/dev: per-call check becomes a no-op, CONFIG_FILE is
+    #                 ignored, DIM=256 / MAX_NEIGHBORS=100 / batch cap 10 are
+    #                 hardcoded (users see "Provide fewer than 10 molecules").
+    # Must match database.secret.production — the render fails if it does not.
     production: ""
     enable_auth: "false"
     enable_notifications: "false"
@@ -816,14 +752,12 @@ ketcher:
     topologyKey: kubernetes.io/hostname
 
 # ===========================================================================
-# electrostatics — electrostatics inference server. NON-CORE, OFF by default.
-# The UI calls it via ELECTROSTATICS_API and degrades gracefully (503) when
-# absent. Service name must match the ELECTROSTATICS_API host set on the
-# orchestrator and the search UI (both default to cheese-electrostatics).
+# electrostatics — inference server. OFF by default; the UI calls it via
+# ELECTROSTATICS_API and degrades gracefully (503) without it. The Service name
+# must match that host (both default to cheese-electrostatics).
 #
-# NOT to be confused with `cheese-inference`, the index-builder: that one is a
-# one-shot batch job you run once over a custom database, not a service, and it
-# is deliberately not part of this chart.
+# Not `cheese-inference`, the index-builder — a one-shot job over a custom
+# database, deliberately not in this chart.
 # ===========================================================================
 electrostatics:
   enabled: false
