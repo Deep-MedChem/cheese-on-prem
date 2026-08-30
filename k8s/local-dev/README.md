@@ -43,7 +43,7 @@ Docker container, so data is staged with `docker cp … kind-control-plane:/data
 ## Building images from source
 
 Only needed when iterating on a component. For plain installs leave the chart
-default `image.source: acr` and skip this — kubelet pulls the released images
+default `image.source: ecr` and skip this — kubelet pulls the released images
 directly.
 
 ```bash

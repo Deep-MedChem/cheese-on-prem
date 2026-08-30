@@ -45,19 +45,16 @@ Call it with the root context so `source: ecr` can compose paths from the shared
     {{ include "cheese.image" (list $ .Values.database.image) }}
 
 A bare image block still works (`include "cheese.image" $db.image`) for callers
-that predate this, but then `source: ecr` has nothing to compose from and fails
+that predate this, but then `source: ecr` cannot read onprem.imageTag and fails
 with an explicit message rather than rendering a half-built reference.
 
 Sources:
   local — an image already on the node (kind dev). Used verbatim.
-  ecr   — DeepMedChem's registry. Composed as
-          <onprem.registry>/on-prem/<ecr.image>/<onprem.customer>:<tag>
-          so the customer slug lives in ONE place rather than in every
-          component. Per-component ecr.tag wins over onprem.imageTag.
-  acr   — RETIRED. The Azure registry account was shut down in July 2026 and is
-          unreachable, so this fails at render time. Left in place only so an
-          existing values.yaml gets a message that says what to do instead of an
-          ImagePullBackOff nobody can explain.
+  ecr   — DeepMedChem's registry. ecr.repository is the full path; the tag
+          comes from onprem.imageTag unless the component sets its own ecr.tag.
+  acr   — GONE. The Azure registry was retired and its values blocks are
+          deleted. Setting it fails at render, naming the replacement, so an
+          un-migrated values.yaml can't quietly render an unpullable path.
 */}}
 {{- define "cheese._imageCtx" -}}
 {{- /* Normalise both call styles into a dict of root + image block. */ -}}
@@ -73,23 +70,20 @@ Sources:
 {{- $image := $ctx.img -}}
 {{- $src := $image.source -}}
 {{- if eq $src "acr" -}}
-{{- fail "image.source: acr is retired — the Azure registry account was shut down in July 2026 and cannot be pulled from. Use source: ecr and set onprem.customer (see k8s/README.md, \"Images\")." -}}
+{{- fail "image.source: acr is gone — the Azure registry was retired and the acr block has been removed from values.yaml. Use source: ecr (see k8s/README.md, \"Images\")." -}}
 {{- end -}}
 {{- $sel := index $image $src -}}
 {{- if eq $src "ecr" -}}
 {{- $root := $ctx.root -}}
 {{- if not $root -}}
-{{- fail "source: ecr needs the root context — call this helper as (list $ <image block>), not with the image block alone." -}}
+{{- fail "source: ecr needs the root context for onprem.imageTag — call this helper as (list $ <image block>), not with the image block alone." -}}
 {{- end -}}
 {{- $op := $root.Values.onprem -}}
-{{- if not $op.customer -}}
-{{- fail "source: ecr requires onprem.customer — the per-customer segment of on-prem/<image>/<customer>. DeepMedChem issues you this slug together with your access key." -}}
-{{- end -}}
-{{- if not $sel.image -}}
-{{- fail (printf "source: ecr requires ecr.image (the <image> in on-prem/<image>/<customer>) on this component") -}}
+{{- if not $sel.repository -}}
+{{- fail (printf "source: ecr requires ecr.repository (the full image path) on this component") -}}
 {{- end -}}
 {{- $tag := $sel.tag | default $op.imageTag | default "latest" -}}
-{{- printf "%s/on-prem/%s/%s:%s" (trimSuffix "/" $op.registry) $sel.image $op.customer $tag -}}
+{{- printf "%s:%s" $sel.repository $tag -}}
 {{- else -}}
 {{- printf "%s:%s" $sel.repository (default "latest" $sel.tag) -}}
 {{- end -}}
@@ -103,7 +97,7 @@ Sources:
 {{- end -}}
 
 {{/*
-Image pull secrets block: emits "imagePullSecrets:" only when source = acr.
+Image pull secrets block: emits "imagePullSecrets:" only when source = ecr.
 Pass an image block (e.g. `.Values.orchestrator.image`).
 */}}
 {{- define "cheese.imagePullSecrets" -}}
@@ -114,9 +108,6 @@ Pass an image block (e.g. `.Values.orchestrator.image`).
 {{- $name := $image.ecr.pullSecret | default (and $root $root.Values.onprem.pullSecret) | default "cheese-ecr-pull" }}
 imagePullSecrets:
   - name: {{ $name }}
-{{- else if eq $image.source "acr" }}
-imagePullSecrets:
-  - name: {{ default "cheese-acr-pull" $image.acr.pullSecret }}
 {{- end }}
 {{- end -}}
 
