@@ -23,9 +23,9 @@ yourself.
 > signature is fine, the image simply predates the scheme. Both are off by
 > default; if you enable them, they cannot run on a v1 licence yet.
 >
-> **Pin the agent image tag to `latest`.** Only `:latest` is published today, so
-> the tag inherited from `onprem.imageTag` (`develop`) does not resolve and the
-> agent sits in `ImagePullBackOff`. See [Enable it](#enable-it).
+> **The agent's image tag is pinned by the chart** and deliberately does not
+> follow `onprem.imageTag`: the agent versions independently of the CHEESE
+> product images. See [Enable it](#enable-it).
 
 ## v0 vs v1 — which one you have
 

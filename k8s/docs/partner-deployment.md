@@ -99,9 +99,8 @@ dataSync:
 licensingAgent:
   enabled: true
   image:
-    source: ecr
-    ecr:
-      tag: latest                # REQUIRED: the agent has no :develop build yet
+    source: ecr                  # tag is pinned by the chart; it does NOT
+                                 # follow onprem.imageTag
   secret:
     licenseKey: "DMCH-…"         # or secret.existingSecret: <your-secret>
 ```
@@ -156,26 +155,12 @@ the orchestrator's ingress.
 
 ## ⚠️ Current limitations
 
-- **Pin the licence agent to `ecr.tag: latest`.** The agent image is published,
-  but only `:latest` exists so far. Left on the tag inherited from
-  `onprem.imageTag` (`develop`) it does not resolve and the agent sits in
-  `ImagePullBackOff`. The agent's release channel is separate from the CHEESE
-  product channel, so pin it deliberately:
-
-  ```yaml
-  licensingAgent:
-    enabled: true
-    image:
-      source: ecr
-      ecr:
-        tag: latest
-  ```
-
 - **Two optional components cannot run on a v1 licence yet.**
   `cheese-inference` and `conformer-alignment-api` still verify v0 only; their
   verifier ports are open. The two components you actually need
   (`cheese-database`, `cheese-orchestrator`) enforce v1 and are unaffected.
-- **Four optional images have no `:develop` tag** (`ketcher`, `cheese-inference`,
-  `cheese-electrostatics-inference`, and the licence agent above). With
-  `onprem.imageTag: develop` they will not resolve — pin them to `latest` with
-  their own `ecr.tag` if you enable them.
+- **Three optional images have no `:develop` tag** (`ketcher`, `cheese-inference`,
+  `cheese-electrostatics-inference`). With `onprem.imageTag: develop` they will
+  not resolve — pin them to `latest` with their own `ecr.tag` if you enable them.
+  The licence agent is unaffected: its tag is pinned by the chart and does not
+  follow `onprem.imageTag` at all.

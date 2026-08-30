@@ -9,7 +9,7 @@ writer of that file.
 
 The installation fingerprint is the kube-system Namespace UID, so ONE licence
 covers the whole cluster and nodes may come and go — see licensing-agent-rbac.yaml
-for the permission that makes that read possible, and k8s/docs/licensing-v1-agent.md
+for the permission that makes that read possible, and k8s/docs/licensing-agent.md
 for the licensing model and its current (pre-enforcement) status.
 
 The CHEESE_* variable names are the product's client-side contract and are

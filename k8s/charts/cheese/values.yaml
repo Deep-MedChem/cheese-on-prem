@@ -24,7 +24,9 @@
 # Selects storage class + ingress class via the cheese.storageClass /
 # cheese.ingressClass helpers (templates/_platform.tpl).
 #   local : kind / bare-metal dev — hostPath PV + nginx. Fully supported + tested.
-#   aws   : SCAFFOLD ONLY — no AWS sources/images yet; gp3/efs-sc + alb stubs.
+#   aws   : SCAFFOLD ONLY — gp3/efs-sc + alb class stubs, never deployed or
+#           tested. (The IMAGES are fine on any target: they come from ECR
+#           regardless. What is untested here is storage/ingress class wiring.)
 # azure is DEPRECATED and unsupported.
 deployment:
   target: local                            # local | aws
@@ -94,11 +96,11 @@ licensingAgent:
     # repo builds it: develop -> :develop, main -> :latest, plus an immutable
     # :<short-sha> so a running pod traces back to a commit.
     #
-    # ⚠️ SET ecr.tag: latest. Only :latest exists today — the agent has not been
-    # built from dmch-licensing's develop branch yet, so the inherited
-    # onprem.imageTag (`develop`) resolves to a tag that is NOT THERE and the
-    # pod sits in ImagePullBackOff. This tag is the AGENT's release channel and
-    # is unrelated to the CHEESE product channel; pin it deliberately.
+    # The tag below is PINNED, not inherited: this is the agent's own release
+    # channel and it has nothing to do with the CHEESE product channel that
+    # onprem.imageTag selects. The two version independently, so an inherited
+    # `develop` would ask for an agent build that need not exist — which is
+    # exactly the state today (only :latest is published).
     #
     # Note the namespace: on-prem/LICENSING, not on-prem/cheese. The agent is
     # product-agnostic — one image shared by every DeepMedChem on-prem product —
@@ -111,7 +113,9 @@ licensingAgent:
       pullPolicy: IfNotPresent
     ecr:
       repository: 815935788477.dkr.ecr.us-east-1.amazonaws.com/on-prem/licensing/dmch-licensing-agent
-      tag: ""                                # empty -> onprem.imageTag; SET THIS TO latest (see above)
+      # Pinned deliberately — see above. Setting this to "" falls back to
+      # onprem.imageTag, which is the CHEESE channel and is NOT what you want.
+      tag: latest
       pullPolicy: IfNotPresent
 
   # Licensing server base URL (DeepMedChem-hosted).
@@ -687,8 +691,9 @@ searchUi:
     VITE_CDN_ENABLED: "false"
     VITE_CDN_BASE_URL: ""
     # --- Runtime-config injection (server reads these, injects window.__CHEESE_RUNTIME__
-    #     via /api/runtime-config). Only effective on a UI image built from a branch
-    #     that has the feature (develop+); the :latest image may not yet. ---
+    #     via /api/runtime-config). The feature is on both search-ui main and
+    #     develop, and the :develop and :latest images are currently the SAME
+    #     digest, so either tag has it. ---
     MODIFY_INDEX_HTML: "true"              # enable runtime injection into index.html
     KETCHER_ORIGIN: ""                     # self-hosted ketcher origin; auto-set when ketcher.enabled (see _helpers/runtime wiring in configmap)
     SUPABASE_PUBLIC_URL: ""               # browser-reachable Supabase origin (on-prem); auto-set when supabase.enabled
