@@ -26,31 +26,21 @@ database:
       espsim_electrostatic: "espsim"
       espsim_shape: "shapesim"
 
-  # Examples — flip `enabled` per dataset. Keys are canonical names
-  # (scripts/_engine-config); output_directory is the folder under databasesRoot.
+  # Flip `enabled` per dataset; everything else (folder, index type, delimiter)
+  # is inherited from values.yaml, which lists every delivered database.
+  #
+  # The kind drive carries the SMALLEST databases only — this harness exists to
+  # prove the stack wires up, and a multi-hundred-GiB dataset buys nothing for
+  # that while costing hours of staging. Everything values.yaml does not enable
+  # is already off; the two lines below are the ones that need saying.
   databases:
     test:
       enabled: false                 # chart default stub — off (path not on the drive)
     ENAMINE-AA:
-      enabled: true
-      output_directory: "enamine_amino_acids"
-      index_type: "clustered"
-      delimiter: ","
-    MCULE-IN-STOCK:
-      enabled: true
-      output_directory: "mcule_purchasable_in_stock_240717_clustered"
-      index_type: "clustered"
-      delimiter: ","
+      enabled: true                  # 625 MiB — the whole point of this profile
     MOLPORT:
-      enabled: false                 # incomplete build on the drive (missing smiles_clusters/)
-      output_directory: "molport_10_25"
-      index_type: "clustered"
-      delimiter: ","
-    ZINC15:
-      enabled: true
-      output_directory: "zinc15"
-      index_type: "clustered"
-      delimiter: ","
+      enabled: false                 # ON in values.yaml; the copy on the drive is
+                                     # incomplete (no smiles_clusters/)
 
   # VISUALIZATION is pinned off in the template — re-adding it here duplicates
   # the env and breaks upgrades.

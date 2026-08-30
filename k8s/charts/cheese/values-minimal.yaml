@@ -59,26 +59,18 @@ database:
       espsim_electrostatic: "espsim"
       espsim_shape: "shapesim"
 
-  # « SET THIS » — only what you are licensed for and have disk for. Keys are
-  # canonical names; dataSync fetches exactly the enabled entries.
+  # « SET THIS » — enable only what you are licensed for and have disk for.
+  # values.yaml lists every delivered database, disabled, with its download size;
+  # flip the ones you want here and dataSync fetches exactly those. Folder, index
+  # type and delimiter are inherited — do not restate them.
   databases:
     test:
       enabled: false                       # chart stub — always off here
+    MOLPORT:
+      enabled: false                       # ON in values.yaml; a real install
+                                           # chooses its own datasets
     ZINC15:
-      enabled: true
-      output_directory: "zinc15"
-      index_type: "clustered"
-      delimiter: ","
-    MCULE-IN-STOCK:
-      enabled: false
-      output_directory: "mcule_purchasable_in_stock_240717_clustered"
-      index_type: "clustered"
-      delimiter: ","
-    ENAMINE-AA:
-      enabled: false
-      output_directory: "enamine_amino_acids"
-      index_type: "clustered"
-      delimiter: ","
+      enabled: true                        # 124 GiB
 
 # ── 4. FILL THE VOLUME ──────────────────────────────────────────────────────
 # Nothing else puts data on the volume. Skip only if it already holds the
