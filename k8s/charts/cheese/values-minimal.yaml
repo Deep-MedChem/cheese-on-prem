@@ -53,14 +53,19 @@ database:
     # Licensing mode. NOTE: on kind the licence is validated against the
     # kind-control-plane container's DMI (product_name="kind"), NOT this host, so
     # this licence will NOT validate. Regenerate a node licence (see
-    # k8s/local-dev/docs/kind-bringup-log.md step 4) or set `production: "OUR_SECRET"`.
+    # k8s/local-dev/docs/kind-bringup-log.md step 4) or set `production: "OUR_SECRET"`
+    # HERE AND on orchestrator.env.production — the chart requires the pair to
+    # match. That pair is the unlicensed dev mode: it skips licence
+    # verification, and also drops the orchestrator to a hardcoded DIM=256 and
+    # a 10-molecule search cap, so never leave it set for anything a customer
+    # or a benchmark touches.
     # NOTE: THIS WILL BE CHANGED IN THE NEAR FUTURE TO A PROPER SYSTEM!
     cheeseLicenseFile: "/home/katja/.config/cheese/cheese_license_file.json"
     production: ""
 
 orchestrator:
   env:
-    production: ""                   # must match database.secret.production
+    production: ""                   # must match database.secret.production (chart default is "" too)
   secret:
     cheeseLicenseFile: "/home/katja/.config/cheese/cheese_license_file.json"
   ingress:
