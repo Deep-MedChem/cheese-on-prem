@@ -11,23 +11,21 @@ yourself.
 
 > ### ⚠️ Read this before you rely on it
 >
-> **No released CHEESE image verifies a v1 licence yet.** The verifier is still
-> open work in the four gated repos (`cheese-database` #155,
-> `cheese-orchestrator` #179, `cheese-inference` #7, `conformer-alignment-api`
-> #10). This chart plumbing deliberately lands **ahead of enforcement**.
+> **v1 is enforced by the two core images, and only those.** As of 2026-08-30
+> `cheese-database` (#155) and `cheese-orchestrator` (#179) verify v1 licences
+> and are published to `on-prem/cheese/*` as `:develop` and `:latest`. They
+> dispatch on the licence's `schema` field and leave the v0 path untouched, so
+> a hand-placed v0 file and an agent-written v1 file both verify.
 >
-> Concretely, today:
+> Two components are still **v0-only**, their verifier ports still open:
+> `cheese-inference` (#7) and `conformer-alignment-api` (#10). A v1 file handed
+> to either is rejected as **"signature does not match license content"** — the
+> signature is fine, the image simply predates the scheme. Both are off by
+> default; if you enable them, they cannot run on a v1 licence yet.
 >
-> - A v1 licence file handed to a **current** image is rejected by that image's
->   v0 verifier as **"signature does not match license content"**. The message is
->   misleading — the signature is fine, the image simply predates the scheme.
-> - So do **not** point `database.secret.cheeseLicenseFile` at the agent's output
->   on a stack you need to keep running, unless you are running images built from
->   the verifier branches.
-> - Enabling the agent is safe and useful now for *plumbing* work: activating an
->   installation, proving connectivity, checking the fingerprint the server sees.
->
-> Talk to DeepMedChem before wiring this into a customer or partner cluster.
+> **The agent's image tag is pinned by the chart** and deliberately does not
+> follow `onprem.imageTag`: the agent versions independently of the CHEESE
+> product images. See [Enable it](#enable-it).
 
 ## v0 vs v1 — which one you have
 

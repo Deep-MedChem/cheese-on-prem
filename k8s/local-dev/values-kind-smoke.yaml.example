@@ -1,0 +1,113 @@
+# ===========================================================================
+# kind smoke test — CHEESE engine + database + API, one small database.
+#
+#   helm install cheese k8s/charts/cheese -n cheese --create-namespace \
+#     -f k8s/local-dev/values-kind-smoke.yaml.example
+#
+# The smallest thing that proves the product works: the database service, the
+# orchestrator (the API you integrate against), and ONE ~625 MB database pulled
+# from S3. Nothing else in the chart is enabled — no UI, no ketcher, no
+# inference, no auth.
+#
+# THROWAWAY profile for a local kind cluster. Do not carry it to a real cluster:
+# the PV is a hostPath inside the kind node and dies with it.
+# ===========================================================================
+
+deployment:
+  target: local                  # hostPath PV + nginx ingress
+  storage:
+    size: 20Gi                   # plenty for one small DB; the kind PV is just a host dir
+    createLocalPV: true
+    hostPath: /data              # resolves INSIDE the kind-control-plane container
+
+# ── Images ─────────────────────────────────────────────────────────────────
+# Each component's ecr.repository already points at on-prem/cheese/<image>;
+# only the channel is set here. There is no customer slug — the images are
+# customer-agnostic and a tailored build is a tag.
+onprem:
+  imageTag: develop              # `develop` tracks the dev channel, `latest` the released one
+
+database:
+  image:
+    source: ecr
+
+  # Every DB lives at <databasesRoot>/<output_directory>, i.e. on this profile
+  # /data/cheese-databases/enamine_amino_acids inside the container.
+  databasesRoot: "cheese-databases"
+
+  config:
+    DIM: "256"
+    DEVICE: "cpu"                # no GPU needed to SEARCH; it only speeds up indexing your own data
+    MODELS_DIRECTORY: ""         # MUST stay empty on-prem — models are decrypted from the image via the licence
+    PROPERTY_MODELS_PATH: ""
+    TRANSFORMERS:
+      morgan: "tanimoto"
+      espsim_electrostatic: "espsim"
+      espsim_shape: "shapesim"
+
+  databases:
+    test:
+      enabled: false             # chart stub; the bundled fixture is not staged on the PVC
+    # The smallest database in the catalogue by a wide margin: 655 MB / 5518
+    # objects. The next one up is ~5 GB, so start here.
+    ENAMINE-AA:
+      enabled: true
+      output_directory: "enamine_amino_acids"
+      index_type: "clustered"
+      delimiter: ","
+
+  secret:
+    # A PLAIN FILENAME, never a host path: the products resolve it as
+    # ${DATA_ROOT:-/data}/<value>, so an absolute path silently becomes
+    # /data/home/you/... and the licence is never found. The agent below writes
+    # to exactly this path.
+    cheeseLicenseFile: "cheese_license_file.json"
+    production: ""
+
+orchestrator:
+  image:
+    source: ecr
+  env:
+    production: ""               # must match database.secret.production
+  secret:
+    cheeseLicenseFile: "cheese_license_file.json"
+  ingress:
+    public:
+      enabled: true
+      hosts:
+        - host: cheese-api.localtest.me    # *.localtest.me always resolves to 127.0.0.1
+          paths:
+            - path: /
+              pathType: Prefix
+
+# ── Fetch the database from S3 ─────────────────────────────────────────────
+# Reads the Secret `cheese aws-auth --target k8s` writes — the SAME AWS key
+# that pulls the images. Folders are derived from the enabled entries above,
+# so what is synced and what the engine reads cannot drift apart.
+dataSync:
+  enabled: true
+
+# ── Licence (v1) ────────────────────────────────────────────────────────────────
+# The agent exchanges the DMCH-… key for a signed licence file, writes it to the
+# PVC at database.secret.cheeseLicenseFile above, and renews it daily.
+#
+# v1 is the right scheme on kind and needs no workaround: the fingerprint is the
+# cluster's own kube-system namespace UID. (The v0 offline file binds to the
+# node's DMI hardware id, which kind fakes as product_name="kind" — that is the
+# bind-mount hack you can skip entirely by using v1.)
+#
+# ⚠️ Recreating the cluster mints a NEW kube-system UID, so a new fingerprint,
+# so another activation slot; max_activations defaults to 1 and the second
+# cluster is refused with 409 max_activations_reached. For a delete/recreate
+# loop, set a fixed fingerprintOverride so every cluster reuses one activation.
+licensingAgent:
+  enabled: true
+  image:
+    source: ecr                  # tag is pinned by the chart, not onprem.imageTag
+  secret:
+    # Keep the key out of this file:
+    #   kubectl -n cheese create secret generic dmch-license-key \
+    #     --from-literal=licenseKey='DMCH-…'
+    existingSecret: dmch-license-key
+  # Uncomment for a delete/recreate test loop — see the warning above.
+  # fingerprintOverride: "kind:albert-smoke"
