@@ -10,6 +10,11 @@ and for PVC contents [`pvc-data-runbook.md`](../../docs/pvc-data-runbook.md).
 > has since been removed (`make install-ingress-controller` is now
 > `local-dev/scripts/install-ingress-controller.sh`; the other targets were
 > wrappers around the same-named scripts).
+>
+> Historical note: the `cheese.azurecr.io` images below are no longer
+> reachable — that registry was retired. The commands are kept as run; the
+> current path is `<registry>/on-prem/cheese/<svc>:<tag>` (see
+> [`install-order.md`](./install-order.md) §4).
 
 The session is annotated with the gotchas we hit so the next person doesn't
 have to re-discover them.

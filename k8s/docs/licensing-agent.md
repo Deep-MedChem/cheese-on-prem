@@ -271,7 +271,8 @@ licenseAgent:
     local: { repository: cheese-license-agent, tag: dev, pullPolicy: Never }
 ```
 
-The `acr` block in `values.yaml` is a placeholder path, not a pullable reference.
+The `ecr` block in `values.yaml` records the name the image would take once
+it is published; that repository does not exist yet, so it is not pullable.
 
 ## Verify without a cluster
 
