@@ -1,5 +1,9 @@
 # The database catalogue must never offer more than the hosted service serves.
 #
+# The same set is restated in the Helm chart (database.databases), so the check
+# also asserts the two agree — a chart entry pointing at a retired folder sends a
+# partner's dataSync at a prefix that no longer exists.
+#
 # It is a hand-maintained file with no other guard, and it drifted from
 # production within two days of being created — two retired ChemSpace-10B
 # databases (~2.6 TB combined) stayed selectable, and two MCULE rebuilds were
@@ -15,12 +19,14 @@ on:
     paths:
       - "config/databases.catalog"
       - "scripts/_engine-config"
+      - "k8s/charts/cheese/values.yaml"
       - "scripts/assert-catalog-subset.sh"
       - ".github/workflows/assert-catalog-subset.yml"
   pull_request:
     paths:
       - "config/databases.catalog"
       - "scripts/_engine-config"
+      - "k8s/charts/cheese/values.yaml"
   schedule:
     - cron: "17 6 * * 1"        # Mondays, catches drift originating elsewhere
   workflow_dispatch:
