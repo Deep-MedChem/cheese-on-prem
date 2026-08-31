@@ -87,19 +87,19 @@ orchestrator:
 dataSync:
   enabled: true
 
-# ── Licence (v1) ────────────────────────────────────────────────────────────────
+# ── Licence (call-home) ─────────────────────────────────────────────────────────
 # The agent exchanges the DMCH-… key for a signed licence file, writes it to the
 # PVC at database.secret.cheeseLicenseFile above, and renews it daily.
 #
-# v1 is the right scheme on kind and needs no workaround: the fingerprint is the
-# cluster's own kube-system namespace UID. (The v0 offline file binds to the
-# node's DMI hardware id, which kind fakes as product_name="kind" — that is the
-# bind-mount hack you can skip entirely by using v1.)
+# Call-home is the right scheme on kind and needs no workaround: the fingerprint
+# is the cluster's own kube-system namespace UID. (The air-gapped offline file
+# reads the node's DMI attributes, which kind fakes as product_name="kind" — that
+# is the bind-mount hack you skip entirely by using the agent.)
 #
-# ⚠️ Recreating the cluster mints a NEW kube-system UID, so a new fingerprint,
-# so another activation slot; max_activations defaults to 1 and the second
-# cluster is refused with 409 max_activations_reached. For a delete/recreate
-# loop, set a fixed fingerprintOverride so every cluster reuses one activation.
+# ⚠️ Recreating the cluster mints a NEW kube-system UID, so a new fingerprint and
+# another activation slot; max_activations defaults to 1 and the second cluster
+# is refused with 409 max_activations_reached. Ask for the stale activation to be
+# released, or for a test key with more slots — do not pin a fingerprint by hand.
 licensingAgent:
   enabled: true
   image:
@@ -109,5 +109,3 @@ licensingAgent:
     #   kubectl -n cheese create secret generic dmch-license-key \
     #     --from-literal=licenseKey='DMCH-…'
     existingSecret: dmch-license-key
-  # Uncomment for a delete/recreate test loop — see the warning above.
-  # fingerprintOverride: "kind:albert-smoke"

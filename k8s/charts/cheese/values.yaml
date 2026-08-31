@@ -5,7 +5,7 @@
 # useful for reading and for `helm template`, not for a real cluster. Layer a
 # profile on top:
 #
-#   values-minimal.yaml     smallest real install (licensed images, v1 licence)
+#   values-minimal.yaml     smallest real install (licensed images, call-home licence)
 #   values-quickstart.yaml  kind harness — not for deploying
 #
 #   helm install cheese charts/cheese -n cheese --create-namespace \
@@ -70,21 +70,23 @@ data:
   mountPath: /data                         # products resolve their paths against this
 
 # ===========================================================================
-# licence agent — v1 licensing. Off by default; a real cluster needs it.
+# licence agent — call-home licensing. Off by default; a real cluster needs it.
 #
 # Exchanges the DMCH-… key for a signed 30-day licence file and rewrites it
 # daily onto the volume, at the path the products read (`cheeseLicenseFile`).
 #
-#   v1  this agent. Fingerprint is the CLUSTER's kube-system UID, so one licence
-#       covers the installation and nodes may come and go.
-#   v0  long-lived offline RSA file bound to ONE machine's DMI id. It authorises
-#       a single node, so pods landing elsewhere fail verification — fine for a
-#       single-node box you control, unusable on a real cluster. Air-gapped
-#       sites are the exception; talk to DeepMedChem.
+#   call-home (v1)  this agent. Fingerprint is the CLUSTER's kube-system UID, so
+#       one licence covers the installation and nodes may come and go.
+#   air-gapped (v0)  long-lived offline RSA file, never checked against a server. Its
+#       fingerprint is read from /sys, so by default it follows ONE node and
+#       pods landing elsewhere fail verification. Bound instead to a single
+#       identity pinned on every node, one file covers the cluster — the
+#       air-gapped path, which this chart does not wire up. See k8s/README.md.
 #   (Older notes call the agent "v2". That numbering is wrong.)
 #
-# An image that understands v1 dispatches on the licence's `schema` field and
-# still accepts v0; one that predates it rejects a v1 file as "signature does
+# An image that understands call-home dispatches on the licence's `schema` field
+# and still accepts air-gapped files; one that predates it rejects a call-home
+# file as "signature does
 # not match". Which images are where is release information, not chart config —
 # see k8s/docs/licensing-agent.md.
 # ===========================================================================
@@ -142,9 +144,10 @@ licensingAgent:
   appVersion: ""                           # CHEESE_APP_VERSION, reported at activation
   usageCountersPath: ""                    # JSON file of usage counters to report, relative to data.mountPath
 
-  # ESCAPE HATCH — leave empty in a cluster. In a pod the fingerprint is the
-  # kube-system namespace UID; this forces a value instead (tests / off-cluster).
-  # Setting it wrong burns an activation slot on a fingerprint you cannot reuse.
+  # DeepMedChem test hatch — leave empty. A real installation's fingerprint is
+  # the kube-system namespace UID, derived in-cluster, and forcing it by hand
+  # only burns an activation slot on a value the cluster will not present again.
+  # Reusing one fingerprint across installations breaches the licence terms.
   fingerprintOverride: ""
 
   serviceAccount:

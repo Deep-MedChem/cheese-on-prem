@@ -16,7 +16,7 @@ development, source-image iteration, and pre-release smoke tests.
 | `scripts/build-source-images.sh` | rebuild `<svc>-local:dev` images from the upstream source repos |
 | `scripts/load-kind-images.sh` | sideload those images into the kind node (`kind load docker-image`) |
 | `kind/cluster.yaml` | single-node kind cluster, host ports 80/443 mapped to the ingress |
-| `values-kind-smoke.yaml.example` | ready-made smoke profile: database + orchestrator + one 655 MB database + the v1 licence agent |
+| `values-kind-smoke.yaml.example` | ready-made smoke profile: database + orchestrator + one 655 MB database + the call-home licence agent |
 | `env/cheese-search-ui.build.env.example` | Vite build args baked into a source-built UI bundle |
 | `docs/install-order.md` | step-by-step kind install playbook |
 | `docs/kind-bringup-log.md` | annotated log of a real first bring-up (gotchas included) |
@@ -73,7 +73,7 @@ override with `SOURCES_ROOT=/path/to/repos` if they live elsewhere. Then flip
 
 ## Licence on kind
 
-Use **v1** — the licence agent. On kind it is not merely supported, it is
+Use **call-home** licensing — the licence agent. On kind it is not merely supported, it is
 *simpler* than the alternative: the fingerprint is the cluster's own `kube-system`
 namespace UID, which is a perfectly valid fingerprint, so there is nothing
 machine-specific to work around.
@@ -104,28 +104,23 @@ does this — database + orchestrator + one small database + the agent.
 > `kind delete cluster` + `kind create` mints a **new** `kube-system` UID, so a
 > new fingerprint, so another activation. `max_activations` defaults to 1 and the
 > next one is refused with `409 max_activations_reached` — and a dead activation
-> only ages out after 45 days.
+> only ages out after 45 days. kind's hostPath PV lives *inside* the node
+> container, so deleting the cluster also destroys the licence file and the
+> agent's state; the fresh cluster activates from scratch.
 >
-> For a loop where you recreate the cluster, pin a fixed fingerprint so every
-> cluster reuses one activation:
->
-> ```yaml
-> licensingAgent:
->   fingerprintOverride: "kind:<your-name>"
-> ```
->
-> Note kind's hostPath PV lives *inside* the node container, so deleting the
-> cluster also destroys the licence file and the agent's state. The agent simply
-> re-activates — with the override set, into the same slot.
+> Budget for it: get the stale activation released, or ask for a test key with
+> more slots. Do not pin a fingerprint by hand to dodge the limit — one
+> fingerprint is one installation, and that is the whole basis of the scheme.
 
-### Why not the v0 file here
+### Why not the air-gapped file here
 
-v0 is a long-lived file bound to one machine's DMI hardware id. On kind that id
-belongs to the `kind-control-plane` container, which reports `product_name` as
-`kind`, so a licence cut for the real host is rejected and restoring the host
-value needs an ephemeral `mount --bind` inside the node after **every** cluster
-re-create. v1 removes all of that. v0 remains the Docker Compose / single-host
-path only.
+The air-gapped licence works fine on a cluster if you pin one identity across its
+nodes — that is the production path for a cluster with no egress (chart
+`README.md`). It is just miserable in a dev loop: on kind the fingerprint comes
+from the `kind-control-plane` container, which reports `product_name` as `kind`,
+so a licence cut for the real host is rejected and restoring the host value needs
+an ephemeral `mount --bind` inside the node after **every** cluster re-create.
+The agent removes all of that.
 
 ## Teardown
 

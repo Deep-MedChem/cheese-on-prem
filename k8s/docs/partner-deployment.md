@@ -154,17 +154,19 @@ the orchestrator's ingress.
   fingerprint. (If you are a platform partner serving many end-customers from one
   cluster, that is one licence plus your own per-user separation, not one licence
   per user.)
-- **Air-gapped clusters are not supported.** The v0 offline licence binds to a
-  single machine's hardware id, which cannot hold across a cluster whose nodes
-  change. Kubernetes uses the agent-renewed v1 licence, which needs a daily
-  check-in with ~29 days of margin.
+- **This path assumes the cluster has egress.** The default scheme is
+  call-home: the agent renews the licence with a daily check-in and ~29 days of
+  margin. A cluster with no outbound network takes the air-gapped licence
+  instead — one offline file, bound to a single identity you pin on every node.
+  Agree it with us before the file is cut; see the chart
+  [README](../README.md#air-gapped-licensing).
 
 ## ⚠️ Before you enable the optional components
 
-- **Not every optional image supports the v1 licence scheme.** The two
+- **Not every optional image supports the call-home licence scheme.** The two
   components a working install needs — `cheese-database` and
   `cheese-orchestrator` — do. For the optional ones, confirm with DeepMedChem
-  before enabling them on a v1 licence: an image that predates the scheme
+  before enabling them on a call-home licence: an image that predates the scheme
   rejects the agent's licence file as *"signature does not match license
   content"*.
 - **Not every image publishes every channel.** The chart default

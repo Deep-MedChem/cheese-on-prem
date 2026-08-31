@@ -1,4 +1,4 @@
-# Minimal real install: the CHEESE API on licensed images with a v1 licence.
+# Minimal real install: the CHEESE API on licensed images with a call-home licence.
 #
 #   helm install cheese . -n cheese --create-namespace \
 #     -f values-minimal.yaml -f my-site.yaml
@@ -98,7 +98,7 @@ orchestrator:
 # ── OPTIONAL ────────────────────────────────────────────────────────────────
 # searchUi (web UI, needs its own host + auth), ketcher (editor the UI embeds),
 # electrostatics, alignment — all off by default in values.yaml. Not every
-# optional image supports the v1 licence; check before enabling one.
+# optional image supports the call-home licence; check before enabling one.
 #
 # `cheese-inference`, the index-builder, is deliberately not in this chart: it
 # is a one-shot job over a custom database, not a service.

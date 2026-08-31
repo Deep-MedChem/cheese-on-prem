@@ -50,24 +50,39 @@ flowchart TB
 |---|---|---|---|
 | 💾 | **Storage** | a volume mounted at `/data` — either one you provide (`data.existingClaim`) or one the chart provisions as `cheese-data-pvc` | Holds the databases *and* the licence file. Size it for the databases you pick — they run from under 1 GB to 1.2 TB each, ~5.4 TB for the whole catalogue. Stage the contents owned by `2112:0`. Layout and staging commands: [docs/pvc-data-runbook.md](docs/pvc-data-runbook.md). |
 | 🔑 | **Registry credential** | a Secret the kubelet uses to pull the images | One access key from DeepMedChem. It is read-only and its only right is pulling what you are licensed for. |
-| 📄 | **Licence key** | a Secret the licence agent reads | A `DMCH-…` key. The agent exchanges it for a 30-day licence file, writes that to `/data`, and renews it daily — so the licence covers the whole cluster and nodes can come and go. |
+| 📄 | **Licence key** | a Secret the licence agent reads | A `DMCH-…` key. The agent exchanges it for a 30-day licence file, writes that to `/data`, and renews it daily — so the licence covers the whole cluster and nodes can come and go. An air-gapped cluster gets a licence *file* instead of a key: [Air-gapped licensing](#air-gapped-licensing). |
 
-### Licensing on Kubernetes is v1 only
+### Which licensing scheme <kbd>🌐 call-home</kbd> <kbd>✈️ air-gapped</kbd>
 
-CHEESE has two licensing schemes. On Kubernetes only one of them applies:
+CHEESE has two licensing schemes and **both can cover a cluster**. What separates
+them is what they ask of your network, not whether Kubernetes is supported:
 
-- **v1 — "call home"** (what you use): the agent renews a 30-day file daily and
-  the licence authorises **the whole installation**, however many nodes it spans.
-- **v0 — "air-gapped"**: a long-lived file bound to **one physical machine's
-  hardware id**. It cannot work on a cluster whose nodes change, so it is offered
-  only for single-host Docker Compose installs.
+- **Call-home licensing** (the default here, and the only one the chart
+  automates): an agent renews a 30-day file daily and the licence authorises
+  **the whole installation**, however many nodes it spans. Costs you one
+  outbound HTTPS call a day and no per-node setup at all.
+- **Air-gapped licensing**: a long-lived signed file that never contacts
+  anything. Each container derives a **fingerprint** from attributes it reads
+  under `/sys`, which by default are the ones belonging to whichever node it
+  landed on — that, and only that, is why this scheme is usually described as
+  machine-bound. Bind the licence to **one identity every node presents** — your
+  cluster's UUID, say — and a single offline file covers the whole cluster.
+  Pinning that identity on each node is yours to arrange; see
+  [Air-gapped licensing](#air-gapped-licensing).
 
-> **⚠️ Status, so nobody is misled.** **No released product image verifies a v1
-> licence yet** — that port is open work in the four gated repos. Until it ships,
-> a v1 key is issued but not enforced, and a v1 licence *file* handed to a current
-> image will be rejected by its v0 verifier with a misleading
-> "signature does not match". Talk to us before wiring licensing into a partner
-> cluster.
+Take **call-home** unless the cluster has no outbound network at all — it is less
+work and access can be rotated. Take **air-gapped** when it genuinely has none.
+
+> **The schemes are also numbered.** Licence files, error messages and anything
+> we send you call air-gapped **v0** and call-home **v1** — the numbers are the
+> `schema` field inside the file, nothing more. Same two schemes.
+
+> **⚠️ Status, so nobody is misled.** **No released product image verifies a
+> call-home licence yet** — that port is open work in the gated repos. Until it
+> ships, a call-home key is issued but not enforced, and a call-home licence
+> *file* handed to a current image is rejected by its air-gapped verifier with a
+> misleading "signature does not match". Talk to us before wiring licensing into
+> a partner cluster.
 
 ### Install it
 
@@ -95,7 +110,7 @@ step-by-step, including the secrets, is in [Quick start](#quick-start) below.
 | **Alignment** | `alignment.enabled` | off | conformer alignment, license-gated |
 | **Supabase** | `supabase.enabled` | off | in-cluster auth + per-user spaces (test profile) |
 | **oauth2-proxy** | `oauth2Proxy.enabled` | off | SSO stub (alternate to Supabase) |
-| **Licence agent** | `licensingAgent.enabled` | off — **turn it on** | v1 licensing, the scheme Kubernetes uses: renews the licence file onto `/data` daily. Off only because the chart cannot invent your licence key ([docs](docs/licensing-agent.md)) |
+| **Licence agent** | `licensingAgent.enabled` | off — **turn it on** | call-home licensing, the default on Kubernetes: renews the licence file onto `/data` daily. Off only because the chart cannot invent your licence key ([docs](docs/licensing-agent.md)) |
 
 ## Images
 
@@ -330,7 +345,7 @@ profile on top. Two are checked in:
 
 | Profile | For |
 |---|---|
-| `values-minimal.yaml` | the smallest real install — licensed images, v1 licence, the API behind an ingress |
+| `values-minimal.yaml` | the smallest real install — licensed images, call-home licence, the API behind an ingress |
 | `values-quickstart.yaml` | a kind harness for trying the chart out. Not for deploying. |
 
 **minimal** (`charts/cheese/values-minimal.yaml`) — carries only the keys a site
@@ -418,7 +433,9 @@ You get `cheese-database` + `cheese-synthongpt` + `cheese-orchestrator` behind t
 
 ## Licensing
 
-Kubernetes uses **v1** licensing. You are issued a `DMCH-…` **key**; the chart's
+The default on Kubernetes is **call-home** licensing (air-gapped clusters take
+the offline file instead — see [below](#air-gapped-licensing)). You are issued a
+`DMCH-…` **key**; the chart's
 **licence agent** exchanges it for a signed 30-day licence file, writes that onto
 the shared `/data` PVC where the product containers already look, and renews it
 daily.
@@ -457,18 +474,19 @@ The agent runs as UID 2112, not root.
   key baked into the image; they never call the licensing server. Only the agent
   talks to it. If the server is unreachable the stack keeps running — the file has
   a 30-day TTL renewed daily, so roughly 29 days of margin.
-- **Not every image understands v1.** `cheese-database` and
+- **Not every image understands the call-home scheme.** `cheese-database` and
   `cheese-orchestrator` — the two components a headless install needs — do. For
-  the optional components, confirm with DeepMedChem before enabling them on a v1
-  licence; all of them are off by default.
+  the optional components, confirm with DeepMedChem before enabling them on a
+  call-home licence; all of them are off by default.
 - **One licence per cluster, not per release.** Several Helm releases in one
   cluster share its fingerprint. Separate tenants at the application layer, not
   with extra licences.
 - **Recreating a cluster costs an activation.** A new cluster means a new
   `kube-system` UID, so a new fingerprint and another activation slot;
   `max_activations` defaults to 1 and the next activation is refused with `409
-  max_activations_reached`. For a delete/recreate test loop, pin
-  `licensingAgent.fingerprintOverride` so every cluster reuses one activation.
+  max_activations_reached`. The response lists the live activations, so ask us to
+  release the stale one — a fingerprint is an installation, and rebuilding the
+  cluster really does make a new one.
 - A `DMCH-PP-…` **partner token is not a licence key.** It mints keys for your
   end-customers; the chart refuses to render if it sees one.
 
@@ -476,11 +494,35 @@ Full detail — the licensing model, one-licence-per-installation vs partner
 sublicensing, the RBAC probe results, why the agent is not root, operating and
 troubleshooting it: **[docs/licensing-agent.md](docs/licensing-agent.md)**.
 
-### v0 is not usable on a cluster
+### Air-gapped licensing
 
-The older scheme is a long-lived file bound to **one machine's** DMI hardware id.
-It cannot span a cluster whose nodes change, and it is not what you were issued a
-`DMCH-…` key for. It remains the Docker Compose / single-host path only — see the
+A cluster with no outbound network cannot run the call-home scheme — the agent
+has to reach the licensing server. Use the **air-gapped** licence there. It is a
+signed file good for the contract term that is never checked against anything,
+and it can cover a cluster.
+
+The condition is the fingerprint. Each licensed container computes it from
+attributes it reads under `/sys`, which out of the box describe the node it is
+running on — so an unmodified cluster gives every node a different fingerprint
+and a file cut for one of them fails on the rest. Have the licence bound instead
+to a **single identity that every node presents** (deriving it from the cluster's
+own UUID is the obvious choice) and one file covers the installation, offline and
+indefinitely. What you take on in exchange:
+
+- **You pin that identity on every node**, before the kubelet starts, so any pod
+  landing there reads the same values — node-image or provisioning work, repeated
+  whenever a node is rebuilt. A node that misses it starts pods that fail licence
+  verification and log that the licence is not valid for this host.
+- **The chart does not do it for you.** It mounts the licence file and nothing
+  else; there is no chart key for the fingerprint.
+- **Nothing can be rotated or withdrawn remotely** — in either direction. That is
+  the point of an air-gapped licence, but a re-cut file has to be redistributed
+  by hand.
+
+Agree the fingerprint with DeepMedChem **before** the file is cut; changing it
+afterwards means a new file. You are issued a licence **file** for this path, not
+the `DMCH-…` key that the call-home agent takes. The single-host version of the same
+scheme, and the fingerprint helper, are in the
 [Compose install guide](../docs/compose-install.md).
 
 ## Verify the chart (no cluster)
@@ -519,7 +561,7 @@ k8s/
 │       ├── data-pvc.yaml  data-pv-local.yaml
 │       ├── database-* orchestrator-* synthongpt-* search-ui-*
 │       ├── ketcher-* electrostatics-* alignment-*
-│       ├── licensing-agent-*         # v1 licensing agent (deployment / rbac / secret), off by default
+│       ├── licensing-agent-*         # call-home licence agent (deployment / rbac / secret), off by default
 │       └── supabase/   # db / auth / rest / meta / studio / gateway / sql-configmap / init-job
 ├── docs/                           # pvc-data-runbook, architecture, headless-variant, licensing-agent
 ├── manifests/base/                 # namespace.yaml, image-pull-secret.example.yaml

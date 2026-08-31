@@ -67,10 +67,10 @@ match (`cheese-local-manual` in the example), and the host path must exist.
 
 ### Licence file
 
-> **You do not stage this on Kubernetes.** The v1 licence agent writes it here
-> and renews it daily — see [licensing-agent.md](licensing-agent.md). The rest of
-> this section describes the file for reference, and applies to the single-host
-> v0 flow.
+> **You do not stage this on Kubernetes.** The call-home licence agent writes it
+> here and renews it daily — see [licensing-agent.md](licensing-agent.md). The
+> rest of this section describes the file for reference, and applies to the
+> hand-placed air-gapped flow.
 
 ```
 /data/license.yaml

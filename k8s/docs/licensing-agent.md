@@ -1,4 +1,4 @@
-# The licence agent on Kubernetes <kbd>☸️ k8s</kbd> <kbd>🌐 v1 licensing</kbd>
+# The licence agent on Kubernetes <kbd>☸️ k8s</kbd> <kbd>🌐 call-home licensing</kbd>
 
 The chart can run a small **licence agent** next to the stack. It exchanges the
 `DMCH-…` licence key you were issued for a signed licence file, writes that file
@@ -11,15 +11,16 @@ yourself.
 
 > ### ⚠️ Read this before you rely on it
 >
-> **Not every image understands v1.** An image that supports it dispatches on
-> the licence's `schema` field and leaves the v0 path untouched, so a
-> hand-placed v0 file and an agent-written v1 file both verify. An image that
-> predates the scheme rejects a v1 file as **"signature does not match license
-> content"** — the signature is fine, the image simply cannot read that schema.
+> **Not every image understands the call-home scheme.** An image that supports
+> it dispatches on the licence's `schema` field and leaves the air-gapped path
+> untouched, so a hand-placed offline file and an agent-written call-home file
+> both verify. An image that predates the scheme rejects a call-home file as
+> **"signature does not match license content"** — the signature is fine, the
+> image simply cannot read that schema.
 >
 > The two core components the chart enables by default (`cheese-database`,
-> `cheese-orchestrator`) support v1. The optional ones may lag. Which release of
-> which image supports v1 changes as images ship, so confirm with DeepMedChem
+> `cheese-orchestrator`) support it. The optional ones may lag. Which release of
+> which image supports it changes as images ship, so confirm with DeepMedChem
 > for the components you intend to enable rather than assuming — this document
 > is not the place that tracks it.
 >
@@ -27,21 +28,28 @@ yourself.
 > follow `onprem.imageTag`: the agent versions independently of the CHEESE
 > product images. See [Enable it](#enable-it).
 
-## v0 vs v1 — which one you have
+## Which scheme you have
 
-Two licensing schemes exist. **On Kubernetes only v1 can work**: v0 binds a
-licence to one machine's hardware id, which is meaningless on a cluster whose
-nodes come and go.
+Two licensing schemes exist, and **either can licence a cluster**. **Call-home**
+is the default on Kubernetes because it needs nothing from you per node: the
+fingerprint is the cluster's own `kube-system` UID. **Air-gapped** asks you to
+pin one identity across every node in exchange for never touching the network —
+the right trade only when the cluster genuinely has no egress (see the chart
+[README](../README.md#air-gapped-licensing)).
 
-| | ✈️ **v0 — "air-gapped"** | 🌐 **v1 — "call home"** (this agent) |
+The two are numbered as well: air-gapped is **v0**, call-home is **v1**. The
+numbers are the `schema` field inside the licence file, and they are what you
+will meet in error messages and in anything we send you.
+
+| | ✈️ **Air-gapped** (v0) | 🌐 **Call-home** (v1) — this agent |
 |---|---|---|
 | You were given | a signed licence **file** | a licence **key**, a `DMCH-…` string |
-| Obtained by | emailing us a machine fingerprint | the agent, automatically |
-| Bound to | **one physical machine's** DMI hardware id | **the whole installation** (here: the cluster) |
+| Obtained by | sending us the fingerprint the deployment presents | the agent, automatically |
+| Bound to | a fingerprint read from `/sys` — by default the **node** the container runs on, or one identity you pin cluster-wide | **the whole installation** (here: the cluster) |
 | Valid for | the contract term | **30 days**, renewed daily |
 | Needs network | never | a daily outbound HTTPS check-in |
 | Access can be withdrawn | no | yes — stop renewing |
-| Supported on | Docker Compose / single host | Kubernetes, Docker Compose |
+| Supported on | Docker Compose, and Kubernetes with a pinned cluster identity | Kubernetes, Docker Compose |
 
 Some older internal notes call the agent "v2". That numbering is wrong: **v0 is
 the offline file, v1 is the agent.**
@@ -248,7 +256,7 @@ of the licence file.
 | `activation limit reached` / `409` | `max_activations` slots are all in use | the log prints the live activations; release the stale one, or ask for more slots |
 | `licensing server unreachable (grace continues)` | no outbound HTTPS, or the server is down | no immediate impact — the licence on disk is valid for ~30 days; fix egress |
 | `Permission denied` writing the licence file | `prepareDataDir.enabled: false` and the directory was never prepared | re-enable it, or `chgrp 0` + `chmod g+rwxs` the directory yourself |
-| product still reports a licence error | that image predates the v1 verifier — see the status box at the top | run a verifier-branch image, or keep using the v0 file |
+| product still reports a licence error | that image predates the call-home verifier — see the status box at the top | run a verifier-branch image, or keep using the v0 file |
 | `ImagePullBackOff` | nothing has been published to the agent's ECR repository yet | build it from `dmch-licensing` and side-load it (below) |
 
 ## The image
@@ -319,10 +327,13 @@ helm template cheese charts/cheese --set licensingAgent.enabled=true \
   side was renamed to `DMCH_LICENSING_*`; the **client** side is the deployed
   product's existing contract and was deliberately left alone. Do not "fix" them.
 - `CHEESE_ACTIVATION_ID` belongs to the **product** containers, not the agent: it
-  is an optional soft cross-check inside the v1 verifier, and a mismatch only
+  is an optional soft cross-check inside the call-home verifier, and a mismatch only
   logs a warning. Activation limits are enforced server-side.
 - Off-cluster (Compose, bare metal) the same agent binary uses a persisted UUID
   as its fingerprint instead of the namespace UID; that path is documented in
   the Compose install docs, not here.
-- `licensingAgent.fingerprintOverride` exists for tests only. Setting it in a real
-  install burns an activation slot on a fingerprint you cannot reproduce.
+- `licensingAgent.fingerprintOverride` is a DeepMedChem test hatch, not a
+  supported knob. In a real install it only burns an activation slot on a value
+  the cluster will never present again, and reusing one fingerprint across
+  installations breaches the licence terms. Hitting `409
+  max_activations_reached` legitimately? Ask us to release the stale activation.

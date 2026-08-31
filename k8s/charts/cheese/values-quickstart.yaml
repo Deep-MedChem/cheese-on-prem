@@ -1,7 +1,7 @@
 # Quickstart: try the chart on kind against databases already on the host.
 #   helm install cheese . -n cheese --create-namespace -f values-quickstart.yaml
 #
-# ⚠️ NOT an install profile — local images, a hand-placed v0 licence,
+# ⚠️ NOT an install profile — local images, a hand-placed air-gapped licence,
 # localtest.me hostnames, a hostPath volume. To deploy, use values-minimal.yaml.
 #
 # database.databasesRoot must also be bind-mounted into the node — see
@@ -50,7 +50,7 @@ database:
     # An absolute path becomes /data/<that path> and is never found — stage the
     # file at the root of the volume instead.
     #
-    # On kind the v0 licence is checked against the kind-control-plane's DMI
+    # On kind the air-gapped licence is checked against the kind-control-plane's DMI
     # (product_name="kind"), not this host, so a host licence will not validate.
     # Regenerate a node licence (k8s/local-dev/docs/kind-bringup-log.md step 4),
     # or set production: "OUR_SECRET" here AND on orchestrator.env.production —
@@ -74,8 +74,8 @@ orchestrator:
             - path: /
               pathType: Prefix
 
-# ── LICENCE AGENT (v1) ───────────────────────────────────────────────────────
-# Off here because this profile uses the hand-placed v0 file above. v1 is
+# ── LICENCE AGENT (call-home) ────────────────────────────────────────────────
+# Off here because this profile uses the hand-placed air-gapped file above. It is
 # actually the easier path on kind — its fingerprint is the cluster's own
 # kube-system UID, so no DMI workaround. To switch: enabled: true, and keep both
 # cheeseLicenseFile values as plain volume-relative filenames.
