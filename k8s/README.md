@@ -232,13 +232,34 @@ The chart is unaware of which you chose; it only consumes the Secret by name.
 
 ## Deployment target
 
-`deployment.target` selects storage + ingress class (see `templates/_platform.tpl`):
+**Any conformant Kubernetes ≥ 1.28 runs this chart** — AKS, EKS, GKE, OpenShift,
+Rancher, bare metal. Nothing in it is cloud-specific, images included: they come
+from ECR wherever you deploy.
 
-- **`local`** — kind / bare-metal dev. hostPath PV (`cheese-local-manual`) + `nginx`. Fully supported and tested.
-- **`aws`** — **scaffold only** (no AWS sources/images yet): `gp3`/`efs-sc` + `alb` stubs, untested.
-- **`azure`** — **deprecated / unsupported.**
+`deployment.target` is therefore not a list of places CHEESE may run. It is
+shorthand for the only two strings the chart cannot guess about your cluster
+(see `templates/_platform.tpl`):
 
-An explicit `deployment.storage.className` / `deployment.ingress.className` always wins.
+| `target` | Storage class of the PVC the chart provisions | Ingress class |
+|---|---|---|
+| `local` | `cheese-local-manual` — and it renders the backing hostPath PV | `nginx` |
+| `aws` | `gp3`, or `efs-sc` when `storage.accessMode: ReadWriteMany` | `alb` |
+
+If your cluster's classes are neither pair, name them and forget `target` — an
+explicit class always wins, and setting both makes it irrelevant:
+
+```yaml
+deployment:
+  storage: { className: managed-csi }     # e.g. AKS
+  ingress: { className: nginx }
+```
+
+Bringing your own claim (`data.existingClaim`) skips the storage class
+altogether — the recommended path on a cluster whose volumes already exist.
+
+`local` is the tested path and the one the kind harness uses; it is also the only
+target that renders a PV for you. The `aws` class names are right but the chart
+has not been run on EKS end to end.
 
 ## Secrets
 

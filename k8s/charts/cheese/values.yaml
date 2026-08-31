@@ -27,6 +27,9 @@
 # class names, scaffold only. azure is deprecated. On anything else, use `local`
 # and override both class names.
 deployment:
+  # Shorthand for a known (storage class, ingress class) pair — NOT a list of
+  # supported platforms. Any conformant cluster runs this chart; if its class
+  # names differ, set them below and the target stops mattering.
   target: local                            # local | aws
   # Only applies when the chart provisions the volume — ignored if
   # data.existingClaim is set.
