@@ -33,6 +33,13 @@ deliberately NOT renamed to DMCH_LICENSING_* (that rename applies to the server)
 {{- fail "licensingAgent.secret.licenseKey looks like a DMCH-PP-… partner token. A partner token is NOT a licence key: it issues keys for end-customers via /partner/v1/licenses. Using it here fails with 401 partner_token_not_a_license_key." -}}
 {{- end -}}
 {{- end -}}
+{{- /* Removed key. Helm ignores unknown values silently, so without this a
+       values file that still carries it would render an agent that quietly
+       ignores it — and the operator would burn activation slots and hit 409
+       with nothing to point at. */ -}}
+{{- if $la.fingerprintOverride -}}
+{{- fail "licensingAgent.fingerprintOverride is gone. An installation's fingerprint is the cluster's kube-system Namespace UID, derived in-cluster, and cannot be set by hand. Hitting 409 max_activations_reached? The response lists the live activations — ask DeepMedChem to release the stale one." -}}
+{{- end -}}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -128,10 +135,6 @@ spec:
             {{- with $la.usageCountersPath }}
             - name: CHEESE_USAGE_COUNTERS_PATH
               value: {{ printf "%s/%s" (trimSuffix "/" $root.Values.data.mountPath) (trimPrefix "/" .) | quote }}
-            {{- end }}
-            {{- with $la.fingerprintOverride }}
-            - name: CHEESE_FINGERPRINT_OVERRIDE
-              value: {{ . | quote }}
             {{- end }}
           {{- if $la.healthPort }}
           ports:

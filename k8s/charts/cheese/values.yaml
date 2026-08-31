@@ -144,12 +144,6 @@ licensingAgent:
   appVersion: ""                           # CHEESE_APP_VERSION, reported at activation
   usageCountersPath: ""                    # JSON file of usage counters to report, relative to data.mountPath
 
-  # DeepMedChem test hatch — leave empty. A real installation's fingerprint is
-  # the kube-system namespace UID, derived in-cluster, and forcing it by hand
-  # only burns an activation slot on a value the cluster will not present again.
-  # Reusing one fingerprint across installations breaches the licence terms.
-  fingerprintOverride: ""
-
   serviceAccount:
     create: true
     name: ""                               # "" → dmch-licensing-agent

@@ -332,8 +332,8 @@ helm template cheese charts/cheese --set licensingAgent.enabled=true \
 - Off-cluster (Compose, bare metal) the same agent binary uses a persisted UUID
   as its fingerprint instead of the namespace UID; that path is documented in
   the Compose install docs, not here.
-- `licensingAgent.fingerprintOverride` is a DeepMedChem test hatch, not a
-  supported knob. In a real install it only burns an activation slot on a value
-  the cluster will never present again, and reusing one fingerprint across
-  installations breaches the licence terms. Hitting `409
-  max_activations_reached` legitimately? Ask us to release the stale activation.
+- **The fingerprint cannot be set by hand.** It is derived in-cluster from the
+  `kube-system` Namespace UID; there is no value, flag or environment variable
+  that changes it, and the chart refuses to render if it finds one. Hitting `409
+  max_activations_reached` legitimately? The response lists the live activations
+  — ask us to release the stale one.
