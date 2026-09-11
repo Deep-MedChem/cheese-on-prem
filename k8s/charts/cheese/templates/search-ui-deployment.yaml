@@ -12,14 +12,15 @@ spec:
   {{- if not $ui.autoscaling.enabled }}
   replicas: {{ $ui.replicaCount }}
   {{- end }}
+  revisionHistoryLimit: {{ include "cheese.revisionHistoryLimit" (list $root $ui) }}
   selector:
     matchLabels:
       {{- include "cheese.componentSelectorLabels" (list $root "search-ui") | nindent 6 }}
   template:
     metadata:
-      {{- with $ui.podAnnotations }}
+      {{- with (include "cheese.podAnnotations" (list $root $ui.podAnnotations $ui.secret.existingSecret "/search-ui-secret.yaml")) }}
       annotations:
-        {{- toYaml . | nindent 8 }}
+        {{- . | nindent 8 }}
       {{- end }}
       labels:
         {{- include "cheese.componentSelectorLabels" (list $root "search-ui") | nindent 8 }}

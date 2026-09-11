@@ -21,14 +21,15 @@ spec:
   {{- if not $db.autoscaling.enabled }}
   replicas: {{ default 1 $role.replicaCount }}
   {{- end }}
+  revisionHistoryLimit: {{ include "cheese.revisionHistoryLimit" (list $root $db) }}
   selector:
     matchLabels:
       {{- include "cheese.componentSelectorLabels" (list $root $component) | nindent 6 }}
   template:
     metadata:
-      {{- with $db.podAnnotations }}
+      {{- with (include "cheese.podAnnotations" (list $root $db.podAnnotations $db.secret.existingSecret "/database-secret.yaml")) }}
       annotations:
-        {{- toYaml . | nindent 8 }}
+        {{- . | nindent 8 }}
       {{- end }}
       labels:
         {{- include "cheese.componentSelectorLabels" (list $root $component) | nindent 8 }}

@@ -44,14 +44,15 @@ spec:
   replicas: 1
   strategy:
     type: Recreate
+  revisionHistoryLimit: {{ include "cheese.revisionHistoryLimit" (list $root $la) }}
   selector:
     matchLabels:
       {{- include "cheese.componentSelectorLabels" (list $root "licensing-agent") | nindent 6 }}
   template:
     metadata:
-      {{- with $la.podAnnotations }}
+      {{- with (include "cheese.podAnnotations" (list $root $la.podAnnotations $la.secret.existingSecret "/licensing-agent-secret.yaml")) }}
       annotations:
-        {{- toYaml . | nindent 8 }}
+        {{- . | nindent 8 }}
       {{- end }}
       labels:
         {{- include "cheese.componentSelectorLabels" (list $root "licensing-agent") | nindent 8 }}
