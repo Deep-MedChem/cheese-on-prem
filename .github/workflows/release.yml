@@ -1,0 +1,72 @@
+# Cut a release by hand: tag the current commit and publish the packaged chart.
+#
+# Partners install from a tag, not from main — main moves under them, and a
+# `helm install` against a moving branch is how two people end up with the same
+# "0.6.0" and different templates.
+#
+# The chart version is whatever Chart.yaml says on the dispatched ref. Bump it
+# in a normal PR first; this workflow never writes to the repo, it only reads
+# that number and publishes under it. So the tag, the release and the .tgz can
+# never disagree with the chart the tag points at.
+#
+# Manual dispatch only: releasing is a decision, not a consequence of merging.
+name: release
+
+on:
+  workflow_dispatch:
+    inputs:
+      prerelease:
+        description: "Mark the GitHub release as a pre-release"
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      # Full history: the tag-already-exists check below needs the tags.
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: azure/setup-helm@v4
+
+      - name: Read the chart version
+        id: chart
+        run: |
+          set -euo pipefail
+          version=$(helm show chart k8s/charts/cheese | awk '$1 == "version:" { print $2 }')
+          if ! [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?$ ]]; then
+            echo "::error::Chart.yaml version '$version' is not semver"
+            exit 1
+          fi
+          if git rev-parse -q --verify "refs/tags/v$version" >/dev/null; then
+            echo "::error::v$version is already released — bump version in k8s/charts/cheese/Chart.yaml first"
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "Releasing chart $version" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Lint and package
+        run: |
+          set -euo pipefail
+          helm lint k8s/charts/cheese
+          helm lint k8s/charts/cheese -f k8s/charts/cheese/values-minimal.yaml
+          helm package k8s/charts/cheese --destination dist
+
+      # gh creates the tag itself, at the commit this run checked out.
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.chart.outputs.version }}
+          PRERELEASE: ${{ inputs.prerelease && '--prerelease' || '' }}
+        run: |
+          set -euo pipefail
+          gh release create "v$VERSION" "dist/cheese-$VERSION.tgz" \
+            --target "$GITHUB_SHA" \
+            --title "cheese chart $VERSION" \
+            --generate-notes \
+            $PRERELEASE
