@@ -1,0 +1,45 @@
+# Manual release: push the packaged chart to GHCR and tag the commit it came from.
+# The version must already be in k8s/charts/cheese/Chart.yaml — bump it in a PR first.
+name: release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Chart version to release, no leading v (e.g. 0.6.0)"
+        required: true
+
+permissions:
+  contents: write
+  packages: write
+
+env:
+  CHART_REGISTRY: oci://ghcr.io/deep-medchem/charts
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: azure/setup-helm@v4
+
+      - name: test
+        run: |
+          helm lint k8s/charts/cheese
+          helm package k8s/charts/cheese --destination dist
+
+      - name: Push to GHCR
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ inputs.version }}
+        run: |
+          echo "$GH_TOKEN" | helm registry login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
+          helm push "dist/cheese-$VERSION.tgz" "$CHART_REGISTRY"
+
+      - name: Tag and publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ inputs.version }}
+        run: |
+          gh release create "v$VERSION" "dist/cheese-$VERSION.tgz" \
+            --target "$GITHUB_SHA" --generate-notes
