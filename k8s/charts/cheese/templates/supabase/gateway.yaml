@@ -8,6 +8,7 @@ metadata:
     {{- include "cheese.componentLabels" (list . "supabase-gateway") | nindent 4 }}
 spec:
   replicas: 1
+  revisionHistoryLimit: {{ include "cheese.revisionHistoryLimit" (list $ $s) }}
   selector:
     matchLabels:
       {{- include "cheese.componentSelectorLabels" (list . "supabase-gateway") | nindent 6 }}

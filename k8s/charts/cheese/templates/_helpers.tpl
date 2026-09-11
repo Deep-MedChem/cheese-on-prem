@@ -199,6 +199,24 @@ Usage: include "cheese.podAnnotations" (list $root $podAnnotations $existingSecr
 {{- if not $existing }}checksum/secret: {{ include (print $root.Template.BasePath $secretTemplate) $root | sha256sum | quote }}{{ end }}
 {{- end -}}
 
+{{/*
+revisionHistoryLimit for a workload. Pass (list $root <component values>): the
+component's own key wins, else the chart-wide one, else 10. hasKey rather than
+`default` so a deliberate 0 (keep none, no rollback) survives.
+*/}}
+{{- define "cheese.revisionHistoryLimit" -}}
+{{- $root := index . 0 -}}
+{{- $cfg := index . 1 -}}
+{{- $v := $root.Values.revisionHistoryLimit -}}
+{{- if and (kindIs "map" $cfg) (hasKey $cfg "revisionHistoryLimit") -}}
+{{- $v = $cfg.revisionHistoryLimit -}}
+{{- end -}}
+{{- if or (kindIs "invalid" $v) (eq (toString $v) "") -}}
+{{- $v = 10 -}}
+{{- end -}}
+{{- $v | int -}}
+{{- end -}}
+
 {{/* ServiceAccount the licence agent runs as. Pass root context. */}}
 {{- define "cheese.licensingAgentServiceAccountName" -}}
 {{- $sa := .Values.licensingAgent.serviceAccount -}}

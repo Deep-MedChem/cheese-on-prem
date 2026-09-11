@@ -35,6 +35,7 @@ spec:
   {{- if not $oc.autoscaling.enabled }}
   replicas: {{ $oc.replicaCount }}
   {{- end }}
+  revisionHistoryLimit: {{ include "cheese.revisionHistoryLimit" (list $root $oc) }}
   selector:
     matchLabels:
       {{- include "cheese.componentSelectorLabels" (list $root "orchestrator") | nindent 6 }}
