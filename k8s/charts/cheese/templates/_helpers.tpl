@@ -170,6 +170,35 @@ Pass root context.
 {{- include "cheese.secretName" (list .Values.licensingAgent.secret.existingSecret "dmch-license-key") -}}
 {{- end -}}
 
+{{/*
+Pod-template annotations for a component: its own podAnnotations, plus a
+checksum of the Secret it reads WHEN THE CHART RENDERS THAT SECRET.
+
+The checksum is what makes a rewritten secret actually reach the pods. Every
+secret here is consumed as a secretKeyRef env var, and env vars are resolved
+once at pod start and never update in place — so with nothing changing in the
+pod template, editing a Secret leaves the OLD value running until something
+unrelated happens to roll the Deployment. The failure is silent: the Deployment
+is Available, the Secret is correct, and the process is using neither.
+
+Deliberately NOT emitted when existingSecret is set. The chart cannot see a
+Secret it does not render — `lookup` returns nothing under `helm template`,
+which is how Argo CD, `helm diff` and CI evaluate this — so the checksum would
+be a constant: an annotation that looks like protection and is none. Bring your
+own trigger through podAnnotations, or run a controller that watches Secrets
+(stakater/reloader).
+
+Usage: include "cheese.podAnnotations" (list $root $podAnnotations $existingSecret "/licensing-agent-secret.yaml")
+*/}}
+{{- define "cheese.podAnnotations" -}}
+{{- $root := index . 0 -}}
+{{- $ann := index . 1 -}}
+{{- $existing := index . 2 -}}
+{{- $secretTemplate := index . 3 -}}
+{{- with $ann }}{{ toYaml . }}{{ "\n" }}{{ end }}
+{{- if not $existing }}checksum/secret: {{ include (print $root.Template.BasePath $secretTemplate) $root | sha256sum | quote }}{{ end }}
+{{- end -}}
+
 {{/* ServiceAccount the licence agent runs as. Pass root context. */}}
 {{- define "cheese.licensingAgentServiceAccountName" -}}
 {{- $sa := .Values.licensingAgent.serviceAccount -}}

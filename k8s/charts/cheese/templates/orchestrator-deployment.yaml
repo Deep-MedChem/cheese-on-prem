@@ -40,9 +40,9 @@ spec:
       {{- include "cheese.componentSelectorLabels" (list $root "orchestrator") | nindent 6 }}
   template:
     metadata:
-      {{- with $oc.podAnnotations }}
+      {{- with (include "cheese.podAnnotations" (list $root $oc.podAnnotations $oc.secret.existingSecret "/orchestrator-secret.yaml")) }}
       annotations:
-        {{- toYaml . | nindent 8 }}
+        {{- . | nindent 8 }}
       {{- end }}
       labels:
         {{- include "cheese.componentSelectorLabels" (list $root "orchestrator") | nindent 8 }}
