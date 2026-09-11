@@ -38,6 +38,9 @@ metadata:
     {{- /* Re-created on each upgrade so a changed database selection actually
            syncs; a Job's pod template is immutable, so it cannot be patched. */}}
     helm.sh/resource-policy: keep
+    {{- with $ds.annotations }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
 spec:
   backoffLimit: {{ $ds.backoffLimit }}
   {{- if $ds.activeDeadlineSeconds }}

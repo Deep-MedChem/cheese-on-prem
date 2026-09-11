@@ -257,6 +257,11 @@ dataSync:
   activeDeadlineSeconds: ""
   ttlSecondsAfterFinished: 86400
 
+  # On the Job object, not its pods. A Job's pod template is immutable, so a
+  # GitOps re-apply of a changed Job fails with "field is immutable"; Argo CD's
+  # `argocd.argoproj.io/sync-options: Replace=true,Force=true` recreates it.
+  annotations: {}
+
   nodeSelector: {}
   resources:
     requests: { cpu: "200m", memory: 256Mi }
@@ -624,6 +629,9 @@ orchestrator:
   service:
     type: ClusterIP
     port: 80
+    # A cloud LB is configured through these; `type: LoadBalancer` without them
+    # is always internet-facing. The Service keeps its ClusterIP either way.
+    annotations: {}
 
   ingress:
     private:
