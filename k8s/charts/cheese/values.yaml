@@ -39,6 +39,11 @@ deployment:
   ingress:
     className: ""                         # "" → target default (local: nginx; aws: alb)
 
+# --- Rollout history -------------------------------------------------------
+# revisionHistoryLimit on every Deployment/StatefulSet; 10 is the API-server
+# default. Any component block can override it with its own key.
+revisionHistoryLimit: 10
+
 # --- Shared data plane -----------------------------------------------------
 # One volume at /data: database, orchestrator, synthongpt, alignment mount it;
 # search UI / ketcher / electrostatics are stateless and don't.

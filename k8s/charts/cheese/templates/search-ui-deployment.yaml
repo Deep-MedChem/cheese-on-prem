@@ -12,6 +12,7 @@ spec:
   {{- if not $ui.autoscaling.enabled }}
   replicas: {{ $ui.replicaCount }}
   {{- end }}
+  revisionHistoryLimit: {{ include "cheese.revisionHistoryLimit" (list $root $ui) }}
   selector:
     matchLabels:
       {{- include "cheese.componentSelectorLabels" (list $root "search-ui") | nindent 6 }}

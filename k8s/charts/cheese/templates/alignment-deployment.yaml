@@ -9,6 +9,7 @@ metadata:
     {{- include "cheese.componentLabels" (list $root "alignment") | nindent 4 }}
 spec:
   replicas: {{ $al.replicaCount }}
+  revisionHistoryLimit: {{ include "cheese.revisionHistoryLimit" (list $root $al) }}
   selector:
     matchLabels:
       {{- include "cheese.componentSelectorLabels" (list $root "alignment") | nindent 6 }}

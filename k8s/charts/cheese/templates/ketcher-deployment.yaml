@@ -9,6 +9,7 @@ metadata:
     {{- include "cheese.componentLabels" (list $root "ketcher") | nindent 4 }}
 spec:
   replicas: {{ $k.replicaCount }}
+  revisionHistoryLimit: {{ include "cheese.revisionHistoryLimit" (list $root $k) }}
   selector:
     matchLabels:
       {{- include "cheese.componentSelectorLabels" (list $root "ketcher") | nindent 6 }}

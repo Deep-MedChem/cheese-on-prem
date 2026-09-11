@@ -12,6 +12,7 @@ spec:
   {{- if not $sg.autoscaling.enabled }}
   replicas: {{ $sg.replicaCount }}
   {{- end }}
+  revisionHistoryLimit: {{ include "cheese.revisionHistoryLimit" (list $root $sg) }}
   selector:
     matchLabels:
       {{- include "cheese.componentSelectorLabels" (list $root "synthongpt") | nindent 6 }}

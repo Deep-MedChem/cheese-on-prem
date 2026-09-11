@@ -21,6 +21,7 @@ spec:
   {{- if not $db.autoscaling.enabled }}
   replicas: {{ default 1 $role.replicaCount }}
   {{- end }}
+  revisionHistoryLimit: {{ include "cheese.revisionHistoryLimit" (list $root $db) }}
   selector:
     matchLabels:
       {{- include "cheese.componentSelectorLabels" (list $root $component) | nindent 6 }}

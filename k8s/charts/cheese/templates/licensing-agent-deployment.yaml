@@ -44,6 +44,7 @@ spec:
   replicas: 1
   strategy:
     type: Recreate
+  revisionHistoryLimit: {{ include "cheese.revisionHistoryLimit" (list $root $la) }}
   selector:
     matchLabels:
       {{- include "cheese.componentSelectorLabels" (list $root "licensing-agent") | nindent 6 }}
