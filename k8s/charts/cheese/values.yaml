@@ -315,6 +315,9 @@ database:
   #
   # Sizes are the download size, from config/databases.catalog. Check free space
   # on the volume before enabling anything.
+  #
+  # Maintainers: the entries below are generated. Change config/databases.catalog
+  # and run scripts/gen-chart-dbs.py --write; CI fails on hand edits that drift.
   databases:
     test:                                  # in-repo fixture; not part of the delivery
       enabled: true

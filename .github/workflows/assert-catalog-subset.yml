@@ -1,17 +1,33 @@
-# The database catalogue must never offer more than the hosted service serves.
+# The database catalogue must never offer more than the hosted service serves,
+# and every entry the chart carries must describe that database correctly.
 #
-# The same set is restated in the Helm chart (database.databases), so the check
-# also asserts the two agree — a chart entry pointing at a retired folder sends a
-# partner's dataSync at a prefix that no longer exists.
+# Two checks, one concern each:
 #
-# It is a hand-maintained file with no other guard, and it drifted from
-# production within two days of being created — two retired ChemSpace-10B
-# databases (~2.6 TB combined) stayed selectable, and two MCULE rebuilds were
-# offered with no canonical name to key them by. A customer who picks one of
-# those spends hours downloading something we cannot support.
+#   assert-catalog-subset.sh   nothing is offered that we do not serve, and
+#                              every catalogued folder has a canonical name
+#   gen-chart-dbs.py --check   the chart's per-database fields (folder,
+#                              index_type, delimiter) are exactly what the
+#                              service reports for that database
 #
-# Scheduled as well as on-push: the catalogue goes stale when the SERVED list
-# changes, which happens in another repo entirely and touches nothing here.
+# The second one matters more than it looks. A wrong index_type makes the engine
+# reject the folder at startup; a delimiter of "," where the payload is tab-
+# separated splits every line in the wrong place and returns wrong SMILES and
+# wrong IDs, with nothing failing. Neither field is decided in this repository,
+# so both are read from the service's public metadata endpoint — no credential
+# here, and no access from here to anything private.
+#
+# The catalogue is hand-maintained and drifted from production within two days
+# of being created: two retired databases (~2.6 TB combined) stayed selectable,
+# and two rebuilds were offered with no canonical name to key them by. A
+# customer who picks one of those spends hours downloading something we cannot
+# support.
+#
+# Scheduled as well as on-push, because the SERVED list changes where the
+# databases are built, which touches nothing here. Mondays at 00:01 UTC —
+# GitHub cron has no timezone, and scheduled runs are queued from a shared pool
+# that in practice delivers them one to five hours late, so this is set early
+# enough to still land on Monday. The run reports either way, so a silently
+# dropped one is visible by its absence.
 name: assert-catalog-subset
 
 on:
@@ -19,22 +35,82 @@ on:
     paths:
       - "config/databases.catalog"
       - "scripts/_engine-config"
-      - "k8s/charts/cheese/values.yaml"
       - "scripts/assert-catalog-subset.sh"
+      - "scripts/gen-chart-dbs.py"
+      - "k8s/charts/cheese/values.yaml"
       - ".github/workflows/assert-catalog-subset.yml"
   pull_request:
     paths:
       - "config/databases.catalog"
       - "scripts/_engine-config"
+      - "scripts/assert-catalog-subset.sh"
+      - "scripts/gen-chart-dbs.py"
       - "k8s/charts/cheese/values.yaml"
+      - ".github/workflows/assert-catalog-subset.yml"
   schedule:
-    - cron: "17 6 * * 1"        # Mondays, catches drift originating elsewhere
+    - cron: "1 0 * * 1"        # Mondays, catches drift originating elsewhere
   workflow_dispatch:
+
+permissions:
+  contents: read
 
 jobs:
   assert:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Catalogue is a subset of what we serve
-        run: ./scripts/assert-catalog-subset.sh
+
+      # Both checks run even if the first fails, so one report covers both.
+      # Each exits 0 agrees / 1 disagrees / anything else "could not tell" — an
+      # unreachable service must not be reported as drift, or the alert stops
+      # meaning anything. The step shell runs with -e, so the codes are caught
+      # with `||` rather than read from $? after the fact.
+      - name: Catalogue and chart agree with what we serve
+        id: verify
+        run: |
+          subset=0; ./scripts/assert-catalog-subset.sh > subset.log 2>&1 || subset=$?
+          fields=0; ./scripts/gen-chart-dbs.py --check > fields.log  2>&1 || fields=$?
+          cat subset.log fields.log
+
+          if [ $subset -eq 0 ] && [ $fields -eq 0 ]; then
+            verdict=up-to-date; heading="✅ On-prem database catalogue is up to date"; rc=0
+          elif [ $subset -gt 1 ] || [ $fields -gt 1 ]; then
+            verdict=unknown;    heading="⚠️ Could not check the on-prem database catalogue"; rc=1
+          else
+            verdict=diverged;   heading="❌ On-prem database catalogue has diverged"; rc=1
+          fi
+
+          echo "verdict=$verdict" >> "$GITHUB_OUTPUT"
+          echo "heading=$heading" >> "$GITHUB_OUTPUT"
+          {
+            echo "### $heading"
+            echo '```'
+            cat subset.log fields.log
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          exit $rc
+
+      # Scheduled runs report whichever way they went — an "up to date" every
+      # Monday is what makes a missing one mean something. Skipped, not failed,
+      # when no webhook is configured, so forks and PRs are unaffected.
+      - name: Report the verdict
+        if: always() && github.event_name == 'schedule'
+        env:
+          WEBHOOK: ${{ secrets.DISCORD_WEBHOOK_URL }}
+          VERDICT: ${{ steps.verify.outputs.verdict }}
+          HEADING: ${{ steps.verify.outputs.heading }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          if [ -z "$WEBHOOK" ]; then
+            echo "No DISCORD_WEBHOOK_URL configured; nothing to report to."
+            exit 0
+          fi
+
+          # Discord caps a message at 2000 characters; keep the tail, which is
+          # where the failure lines are.
+          detail="$(cat subset.log fields.log 2>/dev/null | tail -c 1200)"
+          jq -n --arg t "${HEADING:-⚠️ The catalogue check did not run}" \
+                --arg d "$detail" --arg u "$RUN_URL" \
+            '{content: ($t + "\n```\n" + $d + "\n```\n" + $u)}' \
+            | curl -sSf -X POST -H 'Content-Type: application/json' -d @- "$WEBHOOK" \
+            && echo "Reported: ${VERDICT:-no-verdict}"

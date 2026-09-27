@@ -24,10 +24,12 @@ here="$(cd "$(dirname "$0")/.." && pwd)"
 catalog="$here/config/databases.catalog"
 engine_config="$here/scripts/_engine-config"
 
+# Exit 2, not 1, when the service cannot be read: an outage is not drift, and a
+# caller that alerts on 1 must not be woken by a network blip.
 served="$(curl -sSf --max-time 30 "$API/available_dbs" \
   | python3 -c 'import json,sys; d=json.load(sys.stdin); print("\n".join(d if isinstance(d,list) else d["available_dbs"]))' \
-  | sort)"
-[ -n "$served" ] || { echo "FATAL: $API/available_dbs returned nothing" >&2; exit 2; }
+  | sort)" || { echo "UNKNOWN: cannot read $API/available_dbs" >&2; exit 2; }
+[ -n "$served" ] || { echo "UNKNOWN: $API/available_dbs returned nothing" >&2; exit 2; }
 
 unnamed=() unserved=()
 declare -A folder_of=()          # canonical -> catalogued folder, for the chart check
