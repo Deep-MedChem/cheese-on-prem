@@ -89,8 +89,7 @@ spec:
               root={{ include "cheese.dataSyncRoot" $root | quote }}
               for d in "$root" {{ range $selected }}"$root"/{{ . | quote }} {{ end }}; do
                 mkdir -p "$d"
-                chgrp 0 "$d"
-                chmod g+rwxs "$d"
+                chgrp 0 "$d" && chmod g+rwxs "$d" || { echo "warn: cannot change ownership of $d (identity-enforcing volume, e.g. an EFS access point?) — continuing" >&2; }
                 ls -ld "$d"
               done
           volumeMounts:

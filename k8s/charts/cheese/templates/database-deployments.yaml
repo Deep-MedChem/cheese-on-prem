@@ -59,9 +59,10 @@ spec:
           args:
             - |
               set -eu
-              chown {{ default 2112 $db.securityContext.runAsUser }}:0 /jobs
-              chmod 2775 /jobs
-              ls -ld /jobs
+              {{- /* Best-effort: an identity-enforcing volume refuses chown and needs none. */}}
+              d=/jobs
+              chown {{ default 2112 $db.securityContext.runAsUser }}:0 "$d" && chmod 2775 "$d" || { echo "warn: cannot change ownership of $d (identity-enforcing volume, e.g. an EFS access point?) — continuing" >&2; }
+              ls -ld "$d"
           resources:
             {{- toYaml $db.prepareJobsDir.resources | nindent 12 }}
           volumeMounts:
