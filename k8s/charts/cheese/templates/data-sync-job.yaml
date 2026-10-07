@@ -66,8 +66,10 @@ spec:
       {{- if $ds.prepareDataDir.enabled }}
       {{- /* Same trick as the licence agent: the PVC root is root-owned, so a
              non-root sync cannot create the per-database directories. Prepare
-             ONLY the databases root — group 0, group-write, setgid so files the
-             sync creates stay group-readable for the 2112 product containers.
+             ONLY the databases root and each database folder (the kubelet may
+             already have created it root-owned for a database pod's subPath) —
+             group 0, group-write, setgid so files the sync creates stay
+             group-readable for the 2112 product containers.
              Never a recursive chown: this volume holds terabytes. */}}
       initContainers:
         - name: prepare-data-dir
@@ -84,11 +86,13 @@ spec:
           args:
             - |
               set -eu
-              d={{ include "cheese.dataSyncRoot" $root | quote }}
-              mkdir -p "$d"
-              chgrp 0 "$d"
-              chmod g+rwxs "$d"
-              ls -ld "$d"
+              root={{ include "cheese.dataSyncRoot" $root | quote }}
+              for d in "$root" {{ range $selected }}"$root"/{{ . | quote }} {{ end }}; do
+                mkdir -p "$d"
+                chgrp 0 "$d"
+                chmod g+rwxs "$d"
+                ls -ld "$d"
+              done
           volumeMounts:
             - name: data
               mountPath: {{ $root.Values.data.mountPath | quote }}

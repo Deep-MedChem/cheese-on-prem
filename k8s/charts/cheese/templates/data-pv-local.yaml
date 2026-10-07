@@ -7,6 +7,9 @@ On kind, hostPath resolves INSIDE the kind-control-plane container — stage dat
 with `docker cp ... kind-control-plane:/data/...` (see k8s/docs/pvc-data-runbook.md).
 */ -}}
 {{- if and (not .Values.data.existingClaim) (eq .Values.deployment.target "local") .Values.deployment.storage.createLocalPV -}}
+{{- if ne .Values.deployment.storage.accessMode "ReadWriteOnce" -}}
+{{- fail (printf "deployment.storage.accessMode=%s on a hostPath PV: each node would see its own /data. For multi-node use a shared volume via data.existingClaim." .Values.deployment.storage.accessMode) -}}
+{{- end -}}
 apiVersion: v1
 kind: PersistentVolume
 metadata:

@@ -33,7 +33,7 @@ deployment:
   storage:
     className: ""                          # "" → target default (local: cheese-local-manual; aws: gp3/efs-sc)
     size: 10Ti
-    accessMode: ReadWriteOnce             # RWO single-node; set ReadWriteMany (aws→efs-sc) to scale search across nodes
+    accessMode: ReadWriteOnce             # RWO = one node; ReadWriteMany (aws→efs-sc) to spread pods across nodes. local: RWO only
     createLocalPV: true                   # local only: render the hostPath PersistentVolume
     hostPath: /data                       # local only: node path backing the PV
   ingress:
@@ -44,9 +44,6 @@ deployment:
 # default. Any component block can override it with its own key.
 revisionHistoryLimit: 10
 
-# --- Shared data plane -----------------------------------------------------
-# One volume at /data: database, orchestrator, synthongpt, alignment mount it;
-# search UI / ketcher / electrostatics are stateless and don't.
 # ===========================================================================
 # On-prem images (source: ecr)
 # ===========================================================================
@@ -63,13 +60,17 @@ onprem:
   # Name of the image-pull Secret the kubelet uses for the ecr images.
   pullSecret: cheese-ecr-pull
 
+# --- Data plane --------------------------------------------------------------
+# Pods mount databases read-only, jobs/ read-write, the licence folder read-only.
+# Multi-node needs ReadWriteMany claims (EFS/NFS/CephFS).
 data:
   # Bring your own volume: name a PVC you created (in the release namespace) and
   # the chart mounts it and provisions nothing, ignoring deployment.storage.
-  # Empty → the chart provisions its own. RWO minimum, RWX for replicas.
+  # Empty → the chart provisions its own.
   existingClaim: ""
   pvcName: cheese-data-pvc                 # provisioned PVC; ignored if existingClaim is set
   mountPath: /data                         # products resolve their paths against this
+  stateClaim: ""                           # PVC for jobs/ + licence folder; "" → on the data claim
 
 # ===========================================================================
 # licence agent — v1 licensing. Off by default; a real cluster needs it.
@@ -132,8 +133,9 @@ licensingAgent:
   # want a different path — then set the readers' cheeseLicenseFile to match.
   licenseFile: ""
 
-  # Agent bookkeeping (activation id + fingerprint), same PVC, relative to
-  # data.mountPath. Survives restarts so the install keeps its activation slot.
+  # Agent bookkeeping (activation id + fingerprint), on the state claim,
+  # relative to data.mountPath. Survives restarts so the install keeps its
+  # activation slot.
   statePath: ".dmch-licensing-agent.json"
 
   # Health endpoint (readiness only): 200 when a fresh licence is on disk, 503
@@ -427,12 +429,19 @@ database:
                                            # must match orchestrator.env.production, where the
                                            # two modes are documented in full
     cheeseLicense: ""                      # optional inline license; if set, used instead of file
-    cheeseLicenseFile: "cheese_license_file.json"  # filename on the PVC (relative to /data)
+    cheeseLicenseFile: "licensing/cheese_license_file.json"  # relative to /data, on the state claim; must be in a folder
     discordWebhookUrl: ""
+
+  # Root initContainer: chown jobs/ to 2112:0 (non-recursive). Disable if pre-chowned.
+  prepareJobsDir:
+    enabled: true
+    resources:
+      requests: { cpu: "10m", memory: 16Mi }
+      limits:   { cpu: "100m", memory: 64Mi }
 
   # Common env applied to every role.
   env:
-    jobs_data_path: "jobs"                 # relative to /data
+    jobs_data_path: "jobs"                 # relative to /data, on the state claim
     testing: "false"
     verbose: "0"
     ui_url: "http://cheese-ui.localtest.me"
@@ -668,7 +677,7 @@ orchestrator:
   secret:
     existingSecret: ""                     # if set, reference this pre-created Secret (keys: supabaseServiceRoleKey, discordWebhookUrl) and render NO inline Secret
     discordWebhookUrl: ""
-    cheeseLicenseFile: "cheese_license_file.json"  # filename on the shared PVC; must match database.secret.cheeseLicenseFile
+    cheeseLicenseFile: "licensing/cheese_license_file.json"  # must match database.secret.cheeseLicenseFile
 
   env:
     domain_url: "http://cheese-api.localtest.me"
@@ -933,7 +942,7 @@ alignment:
     type: ClusterIP
     port: 8001
   secret:
-    cheeseLicenseFile: "cheese_license_file.json"   # on the shared PVC; must match database.secret.cheeseLicenseFile
+    cheeseLicenseFile: "licensing/cheese_license_file.json"   # must match database.secret.cheeseLicenseFile
   resources:
     requests: { cpu: "1", memory: 2Gi }
     limits:   { cpu: "4", memory: 8Gi }

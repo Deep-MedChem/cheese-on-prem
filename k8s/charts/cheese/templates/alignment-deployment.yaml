@@ -26,9 +26,7 @@ spec:
       securityContext:
         {{- toYaml $al.podSecurityContext | nindent 8 }}
       volumes:
-        - name: data
-          persistentVolumeClaim:
-            claimName: {{ include "cheese.dataClaimName" $root }}
+        {{- include "cheese.dataVolumes" (dict "root" $root "library" false "state" (not (empty $al.secret.cheeseLicenseFile))) | nindent 8 }}
       containers:
         - name: alignment
           securityContext:
@@ -55,8 +53,7 @@ spec:
           resources:
             {{- toYaml $al.resources | nindent 12 }}
           volumeMounts:
-            - name: data
-              mountPath: {{ $root.Values.data.mountPath | quote }}
+            {{- include "cheese.dataMounts" (dict "root" $root "license" $al.secret.cheeseLicenseFile) | nindent 12 }}
       {{- with $al.nodeSelector }}
       nodeSelector:
         {{- toYaml . | nindent 8 }}

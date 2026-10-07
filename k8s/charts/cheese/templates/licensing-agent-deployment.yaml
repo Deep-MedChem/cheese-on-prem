@@ -66,7 +66,7 @@ spec:
       volumes:
         - name: data
           persistentVolumeClaim:
-            claimName: {{ include "cheese.dataClaimName" $root }}
+            claimName: {{ include "cheese.stateClaimName" $root }}
       {{- if $la.prepareDataDir.enabled }}
       {{- /* The PVC root is root-owned (see docs/pvc-data-runbook.md), so the agent
              could not create/replace a file there as 2112. This runs as root ONCE

@@ -26,7 +26,7 @@ flowchart TB
 
     subgraph ns["☸️ Your cluster, namespace: cheese"]
         direction TB
-        PVC[("cheese-data-pvc<br/>mounted at /data<br/>databases + licence file")]
+        PVC[("cheese-data-pvc<br/>databases (ro) + jobs + licence")]
         DB["<b>cheese-database</b><br/>search engine<br/>REQUIRED"]
         ORCH["<b>cheese-orchestrator</b><br/>the API<br/>REQUIRED"]
         AGENT["licence agent<br/>renews daily"]
@@ -48,7 +48,7 @@ flowchart TB
 
 | | What | Where it goes | Notes |
 |---|---|---|---|
-| 💾 | **Storage** | a volume mounted at `/data` — either one you provide (`data.existingClaim`) or one the chart provisions as `cheese-data-pvc` | Holds the databases *and* the licence file. Size it for the databases you pick — they run from under 1 GB to 1.2 TB each, ~5.4 TB for the whole catalogue. Stage the contents owned by `2112:0`. Layout and staging commands: [docs/pvc-data-runbook.md](docs/pvc-data-runbook.md). |
+| 💾 | **Storage** | a volume mounted at `/data` — either one you provide (`data.existingClaim`) or one the chart provisions as `cheese-data-pvc` | Holds the databases, `jobs/` and the licence folder (or put the last two on a second claim, `data.stateClaim`). Pods mount the databases read-only. Size it for the databases you pick — they run from under 1 GB to 1.2 TB each, ~5.4 TB for the whole catalogue. Stage the contents owned by `2112:0`. Layout and staging commands: [docs/pvc-data-runbook.md](docs/pvc-data-runbook.md). |
 | 🔑 | **Registry credential** | a Secret the kubelet uses to pull the images | One access key from DeepMedChem. It is read-only and its only right is pulling what you are licensed for. |
 | 📄 | **Licence key** | a Secret the licence agent reads | A `DMCH-…` key. The agent exchanges it for a 30-day licence file, writes that to `/data`, and renews it daily — so the licence covers the whole cluster and nodes can come and go. |
 
@@ -333,7 +333,9 @@ it:
 
 Use A when the storage already exists — an NFS export, a CSI claim, or a volume
 that already holds the databases. Either way the claim must be `ReadWriteOnce`
-at minimum, and `ReadWriteMany` to run database replicas across nodes.
+at minimum, and `ReadWriteMany` to run pods across nodes (the chart's hostPath PV
+refuses anything but `ReadWriteOnce`). `data.stateClaim` optionally moves `jobs/`
+and the licence to a second claim; it must be shared the same way.
 
 For secrets, point each component at a pre-created Secret rather than inlining:
 `database`, `orchestrator`, `searchUi` and `licensingAgent` all take
@@ -422,9 +424,9 @@ kubectl -n cheese create secret generic dmch-license-key \
 ```
 
 `database.secret.cheeseLicenseFile` and `orchestrator.secret.cheeseLicenseFile`
-must both name the file the agent writes — a **plain filename**, resolved against
-`/data`, not a host path. They default to `cheese_license_file.json` and agree
-out of the box; only change them together.
+must both name the file the agent writes — a path relative to `/data`, inside a
+folder (pods mount the folder read-only). They default to
+`licensing/cheese_license_file.json` and agree out of the box; only change them together.
 
 It adds one Deployment (1 replica), a ServiceAccount, and a `Role` in
 `kube-system` whose only right is `get` on the `kube-system` namespace object.
@@ -511,10 +513,11 @@ k8s/
 ## Conventions
 
 - **Image source.** Each app component accepts `image.source: local | ecr`.
-- **Shared volume at `/data`.** database / orchestrator / synthongpt / alignment mount
-  it — either a claim you supply (`data.existingClaim`) or `cheese-data-pvc` provisioned
-  by the chart (RWO by default; set `deployment.storage.accessMode: ReadWriteMany`
-  on a cloud target to scale the search role across nodes). Supabase uses its own PVC.
+- **Data volume.** A claim you supply (`data.existingClaim`) or `cheese-data-pvc`
+  provisioned by the chart (RWO by default; `ReadWriteMany` on a shared backend to
+  spread pods across nodes). Pods get `/data` as an `emptyDir` with subPath mounts:
+  databases read-only, `jobs/` read-write, `licensing/` read-only. `data.stateClaim`
+  optionally holds `jobs/` + `licensing/`. Supabase uses its own PVC.
 - **UID 2112 group 0.** Pods touching `/data` run as that identity; stage files `chown -R 2112:0`.
 - **Stable resource names.** `cheese-database-app`, `cheese-orchestrator`, `cheese-electrostatics`,
   `cheese-alignment-app`, `cheese-ketcher`, `supabase-*` — so in-cluster service URLs work out of the box.
