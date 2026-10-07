@@ -21,14 +21,15 @@ spec:
   {{- if not $db.autoscaling.enabled }}
   replicas: {{ default 1 $role.replicaCount }}
   {{- end }}
+  revisionHistoryLimit: {{ include "cheese.revisionHistoryLimit" (list $root $db) }}
   selector:
     matchLabels:
       {{- include "cheese.componentSelectorLabels" (list $root $component) | nindent 6 }}
   template:
     metadata:
-      {{- with $db.podAnnotations }}
+      {{- with (include "cheese.podAnnotations" (list $root $db.podAnnotations $db.secret.existingSecret "/database-secret.yaml")) }}
       annotations:
-        {{- toYaml . | nindent 8 }}
+        {{- . | nindent 8 }}
       {{- end }}
       labels:
         {{- include "cheese.componentSelectorLabels" (list $root $component) | nindent 8 }}
@@ -37,12 +38,38 @@ spec:
       securityContext:
         {{- toYaml $db.podSecurityContext | nindent 8 }}
       volumes:
-        - name: data
-          persistentVolumeClaim:
-            claimName: {{ include "cheese.dataClaimName" $root }}
+        {{- include "cheese.dataVolumes" (dict "root" $root "library" true "state" true) | nindent 8 }}
         - name: config
           configMap:
             name: cheese-database-config
+      {{- if $db.prepareJobsDir.enabled }}
+      {{- /* kubelet-created subPath dirs are root-owned; hand jobs/ to 2112:0. */}}
+      initContainers:
+        - name: prepare-jobs-dir
+          image: {{ include "cheese.image" (list $ $db.image) | quote }}
+          imagePullPolicy: {{ include "cheese.imagePullPolicy" (list $ $db.image) }}
+          securityContext:
+            runAsUser: 0
+            runAsNonRoot: false
+            capabilities:
+              drop: [ALL]
+              add: [CHOWN, FOWNER]
+            allowPrivilegeEscalation: false
+          command: ["sh", "-c"]
+          args:
+            - |
+              set -eu
+              {{- /* Best-effort: an identity-enforcing volume refuses chown and needs none. */}}
+              d=/jobs
+              chown {{ default 2112 $db.securityContext.runAsUser }}:0 "$d" && chmod 2775 "$d" || { echo "warn: cannot change ownership of $d (identity-enforcing volume, e.g. an EFS access point?) — continuing" >&2; }
+              ls -ld "$d"
+          resources:
+            {{- toYaml $db.prepareJobsDir.resources | nindent 12 }}
+          volumeMounts:
+            - name: {{ include "cheese.stateVolumeName" $root }}
+              mountPath: /jobs
+              subPath: {{ trimAll "/" $db.env.jobs_data_path | quote }}
+      {{- end }}
       containers:
         - name: {{ $roleName }}
           securityContext:
@@ -129,8 +156,7 @@ spec:
           resources:
             {{- toYaml $role.resources | nindent 12 }}
           volumeMounts:
-            - name: data
-              mountPath: {{ $root.Values.data.mountPath | quote }}
+            {{- include "cheese.dataMounts" (dict "root" $root "databases" true "jobs" true "license" $db.secret.cheeseLicenseFile) | nindent 12 }}
             - name: config
               mountPath: {{ $cfgMountFile | quote }}
               subPath: {{ $db.config.fileName | quote }}

@@ -10,6 +10,7 @@ metadata:
 spec:
   serviceName: supabase-db
   replicas: 1
+  revisionHistoryLimit: {{ include "cheese.revisionHistoryLimit" (list $ $s) }}
   selector:
     matchLabels:
       {{- include "cheese.componentSelectorLabels" (list . "supabase-db") | nindent 6 }}

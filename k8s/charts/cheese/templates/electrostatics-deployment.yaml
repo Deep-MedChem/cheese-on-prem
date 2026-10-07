@@ -9,6 +9,7 @@ metadata:
     {{- include "cheese.componentLabels" (list $root "electrostatics") | nindent 4 }}
 spec:
   replicas: {{ $es.replicaCount }}
+  revisionHistoryLimit: {{ include "cheese.revisionHistoryLimit" (list $root $es) }}
   selector:
     matchLabels:
       {{- include "cheese.componentSelectorLabels" (list $root "electrostatics") | nindent 6 }}

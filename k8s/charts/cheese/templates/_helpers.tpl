@@ -170,6 +170,53 @@ Pass root context.
 {{- include "cheese.secretName" (list .Values.licensingAgent.secret.existingSecret "dmch-license-key") -}}
 {{- end -}}
 
+{{/*
+Pod-template annotations for a component: its own podAnnotations, plus a
+checksum of the Secret it reads WHEN THE CHART RENDERS THAT SECRET.
+
+The checksum is what makes a rewritten secret actually reach the pods. Every
+secret here is consumed as a secretKeyRef env var, and env vars are resolved
+once at pod start and never update in place — so with nothing changing in the
+pod template, editing a Secret leaves the OLD value running until something
+unrelated happens to roll the Deployment. The failure is silent: the Deployment
+is Available, the Secret is correct, and the process is using neither.
+
+Deliberately NOT emitted when existingSecret is set. The chart cannot see a
+Secret it does not render — `lookup` returns nothing under `helm template`,
+which is how Argo CD, `helm diff` and CI evaluate this — so the checksum would
+be a constant: an annotation that looks like protection and is none. Bring your
+own trigger through podAnnotations, or run a controller that watches Secrets
+(stakater/reloader).
+
+Usage: include "cheese.podAnnotations" (list $root $podAnnotations $existingSecret "/licensing-agent-secret.yaml")
+*/}}
+{{- define "cheese.podAnnotations" -}}
+{{- $root := index . 0 -}}
+{{- $ann := index . 1 -}}
+{{- $existing := index . 2 -}}
+{{- $secretTemplate := index . 3 -}}
+{{- with $ann }}{{ toYaml . }}{{ "\n" }}{{ end }}
+{{- if not $existing }}checksum/secret: {{ include (print $root.Template.BasePath $secretTemplate) $root | sha256sum | quote }}{{ end }}
+{{- end -}}
+
+{{/*
+revisionHistoryLimit for a workload. Pass (list $root <component values>): the
+component's own key wins, else the chart-wide one, else 10. hasKey rather than
+`default` so a deliberate 0 (keep none, no rollback) survives.
+*/}}
+{{- define "cheese.revisionHistoryLimit" -}}
+{{- $root := index . 0 -}}
+{{- $cfg := index . 1 -}}
+{{- $v := $root.Values.revisionHistoryLimit -}}
+{{- if and (kindIs "map" $cfg) (hasKey $cfg "revisionHistoryLimit") -}}
+{{- $v = $cfg.revisionHistoryLimit -}}
+{{- end -}}
+{{- if or (kindIs "invalid" $v) (eq (toString $v) "") -}}
+{{- $v = 10 -}}
+{{- end -}}
+{{- $v | int -}}
+{{- end -}}
+
 {{/* ServiceAccount the licence agent runs as. Pass root context. */}}
 {{- define "cheese.licensingAgentServiceAccountName" -}}
 {{- $sa := .Values.licensingAgent.serviceAccount -}}
@@ -220,6 +267,101 @@ chart's own object is skipped whenever the site supplies one.
 */}}
 {{- define "cheese.dataClaimName" -}}
 {{- .Values.data.existingClaim | default .Values.data.pvcName -}}
+{{- end -}}
+
+{{/* /data = emptyDir + per-folder subPaths: databases ro, jobs rw, licence folder ro. */}}
+
+{{/* Claim for jobs/ + licence folder; data.stateClaim or the data claim. Pass root context. */}}
+{{- define "cheese.stateClaimName" -}}
+{{- .Values.data.stateClaim | default (include "cheese.dataClaimName" .) -}}
+{{- end -}}
+
+{{/* Pod volume name for the state claim: "state" if separate, else "data". Pass root context. */}}
+{{- define "cheese.stateVolumeName" -}}
+{{- if eq (include "cheese.stateClaimName" .) (include "cheese.dataClaimName" .) -}}data{{- else -}}state{{- end -}}
+{{- end -}}
+
+{{/*
+Data-claim subPaths holding the enabled databases (JSON list): databasesRoot,
+else one per database. Mirrors database-configmap.yaml's join. Pass root context.
+*/}}
+{{- define "cheese.librarySubPaths" -}}
+{{- $dbRoot := trimAll "/" (default "" .Values.database.databasesRoot) -}}
+{{- $paths := list -}}
+{{- if $dbRoot }}{{ $paths = append $paths $dbRoot }}{{ end -}}
+{{- range $name, $db := .Values.database.databases -}}
+{{- if $db.enabled -}}
+{{- if or (hasPrefix "/" $db.output_directory) (not $dbRoot) -}}
+{{- $paths = append $paths (trimAll "/" $db.output_directory) -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- $paths | uniq | toJson -}}
+{{- end -}}
+
+{{/* Folder of a licence path; fails if it is at the volume root. Pass (list <root> <path>). */}}
+{{- define "cheese.licenseDir" -}}
+{{- $rel := trimPrefix "/" (index . 1) -}}
+{{- $d := dir $rel -}}
+{{- if or (eq $d ".") (eq $d "") -}}
+{{- fail (printf "licence file %q is at the volume root; pods mount its folder, so use e.g. \"licensing/%s\" for database/orchestrator/alignment.secret.cheeseLicenseFile." $rel (base $rel)) -}}
+{{- end -}}
+{{- $d -}}
+{{- end -}}
+
+{{/* Pod volumes for the /data layout. Pass (dict "root" $ "library" <bool> "state" <bool>). */}}
+{{- define "cheese.dataVolumes" -}}
+{{- $root := .root -}}
+{{- $stateVol := include "cheese.stateVolumeName" $root -}}
+- name: data-scratch
+  emptyDir: {}
+{{- if or .library (and .state (eq $stateVol "data")) }}
+- name: data
+  persistentVolumeClaim:
+    claimName: {{ include "cheese.dataClaimName" $root }}
+{{- end }}
+{{- if and .state (eq $stateVol "state") }}
+- name: state
+  persistentVolumeClaim:
+    claimName: {{ include "cheese.stateClaimName" $root }}
+{{- end }}
+{{- end -}}
+
+{{/* volumeMounts for the /data layout. Pass (dict "root" $ "databases" "synthongpt" "jobs" <bool> "license" <path|"">). */}}
+{{- define "cheese.dataMounts" -}}
+{{- $root := .root -}}
+{{- $mount := trimSuffix "/" $root.Values.data.mountPath -}}
+{{- $stateVol := include "cheese.stateVolumeName" $root -}}
+- name: data-scratch
+  mountPath: {{ $mount | quote }}
+{{- if .databases }}
+{{- range (include "cheese.librarySubPaths" $root | fromJsonArray) }}
+- name: data
+  mountPath: {{ printf "%s/%s" $mount . | quote }}
+  subPath: {{ . | quote }}
+  readOnly: true
+{{- end }}
+{{- end }}
+{{- if .synthongpt }}
+{{- $p := trimAll "/" $root.Values.synthongpt.dataRootSubdir }}
+- name: data
+  mountPath: {{ printf "%s/%s" $mount $p | quote }}
+  subPath: {{ $p | quote }}
+  readOnly: true
+{{- end }}
+{{- if .jobs }}
+{{- $p := trimAll "/" $root.Values.database.env.jobs_data_path }}
+- name: {{ $stateVol }}
+  mountPath: {{ printf "%s/%s" $mount $p | quote }}
+  subPath: {{ $p | quote }}
+{{- end }}
+{{- with .license }}
+{{- $d := include "cheese.licenseDir" (list $root .) }}
+- name: {{ $stateVol }}
+  mountPath: {{ printf "%s/%s" $mount $d | quote }}
+  subPath: {{ $d | quote }}
+  readOnly: true
+{{- end }}
 {{- end -}}
 
 {{/*

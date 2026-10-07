@@ -35,14 +35,15 @@ spec:
   {{- if not $oc.autoscaling.enabled }}
   replicas: {{ $oc.replicaCount }}
   {{- end }}
+  revisionHistoryLimit: {{ include "cheese.revisionHistoryLimit" (list $root $oc) }}
   selector:
     matchLabels:
       {{- include "cheese.componentSelectorLabels" (list $root "orchestrator") | nindent 6 }}
   template:
     metadata:
-      {{- with $oc.podAnnotations }}
+      {{- with (include "cheese.podAnnotations" (list $root $oc.podAnnotations $oc.secret.existingSecret "/orchestrator-secret.yaml")) }}
       annotations:
-        {{- toYaml . | nindent 8 }}
+        {{- . | nindent 8 }}
       {{- end }}
       labels:
         {{- include "cheese.componentSelectorLabels" (list $root "orchestrator") | nindent 8 }}
@@ -51,9 +52,7 @@ spec:
       securityContext:
         {{- toYaml $oc.podSecurityContext | nindent 8 }}
       volumes:
-        - name: data
-          persistentVolumeClaim:
-            claimName: {{ include "cheese.dataClaimName" $root }}
+        {{- include "cheese.dataVolumes" (dict "root" $root "library" false "state" (not (empty $oc.secret.cheeseLicenseFile))) | nindent 8 }}
         {{- if .Values.database.enabled }}
         - name: config
           configMap:
@@ -70,8 +69,7 @@ spec:
               containerPort: {{ $oc.containerPort }}
               protocol: TCP
           volumeMounts:
-            - name: data
-              mountPath: {{ $root.Values.data.mountPath | quote }}
+            {{- include "cheese.dataMounts" (dict "root" $root "license" $oc.secret.cheeseLicenseFile) | nindent 12 }}
             {{- if .Values.database.enabled }}
             - name: config
               mountPath: {{ printf "%s/%s" (trimSuffix "/" $root.Values.data.mountPath) .Values.database.config.fileName | quote }}
