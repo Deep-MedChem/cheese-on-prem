@@ -35,6 +35,13 @@ payload/
   models/manifest.json                                + the model files
 ```
 
+Build the backend with `dmc-platform-backend/Dockerfile.onprem`. It exercises a
+native substructure search as the service user against a read-only partition.
+Older runtimes can pass readiness yet reject more complex VAST conditions when
+RDKit opens a native partition. Use the corrected synthon-core runtime or the
+digest-pinned wheel overlay documented in that Dockerfile. Keep signed releases
+mounted read-only.
+
 ```bash
 v2/build-offline-bundle \
   --backend-image <backend image ref> \
