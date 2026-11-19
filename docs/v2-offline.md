@@ -9,6 +9,7 @@ unchanged; V2 lives under `cheese v2 ...`.
 | | |
 |---|---|
 | UI | `http://127.0.0.1:18780/` |
+| Installed editor revision and file hashes | `http://127.0.0.1:18780/ketcher/build-info.json` |
 | API | `http://127.0.0.1:18781/` (`/health/live`, `/health/ready`, `/api/v2/docs`) |
 | Host requirements | Linux, bash, coreutils, Docker Engine with the compose v2 plugin |
 
