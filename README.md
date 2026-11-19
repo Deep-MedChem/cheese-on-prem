@@ -18,6 +18,7 @@ that matches your infrastructure — each is self-contained and has its own guid
 |---|---|---|---|
 | <kbd>🐳 compose</kbd> | **Docker Compose on a single host** | **[docs/compose-install.md](docs/compose-install.md)** | The standard install. You have a VM or physical server and want the whole platform running with one command. Start here unless you specifically need Kubernetes. |
 | <kbd>☸️ k8s</kbd> | **Kubernetes (Helm chart)** | **[k8s/README.md](k8s/README.md)** | You already run a Kubernetes cluster and want CHEESE deployed into it with your existing storage, ingress and secret management. |
+| <kbd>📦 v2 offline</kbd> | **CHEESE V2 from an offline bundle** | **[docs/v2-offline.md](docs/v2-offline.md)** | Air-gapped host: the V2 search stack, signed releases and the CLI arrive as one verified bundle; `cheese v2 start/status/stop/update`. No network or credentials needed. |
 
 Both install types run the same product images and read the same databases. They
 differ only in how the containers are orchestrated.
@@ -87,6 +88,8 @@ docs/                    Documentation, including the Compose install guide
 tests/                   The bundled test database
 k8s/                     Kubernetes install: the CHEESE Helm chart, plus
                          local-dev tooling for testing it on kind
+v2/                      CHEESE V2 offline bundle: producer, compose template,
+                         installer entry point (tests in tests/v2/)
 assets/                  Images used by the documentation
 deprecated/              Retired components, kept for reference only
 ```

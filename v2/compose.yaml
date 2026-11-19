@@ -1,0 +1,100 @@
+# CHEESE V2 offline stack. Rendered by `cheese v2` -- do not run by hand:
+# every ${CHEESE_V2_*} value comes from <prefix>/state/runtime.env, written by
+# `cheese v2 start` from the installed bundle and <prefix>/config/v2.conf.
+#
+# Network model: backend and ui are only on `internal` (internal: true -> no
+# route off the host). `edge` is the only container that also sits on
+# `hostonly`, a bridge with IP masquerading disabled, and it publishes the two
+# ports on the loopback address only.
+
+services:
+  backend:
+    image: ${CHEESE_V2_BACKEND_IMAGE:?}
+    pull_policy: never
+    restart: unless-stopped
+    networks: [internal]
+    env_file:
+      - ${CHEESE_V2_CONFIG_DIR:?}/secrets.env
+      - ${CHEESE_V2_CONFIG_DIR:?}/backend.env
+    # `environment` wins over env_file, so operator overrides cannot change the
+    # release contract below.
+    environment:
+      ENVIRONMENT: production
+      ONPREM_SEARCH_ONLY: "true"
+      LOCAL_LIBRARY_MANIFESTS_JSON: ${CHEESE_V2_LIBRARY_MANIFESTS_JSON:?}
+      MODEL_ROOT: ${CHEESE_V2_MODEL_ROOT:?}
+      MODEL_MANIFEST_SHA256: ${CHEESE_V2_MODEL_MANIFEST_SHA256:?}
+      RELEASE_PUBLIC_KEY_B64: ${CHEESE_V2_RELEASE_PUBLIC_KEY_B64:?}
+    volumes:
+      - ${CHEESE_V2_DATA_DIR:?}:/data:ro
+      - runtime:/var/lib/dmc-platform
+      - cache:/var/cache/dmc-platform
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health/live', timeout=5)"]
+      interval: 10s
+      timeout: 8s
+      retries: 6
+      start_period: 300s
+
+  ui:
+    image: ${CHEESE_V2_UI_IMAGE:?}
+    pull_policy: never
+    restart: unless-stopped
+    networks: [internal]
+    env_file:
+      - ${CHEESE_V2_CONFIG_DIR:?}/secrets.env
+      - ${CHEESE_V2_CONFIG_DIR:?}/ui.env
+    environment:
+      ONPREM_SEARCH_ONLY: "true"
+      VITE_ONPREM_SEARCH_ONLY: "true"
+      PLATFORM_API_URL: http://backend:8000
+      PORT: "3000"
+      HOST: 0.0.0.0
+    depends_on:
+      backend:
+        condition: service_healthy
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/health').then(r => process.exit(r.ok ? 0 : 1), () => process.exit(1))"]
+      interval: 10s
+      timeout: 8s
+      retries: 6
+      start_period: 60s
+
+  edge:
+    # The backend image already has Python; no third image is shipped.
+    image: ${CHEESE_V2_BACKEND_IMAGE:?}
+    pull_policy: never
+    restart: unless-stopped
+    entrypoint: ["python", "-I", "/opt/cheese-v2/edge-forward.py"]
+    command: ["18780=ui:3000", "18781=backend:8000"]
+    user: "10001:10001"
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    volumes:
+      - ${CHEESE_V2_EDGE_SCRIPT:?}:/opt/cheese-v2/edge-forward.py:ro
+    networks: [internal, hostonly]
+    ports:
+      - "${CHEESE_V2_BIND:?}:${CHEESE_V2_UI_PORT:?}:18780"
+      - "${CHEESE_V2_BIND:?}:${CHEESE_V2_API_PORT:?}:18781"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import socket; [socket.create_connection(('127.0.0.1', p), 3).close() for p in (18780, 18781)]"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+networks:
+  internal:
+    internal: true
+  hostonly:
+    driver: bridge
+    driver_opts:
+      com.docker.network.bridge.enable_ip_masquerade: "false"
+
+volumes:
+  runtime: {}
+  cache: {}

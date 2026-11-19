@@ -46,6 +46,9 @@ show_help() {
   echo "  preflight-config             Validate & auto-heal the engine config"
   echo "  doctor                       Diagnose stack/config problems and suggest fixes"
   echo "  uninstall                    Uninstall CHEESE"
+  echo
+  echo "--- CHEESE V2 (offline bundle) --- "
+  echo "  v2 <command>                 install/update/verify/start/status/stop/logs (cheese v2 --help)"
   exit 1
 }
 
@@ -56,6 +59,13 @@ if [ $# -eq 0 ]; then
     exit 0
 fi
 
+
+# `cheese v2 ...` is the offline V2 stack: self-contained, no classic config or
+# cloud credentials, so it is dispatched before the classic environment loads.
+if [ "$1" = "v2" ]; then
+  shift
+  exec bash "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/cheese-v2" "$@"
+fi
 
 source ${HOME}/.config/cheese/cheese-env.sh
 
