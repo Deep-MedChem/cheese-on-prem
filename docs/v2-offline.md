@@ -9,14 +9,23 @@ unchanged; V2 lives under `cheese v2 ...`.
 | | |
 |---|---|
 | UI | `http://127.0.0.1:18780/` |
-| API | `http://127.0.0.1:18781/` (`/health/live`, `/health/ready`, `/docs`) |
+| API | `http://127.0.0.1:18781/` (`/health/live`, `/health/ready`, `/api/v2/docs`) |
 | Host requirements | Linux, bash, coreutils, Docker Engine with the compose v2 plugin |
 
 ---
 
 ## 1. Build the bundle (connected build host)
 
-Inputs: the two images present locally, and a payload directory:
+Build the production Classic search interface from the on-prem branch of `cheese-search-ui`.
+Its site-local gateway sends searches to V2. On the build host, set `ui_repo` to that checkout:
+
+```bash
+docker build -f "$ui_repo/Dockerfile.cheese-classic-onprem" \
+  --build-arg "SOURCE_REVISION=$(git -C "$ui_repo" rev-parse HEAD)" \
+  -t cheese-classic:v2-onprem "$ui_repo"
+```
+
+The bundle also needs the V2 backend image and a payload directory:
 
 ```
 payload/
@@ -28,7 +37,7 @@ payload/
 ```bash
 v2/build-offline-bundle \
   --backend-image <backend image ref> \
-  --ui-image      <ui image ref> \
+  --ui-image      cheese-classic:v2-onprem \
   --payload       /path/to/payload \
   --output        /path/to/cheese-v2-bundle \
   [--sdk-wheelhouse /path/to/sdk-wheelhouse] [--bundle-version pilot-1] [--archive] [--hardlink]
