@@ -43,7 +43,10 @@ def ed25519_public_key_b64(directory: Path) -> str:
 class _Health(http.server.BaseHTTPRequestHandler):
     def do_GET(self):  # noqa: N802
         ok = self.path in ("/health", "/health/live", "/health/ready")
-        self.send_response(200 if ok else 404)
+        if self.path == "/health/ready" and not self.server.search_ready:
+            self.send_response(503)
+        else:
+            self.send_response(200 if ok else 404)
         self.end_headers()
         self.wfile.write(b'{"status":"ready"}' if ok else b"")
 
@@ -143,10 +146,11 @@ class OfflineBundleTest(unittest.TestCase):
         # The installed CLI, through the classic dispatcher.
         return self.run_cmd(self.prefix / "bin/cheese", "v2", *args, check=check)
 
-    def health_servers(self):
+    def health_servers(self, *, search_ready=True):
         ports = []
         for _ in range(2):
             server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), _Health)
+            server.search_ready = search_ready
             threading.Thread(target=server.serve_forever, daemon=True).start()
             self.addCleanup(server.server_close)
             self.addCleanup(server.shutdown)
@@ -445,6 +449,14 @@ class OfflineBundleTest(unittest.TestCase):
         self.install(b1, d1)
         refused = self.cheese("update", "--bundle", b2, "--trusted-digest", d2, check=False)
         self.assertIn("release IDs must be immutable", refused.stderr)
+
+    def test_start_requires_search_readiness_even_when_containers_are_healthy(self):
+        bundle, digest = self.build(self.payload())
+        self.install(bundle, digest)
+        self.health_servers(search_ready=False)
+        result = self.cheese("start", "--timeout", "1", check=False)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("search libraries did not become ready", result.stderr)
 
     def test_update_of_running_stack_restarts_and_rolls_back_on_failure(self):
         (b1, d1), (b2, d2) = self.build_consistent_update()

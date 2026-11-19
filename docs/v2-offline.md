@@ -87,8 +87,9 @@ cheese v2 stop       # removes this stack's containers/networks; data, volumes a
 ```
 
 `start` returns once all containers are healthy and both ports answer on the
-host. Large catalogues can still be loading: `status` reports
-`readiness: loading search assets` until `/health/ready` is 200.
+host, and the backend reports that its mounted libraries are ready for searches. Use
+`--timeout SEC` to allow longer warmup on a slower host. A running update that fails
+this check restores the previous bundle.
 
 ### Python SDK (optional)
 

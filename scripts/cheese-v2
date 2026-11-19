@@ -563,8 +563,8 @@ start_stack() {
   compose_available
   render_runtime_env
   log "Starting CHEESE V2 (project ${STATE[PROJECT]}, bundle sha256:${STATE[CURRENT_DIGEST]:0:12})..."
-  compose up -d --pull never --remove-orphans
   local deadline=$((SECONDS + timeout)) service health all_ok
+  compose up -d --pull never --remove-orphans || return 1
   while :; do
     all_ok=1
     for service in backend ui edge; do
@@ -588,9 +588,13 @@ start_stack() {
     || { warn "backend is healthy but not reachable from the host on $bind:$api_port"; return 1; }
   [ "$(http_get "$bind" "$ui_port" /health | head -1)" = 200 ] \
     || { warn "UI is healthy but not reachable from the host on $bind:$ui_port"; return 1; }
+  until [ "$(readiness_summary "$bind" "$api_port")" = ready ]; do
+    ((SECONDS < deadline)) || { warn "search libraries did not become ready within ${timeout}s"; return 1; }
+    sleep 2
+  done
   log "CHEESE V2 is up:"
   log "  UI   http://$bind:$ui_port/"
-  log "  API  http://$bind:$api_port/   (readiness: $(readiness_summary "$bind" "$api_port"))"
+  log "  API  http://$bind:$api_port/   (readiness: ready)"
 }
 
 readiness_summary() {
