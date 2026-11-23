@@ -113,11 +113,31 @@ this check restores the previous bundle.
 If the bundle includes the SDK wheelhouse:
 
 ```bash
-cheese v2 sdk-install --venv ~/cheese-sdk [--python python3.11]
+cheese v2 sdk-install --venv ~/cheese-sdk --python python3.11
 ~/cheese-sdk/bin/python -c 'import deepmedchem as dmc; print(dmc.Client(api_url="http://127.0.0.1:18781", on_prem=True).catalog())'
 ```
 
 It installs with `--no-index --require-hashes` from the bundled wheels only.
+
+#### Shared Jupyter server
+
+Starting with the `onprem2` SDK wheel, one kernel can supply the site for every notebook user. On the notebook server, use a dedicated Linux x86-64 CPython 3.11 environment with pip and ipykernel installed from your internal distribution. Choose a Jupyter prefix whose `share/jupyter/kernels` directory is visible to the server. From the extracted offline bundle run:
+
+```bash
+./cli/v2/install-notebook-kernel ./sdk/wheelhouse /opt/cheese-kernel/bin/python \
+  /opt/jupyter https://cheese.your-pharma-company.com
+```
+
+Replace the URL with your internal HTTPS origin. The installer verifies the wheelhouse, installs the pinned SDK dependencies in the chosen interpreter and registers **CHEESE (on-prem)** in that prefix. Rerun with the new wheelhouse to update this kernel. Users select it and run:
+
+```python
+from deepmedchem import Client
+
+with Client(on_prem=True) as cheese:
+    print(cheese.catalog())
+```
+
+The kernel sets `DEEPMEDCHEM_ON_PREM_URL`. Plain `Client()`, `AsyncClient()` and SDK search helpers use that site too. Passing `on_prem=True` also makes a notebook fail early if it is opened in a kernel without a configured site. Users can read the local API docs at `/api/v2/docs` on their deployment hostname.
 
 ## 4. Update
 
