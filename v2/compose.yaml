@@ -36,7 +36,10 @@ services:
       interval: 10s
       timeout: 8s
       retries: 6
-      start_period: 300s
+      # Libraries load before the API answers, and a real synthon space takes minutes.
+      # Failures inside the start period never mark the container unhealthy, so
+      # the --timeout of 'cheese v2 start' / 'update' is the only limit on warm-up.
+      start_period: 7200s
 
   ui:
     image: ${CHEESE_V2_UI_IMAGE:?}
