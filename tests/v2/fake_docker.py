@@ -75,7 +75,9 @@ def compose(state, args):
         if info and info["running"]:
             print(f"{project}__{rest[-1]}")
     elif command == "logs":
-        print("fake logs")
+        # Tests of the support bundle plant their own backend log; ui and edge keep the stub.
+        services = [a for a in rest[1:] if a in ("backend", "ui", "edge")]
+        print(state.get("backend_logs", "fake logs") if services == ["backend"] else "fake logs")
     else:
         print(f"fake compose: unsupported {command}", file=sys.stderr)
         return 2
@@ -129,6 +131,9 @@ def main(args):
             return 0
         if args[0] == "version":
             print("fake")
+            return 0
+        if args[0] == "stats":
+            print("fake: cpu=1.00% memory=10MiB / 100MiB (10.00%) pids=3")
             return 0
         print(f"fake docker: unsupported {args}", file=sys.stderr)
         return 2
