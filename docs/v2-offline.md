@@ -203,7 +203,13 @@ cheese v2 update --bundle /srv/cheese-media/cheese-v2-bundle --trusted-digest sh
   # cacert = "/etc/ssl/certs/internal-ca.pem"
   ```
 
+- For `sftp://`, curl checks the server's host key against the operator's
+  `~/.ssh/known_hosts`; add it once, after comparing it with the key the
+  producer sent: `ssh-keyscan -p <port> <host> >> ~/.ssh/known_hosts`.
 - `--jobs N` sets how many files are downloaded at once (default 4).
+- The very first bundle has no installed CLI to fetch it. Either bring that one
+  on a disk, or run the single script the producer sends:
+  `bash cheese-v2 fetch --from ... --output ... --trusted-digest ...`.
 
 On the producer side, publish the bundle directory unchanged (not the `.tar`),
 for example `sftp> put -r cheese-v2-bundle` or `aws s3 sync cheese-v2-bundle

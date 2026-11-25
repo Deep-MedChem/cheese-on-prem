@@ -121,7 +121,8 @@ class DockerIntegrationTest(unittest.TestCase):
             tag = f"cheese-v2-it/{role}:test"
             (context / "Dockerfile").write_text(
                 f"FROM {BASE}\nUSER root\nCOPY fake_server.py /opt/fake_server.py\n"
-                f"COPY --chmod=755 node /usr/local/bin/node\nUSER 10001\n"
+                # RUN chmod, not COPY --chmod: the test also has to build with Docker's legacy builder.
+                f"COPY node /usr/local/bin/node\nRUN chmod 755 /usr/local/bin/node\nUSER 10001\n"
                 f'ENTRYPOINT []\nCMD ["python", "-I", "/opt/fake_server.py", "{role}", "{port}"]\n'
             )
             run("docker", "build", "-q", "-t", tag, context, timeout=600)
