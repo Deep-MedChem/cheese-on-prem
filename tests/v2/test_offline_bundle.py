@@ -1,5 +1,5 @@
-"""Tests for the offline CHEESE V2 path: producer, verification, install,
-start/status/stop and update. Docker is replaced by tests/v2/fake_docker.py,
+"""Tests for the offline CHEESE V2 path: producer, verification, network fetch,
+install, start/status/stop and update. Docker is replaced by tests/v2/fake_docker.py,
 so nothing here starts a container; one test renders the compose file with the
 real `docker compose config` when Docker is available.
 
@@ -7,6 +7,7 @@ real `docker compose config` when Docker is available.
 """
 
 import base64
+import functools
 import hashlib
 import http.server
 import json
@@ -49,6 +50,24 @@ class _Health(http.server.BaseHTTPRequestHandler):
             self.send_response(200 if ok else 404)
         self.end_headers()
         self.wfile.write(b'{"status":"ready"}' if ok else b"")
+
+    def log_message(self, *args):
+        pass
+
+
+class _Files(http.server.SimpleHTTPRequestHandler):
+    """A producer's download server: one directory, every request recorded."""
+
+    def do_GET(self):  # noqa: N802
+        self.server.requested.append(self.path)
+        if self.path in self.server.corrupt:
+            body = b"not the published file"
+            self.send_response(200)
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+            return
+        super().do_GET()
 
     def log_message(self, *args):
         pass
@@ -160,6 +179,14 @@ class OfflineBundleTest(unittest.TestCase):
         )
         return ports
 
+    def serve(self, root):
+        server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), functools.partial(_Files, directory=str(root)))
+        server.requested, server.corrupt = [], set()
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+        self.addCleanup(server.server_close)
+        self.addCleanup(server.shutdown)
+        return server, f"http://127.0.0.1:{server.server_address[1]}"
+
     def project(self):
         return dict(
             line.split("=", 1) for line in (self.prefix / "state/installed.env").read_text().splitlines()
@@ -267,6 +294,93 @@ class OfflineBundleTest(unittest.TestCase):
         sums.write_text(sums.read_text() + f"{'0' * 64}  ../outside\n")
         result = self.run_cmd(cli, "verify", "--bundle", bundle, "--allow-untrusted", check=False)
         self.assertIn("unsafe or malformed", result.stderr)
+
+    # ── fetch ────────────────────────────────────────────────────────────────
+
+    def test_fetch_downloads_a_bundle_that_verifies_and_installs(self):
+        bundle, digest = self.build(self.payload())
+        cli = bundle / "cli/scripts/cheese-v2"
+        _, url = self.serve(self.tmp)
+        fetched = self.tmp / "downloads/fetched"
+        out = self.run_cmd(cli, "fetch", "--from", f"{url}/bundle/", "--output", fetched, "--trusted-digest", digest)
+        self.assertIn("matches the trusted digest", out.stdout)
+        self.assertIn(f"cheese v2 update --bundle {fetched} --trusted-digest {digest}", out.stdout)
+        self.assertFalse(Path(f"{fetched}.partial").exists())
+        self.assertEqual((fetched / "SHA256SUMS").read_bytes(), (bundle / "SHA256SUMS").read_bytes())
+        self.assertTrue(os.access(fetched / "install.sh", os.X_OK))
+        self.assertTrue(os.access(fetched / "cli/scripts/cheese", os.X_OK))
+        self.assertFalse(os.access(fetched / "bundle.env", os.X_OK))
+        self.run_cmd(cli, "verify", "--bundle", fetched, "--trusted-digest", digest)
+        self.install(fetched, digest)
+        self.assertEqual(os.readlink(self.prefix / "current"), f"bundles/{digest[7:19]}")
+        again = self.run_cmd(cli, "fetch", "--from", f"{url}/bundle", "--output", fetched, "--trusted-digest", digest, check=False)
+        self.assertIn("already exists", again.stderr)
+
+    def test_fetch_takes_nothing_from_a_source_that_is_not_the_trusted_bundle(self):
+        bundle, _ = self.build(self.payload())
+        server, url = self.serve(self.tmp)
+        fetched = self.tmp / "fetched"
+        cli = bundle / "cli/scripts/cheese-v2"
+        wrong = self.run_cmd(cli, "fetch", "--from", f"{url}/bundle", "--output", fetched, "--trusted-digest", "sha256:" + "0" * 64, check=False)
+        self.assertNotEqual(wrong.returncode, 0)
+        self.assertIn("nothing was downloaded from it", wrong.stderr)
+        self.assertEqual(server.requested, ["/bundle/SHA256SUMS"])
+        self.assertFalse(fetched.exists())
+        missing = self.run_cmd(cli, "fetch", "--from", f"{url}/bundle", "--output", fetched, check=False)
+        self.assertIn("--trusted-digest", missing.stderr)
+
+    def test_fetch_rejects_a_changed_file_and_continues_on_the_next_run(self):
+        bundle, digest = self.build(self.payload())
+        cli = bundle / "cli/scripts/cheese-v2"
+        server, url = self.serve(self.tmp)
+        fetched = self.tmp / "fetched"
+        data = "/bundle/payload/releases/mcule-aa-in-stock/r2026-11-01/data.bin"
+        server.corrupt.add(data)
+        command = (cli, "fetch", "--from", f"{url}/bundle", "--output", fetched, "--trusted-digest", digest)
+        failed = self.run_cmd(*command, check=False)
+        self.assertNotEqual(failed.returncode, 0)
+        self.assertIn("data.bin does not match SHA256SUMS", failed.stderr)
+        self.assertIn("run the same command again", failed.stderr)
+        self.assertFalse(fetched.exists())
+        self.assertFalse(Path(f"{fetched}.partial{data[7:]}").exists())
+
+        # The second run downloads only what is still missing.
+        server.corrupt.clear()
+        server.requested.clear()
+        out = self.run_cmd(*command).stdout
+        self.assertEqual(sorted(server.requested), ["/bundle/SHA256SUMS", data])
+        self.assertIn("kept     install.sh", out)
+        self.run_cmd(cli, "verify", "--bundle", fetched, "--trusted-digest", digest)
+
+    def test_fetch_reuses_the_releases_already_installed(self):
+        (b1, d1), (b2, d2) = self.build_consistent_update()
+        self.install(b1, d1)
+        server, url = self.serve(self.tmp)
+        fetched = self.tmp / "fetched"
+        out = self.cheese("fetch", "--from", f"{url}/bundle2", "--output", fetched, "--trusted-digest", d2).stdout
+        installed = "payload/releases/mcule-aa-in-stock/r2026-11-01/data.bin"
+        self.assertIn(f"reused   {installed}", out)
+        self.assertNotIn(f"/bundle2/{installed}", server.requested)
+        self.assertIn("/bundle2/payload/releases/vast-2026-h2/r1/manifest.json", server.requested)
+        self.cheese("update", "--bundle", fetched, "--trusted-digest", d2)
+        self.assertEqual(os.readlink(self.prefix / "current"), f"bundles/{d2[7:19]}")
+        self.assertEqual(list(self.home.rglob("*.partial")), [])
+
+    def test_fetch_reads_other_url_schemes_and_refuses_a_password_in_the_url(self):
+        bundle, digest = self.build(self.payload())
+        cli = bundle / "cli/scripts/cheese-v2"
+        fetched = self.tmp / "fetched"
+        self.run_cmd(cli, "fetch", "--from", f"file://{bundle}", "--output", fetched, "--trusted-digest", digest, "--jobs", "1")
+        self.run_cmd(cli, "verify", "--bundle", fetched, "--trusted-digest", digest)
+        for url, message in (
+            ("sftp://operator:secret@files.example.com/bundle", "do not put a password in the URL"),
+            ("/srv/bundle", "--from must be"),
+        ):
+            result = self.run_cmd(cli, "fetch", "--from", url, "--output", self.tmp / "other", "--trusted-digest", digest, check=False)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn(message, result.stderr)
+        self.assertFalse((self.tmp / "other").exists())
+        self.assertFalse(self.prefix.exists())
 
     # ── install / start / status / stop ──────────────────────────────────────
 

@@ -2,7 +2,8 @@
 # cheese v2 -- offline operator commands for the CHEESE V2 search stack.
 #
 # Self-contained: needs bash, coreutils and docker (compose v2), never the
-# classic ~/.config/cheese setup, cloud credentials or network access. Every
+# classic ~/.config/cheese setup or cloud credentials. Only 'fetch' uses the
+# network (and needs curl); every other command works without it. Every
 # Docker resource it creates belongs to one compose project derived from the
 # install prefix, so it cannot touch the classic stack or anything else.
 #
@@ -40,6 +41,8 @@ Commands:
   install --bundle DIR --trusted-digest sha256:HEX   Install (or upgrade) from an offline bundle
   update  --bundle DIR --trusted-digest sha256:HEX   Upgrade an existing install from a newer bundle
   verify  --bundle DIR --trusted-digest sha256:HEX   Check a bundle without changing anything
+  fetch   --from URL --output DIR --trusted-digest sha256:HEX
+                                                    Download a bundle over the network (the only online command)
   start   [--timeout SEC]                           Start the stack and wait until it answers
   status  [--json]                                  Show installed bundle, containers and readiness
   stop                                              Stop the stack (data and volumes are kept)
@@ -56,6 +59,12 @@ install/update options:
   --skip-preflight               Skip the in-image release signature pre-check
   --force                        Re-apply a bundle that is already installed
   --allow-untrusted              TESTING ONLY: skip the external digest anchor
+
+fetch options:
+  --from URL          Where the producer published the bundle directory (https, sftp, ftps; also http, ftp, file)
+  --output DIR        Where to write the bundle; an interrupted download continues on the next run
+  --curl-config FILE  curl options for the transfer: user, key, proxy, CA (keep passwords here, not in the URL)
+  --jobs N            Files downloaded at once (default 4)
 EOF
 }
 
@@ -190,8 +199,9 @@ load_host_conf() {
   [[ "${HOSTCONF[CHEESE_V2_BIND]}" =~ ^[0-9]{1,3}(\.[0-9]{1,3}){3}$ ]] || die "CHEESE_V2_BIND must be an IPv4 address"
   local port
   for port in CHEESE_V2_UI_PORT CHEESE_V2_API_PORT; do
-    [[ "${HOSTCONF[$port]}" =~ ^[0-9]+$ ]] && ((HOSTCONF[$port] > 0 && HOSTCONF[$port] < 65536)) \
-      || die "$port must be a TCP port"
+    if ! [[ "${HOSTCONF[$port]}" =~ ^[0-9]+$ ]] || ((HOSTCONF[$port] < 1 || HOSTCONF[$port] > 65535)); then
+      die "$port must be a TCP port"
+    fi
   done
   [ "${HOSTCONF[CHEESE_V2_BIND]}" = 127.0.0.1 ] \
     || warn "CHEESE_V2_BIND=${HOSTCONF[CHEESE_V2_BIND]}: the stack is reachable beyond this host"
@@ -201,6 +211,17 @@ load_host_conf() {
 
 declare -A BUNDLE=()
 RELEASE_LINES=()
+
+# The paths a SHA256SUMS lists, one per line; fails on an entry that is not
+# "<sha256>  <plain relative path>".
+listed_paths() {
+  awk '
+    !/^[0-9a-f]{64}  [^\/\\]/ { bad = 1; exit }
+    { path = substr($0, 67) }
+    path ~ /(^|\/)\.\.?(\/|$)/ { bad = 1; exit }
+    { print path }
+    END { exit bad }' "$1"
+}
 
 # Verify a bundle directory end to end. Nothing from the bundle is executed
 # or loaded before this returns.
@@ -226,12 +247,7 @@ verify_bundle() {
   listed="$(mktemp)"; unlisted="$(mktemp)"
   # shellcheck disable=SC2064
   trap "rm -f '$listed' '$unlisted'" RETURN
-  if ! awk '
-      !/^[0-9a-f]{64}  [^\/\\]/ { bad = 1; exit }
-      { path = substr($0, 67) }
-      path ~ /(^|\/)\.\.?(\/|$)/ { bad = 1; exit }
-      { print path }
-      END { exit bad }' "$dir/SHA256SUMS" | LC_ALL=C sort >"$listed"; then
+  if ! listed_paths "$dir/SHA256SUMS" | LC_ALL=C sort >"$listed"; then
     die "SHA256SUMS contains an unsafe or malformed entry"
   fi
   [ -s "$listed" ] || die "SHA256SUMS is empty"
@@ -307,6 +323,188 @@ print_bundle_summary() {
   done
   log "  models   sha256:${BUNDLE[MODEL_MANIFEST_SHA256]:0:12}..."
   log "  key      sha256:${BUNDLE[RELEASE_PUBLIC_KEY_SHA256]:0:12}..."
+}
+
+# ── fetch (network download) ─────────────────────────────────────────────────
+
+# The data directory of an existing install, without creating anything.
+installed_data_dir() {
+  local prefix="$PREFIX"
+  if [ -z "$prefix" ]; then
+    if [ -n "${CHEESE_V2_PREFIX:-}" ]; then
+      prefix="$CHEESE_V2_PREFIX"
+    elif [ -f "$SCRIPT_DIR/../../../../state/installed.env" ]; then
+      prefix="$SCRIPT_DIR/../../../.."
+    else
+      prefix="${XDG_DATA_HOME:-$HOME/.local/share}/cheese-v2"
+    fi
+  fi
+  [ -f "$prefix/state/installed.env" ] && [ -d "$prefix/data" ] && (cd "$prefix/data" && pwd -P)
+}
+
+# Percent-encode a bundle path for a URL, keeping the slashes.
+url_path() {
+  local path="$1" out="" char i
+  for ((i = 0; i < ${#path}; i++)); do
+    char="${path:i:1}"
+    case "$char" in
+      [A-Za-z0-9._~/-]) out+="$char" ;;
+      *) out+="$(printf '%%%02X' "'$char")" ;;
+    esac
+  done
+  printf '%s' "$out"
+}
+
+# curl ignores ~/.curlrc here (-q): only --curl-config shapes the transfer.
+fetch_url() {
+  local url="$1" target="$2" status=0
+  local options=(-q --fail --silent --show-error --location --connect-timeout 30 --retry 5 --retry-delay 5)
+  [ -z "$CURL_CONFIG" ] || options+=(--config "$CURL_CONFIG")
+  curl "${options[@]}" --continue-at - --output "$target" "$url" || status=$?
+  case "$status" in
+    0) return 0 ;;
+    # The server cannot continue a partial file (22, 33, 36): start this file again.
+    22 | 33 | 36)
+      [ -s "$target" ] || return "$status"
+      rm -f "$target"
+      curl "${options[@]}" --output "$target" "$url" ;;
+    *) return "$status" ;;
+  esac
+}
+
+# One bundle file into the partial directory: kept if already complete, taken
+# from the installed data if it is there, downloaded otherwise. Always checked
+# against its SHA256SUMS entry before it gets its final name.
+fetch_file() {
+  local base="$1" stage="$2" data="$3" models="$4" sha="$5" path="$6"
+  local target="$stage/$path" local_copy=""
+  mkdir -p "$(dirname "$target")"
+  if [ -f "$target" ]; then
+    if [ "$(sha256_of "$target")" = "$sha" ]; then
+      printf 'kept     %s\n' "$path"
+      return 0
+    fi
+    rm -f "$target"
+  fi
+  if [ -n "$data" ]; then
+    case "$path" in
+      payload/releases/*) local_copy="$data/releases/${path#payload/releases/}" ;;
+      payload/models/*) [ -z "$models" ] || local_copy="$data/models/$models/${path#payload/models/}" ;;
+    esac
+    if [ -n "$local_copy" ] && [ -f "$local_copy" ] && [ ! -L "$local_copy" ] && [ "$(sha256_of "$local_copy")" = "$sha" ]; then
+      rm -f "$target.part"
+      cp -l "$local_copy" "$target" 2>/dev/null || cp --reflink=auto "$local_copy" "$target"
+      printf 'reused   %s\n' "$path"
+      return 0
+    fi
+  fi
+  if [ ! -f "$target.part" ] || [ "$(sha256_of "$target.part")" != "$sha" ]; then
+    if ! fetch_url "$base/$(url_path "$path")" "$target.part"; then
+      printf 'ERROR: could not download %s\n' "$path" >&2
+      return 1
+    fi
+  fi
+  if [ "$(sha256_of "$target.part")" != "$sha" ]; then
+    rm -f "$target.part"
+    printf 'ERROR: %s does not match SHA256SUMS; the source is corrupt or was modified\n' "$path" >&2
+    return 1
+  fi
+  mv -f "$target.part" "$target"
+  printf 'fetched  %s\n' "$path"
+}
+
+stop_downloads() {
+  local pid
+  for pid in $(jobs -p); do
+    pkill -TERM -P "$pid" 2>/dev/null || true
+    kill "$pid" 2>/dev/null || true
+  done
+}
+
+cmd_fetch() {
+  command -v curl >/dev/null 2>&1 || die "fetch needs curl on this host"
+  [ -n "$FROM" ] || die "fetch needs --from URL"
+  [ -n "$OUTPUT" ] || die "fetch needs --output DIR"
+  [[ "$FROM" =~ ^(https|sftp|ftps|http|ftp|file)://[^[:space:]]+$ ]] \
+    || die "--from must be an https, sftp, ftps, http, ftp or file URL"
+  [[ ! "$FROM" =~ ^[a-z]+://[^/@]*:[^/@]*@ ]] \
+    || die "do not put a password in the URL (it ends up in the process list and shell history); use --curl-config FILE"
+  [ -z "$CURL_CONFIG" ] || [ -f "$CURL_CONFIG" ] || die "--curl-config file not found: $CURL_CONFIG"
+  [[ "$JOBS" =~ ^[1-9][0-9]?$ ]] || die "--jobs takes a number from 1 to 99"
+  [ -n "$TRUSTED" ] || [ "$ALLOW_UNTRUSTED" = 1 ] \
+    || die "--trusted-digest sha256:<hex> is required; get it from the bundle producer over a separate channel"
+  case "$FROM" in
+    http://* | ftp://*) warn "${FROM%%://*} is not encrypted: others on the network can read the bundle (its integrity is still checked)" ;;
+  esac
+
+  local base="${FROM%/}" output stage
+  mkdir -p "$(dirname "$OUTPUT")"
+  output="$(cd "$(dirname "$OUTPUT")" && pwd -P)/$(basename "$OUTPUT")"
+  [ ! -e "$output" ] || die "$output already exists; check it with: cheese v2 verify --bundle $output --trusted-digest sha256:<hex>"
+  stage="$output.partial"
+  mkdir -p "$stage"
+  exec 8>"$stage/.lock"
+  if command -v flock >/dev/null 2>&1; then
+    flock -n 8 || die "another cheese v2 fetch is writing $stage"
+  fi
+
+  # The list first: nothing else is downloaded from a source whose list is not the trusted one.
+  rm -f "$stage/.SHA256SUMS.new"
+  fetch_url "$base/SHA256SUMS" "$stage/.SHA256SUMS.new" || die "could not download $base/SHA256SUMS"
+  local digest
+  digest="$(sha256_of "$stage/.SHA256SUMS.new")"
+  if [ -n "$TRUSTED" ]; then
+    if [ "$digest" != "$TRUSTED" ]; then
+      rm -f "$stage/.SHA256SUMS.new"
+      die "the bundle at $FROM is sha256:$digest, not the trusted sha256:$TRUSTED -- nothing was downloaded from it"
+    fi
+    log "The bundle list matches the trusted digest (sha256:${digest:0:12}...)."
+  else
+    warn "no --trusted-digest: integrity is checked but AUTHENTICITY IS NOT (sha256:$digest)"
+  fi
+  if [ -f "$stage/SHA256SUMS" ] && [ "$(sha256_of "$stage/SHA256SUMS")" != "$digest" ]; then
+    die "$stage holds part of a different bundle; remove it or choose another --output"
+  fi
+  listed_paths "$stage/.SHA256SUMS.new" >/dev/null || die "SHA256SUMS contains an unsafe or malformed entry"
+  mv -f "$stage/.SHA256SUMS.new" "$stage/SHA256SUMS"
+
+  # Releases and models this installation already has are taken from it, not downloaded.
+  local data="" models="" count
+  data="$(installed_data_dir)" || data=""
+  models="$(awk '$2 == "payload/models/manifest.json" { print $1 }' "$stage/SHA256SUMS")"
+  count="$(wc -l <"$stage/SHA256SUMS")"
+  log "Fetching $count files from $base, $JOBS at once${data:+ (files already installed under ${data%/data} are reused)}..."
+
+  # Interrupted (Ctrl-C, a closed session): stop the transfers too; the next run continues.
+  # shellcheck disable=SC2064
+  trap "stop_downloads; exit 130" INT TERM
+  local line failed=0 running=0
+  while IFS= read -r line; do
+    if ((running >= JOBS)); then
+      wait -n || failed=1
+      running=$((running - 1))
+    fi
+    fetch_file "$base" "$stage" "$data" "$models" "${line:0:64}" "${line:66}" &
+    running=$((running + 1))
+  done <"$stage/SHA256SUMS"
+  while ((running > 0)); do
+    wait -n || failed=1
+    running=$((running - 1))
+  done
+  trap - INT TERM
+  [ "$failed" = 0 ] || die "the download is incomplete; run the same command again to continue (kept in $stage)"
+
+  # A transfer keeps no file modes: make the bundle's scripts executable again.
+  local script
+  while IFS= read -r script; do
+    [ "$(head -c 2 "$script")" != '#!' ] || chmod +x "$script"
+  done < <(find "$stage/cli" "$stage/install.sh" -type f 2>/dev/null)
+  rm -f "$stage/.lock"
+  mv -T "$stage" "$output"
+  log ""
+  log "Bundle downloaded to $output ($(du -sh "$output" | cut -f1)); every file matches the list. Apply it with:"
+  log "  cheese v2 update --bundle $output --trusted-digest sha256:$digest"
+  log "(on a host without CHEESE V2: $output/install.sh --trusted-digest sha256:$digest)"
 }
 
 # ── apply (install / update) ─────────────────────────────────────────────────
@@ -671,11 +869,16 @@ cmd_logs() {
 COMMAND="$1"; shift
 BUNDLE_DIR="" TRUSTED="" ALLOW_UNTRUSTED=0 LINK_DATA=0 ACCEPT_KEY="" ALLOW_DOWNGRADE=0
 SKIP_PREFLIGHT=0 FORCE=0 JSON=0 START_TIMEOUT=600 VENV="" PYTHON=python3.11
+FROM="" OUTPUT="" CURL_CONFIG="" JOBS=4
 PASSTHROUGH=()
 while [ $# -gt 0 ]; do
   case "$1" in
     --prefix) PREFIX="${2:?--prefix needs a directory}"; shift 2 ;;
     --bundle) BUNDLE_DIR="${2:?--bundle needs a directory}"; shift 2 ;;
+    --from) FROM="${2:?--from needs a URL}"; shift 2 ;;
+    --output) OUTPUT="${2:?--output needs a directory}"; shift 2 ;;
+    --curl-config) CURL_CONFIG="${2:?--curl-config needs a file}"; shift 2 ;;
+    --jobs) JOBS="${2:?--jobs needs a number}"; shift 2 ;;
     --trusted-digest) TRUSTED="$(normalize_digest "${2:?--trusted-digest needs sha256:<hex>}")"; shift 2 ;;
     --accept-release-key) ACCEPT_KEY="$(normalize_digest "${2:?}")"; shift 2 ;;
     --allow-untrusted) ALLOW_UNTRUSTED=1; shift ;;
@@ -698,6 +901,7 @@ case "$COMMAND" in
   install | update | verify)
     [ -n "$BUNDLE_DIR" ] || die "$COMMAND needs --bundle DIR"
     if [ "$COMMAND" = verify ]; then cmd_verify; else resolve_prefix; cmd_apply "$COMMAND"; fi ;;
+  fetch) cmd_fetch ;;
   start) resolve_prefix; cmd_start ;;
   stop) resolve_prefix; cmd_stop ;;
   status) resolve_prefix; cmd_status ;;

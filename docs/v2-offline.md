@@ -165,6 +165,57 @@ cheese v2 update --bundle /path/to/new-bundle --trusted-digest sha256:<new diges
 Releases and models are content-addressed and shared between bundles; old ones
 stay under `<prefix>/data` until you delete them.
 
+### Download the bundle over the network (optional)
+
+A site that allows one outbound connection can download the bundle instead of
+receiving it on a disk. `fetch` is the only command that uses the network; it
+needs `curl` on the host and changes nothing in the installation.
+
+```bash
+cheese v2 fetch --from sftp://transfer.example.com/cheese/cheese-v2-bundle \
+  --output /srv/cheese-media/cheese-v2-bundle \
+  --trusted-digest sha256:<new digest> [--curl-config /etc/cheese/transfer.curl]
+cheese v2 update --bundle /srv/cheese-media/cheese-v2-bundle --trusted-digest sha256:<new digest>
+```
+
+- `--from` is the address of the bundle **directory** as the producer published
+  it: `https://`, `sftp://` or `ftps://` (also `http://`, `ftp://` and
+  `file://`; the first two are not encrypted and print a warning).
+- The digest still arrives over a separate channel. `fetch` downloads
+  `SHA256SUMS` first and stops if it is not the trusted one, so nothing else is
+  taken from a wrong or altered source. Each file is then checked against its
+  entry before it is kept.
+- Releases and models that this installation already has are taken from it, not
+  downloaded: a bundle that adds or replaces one database transfers that
+  database, the images and the small files.
+- An interrupted download continues where it stopped when the same command runs
+  again (`<output>.partial` holds the files received so far).
+- Credentials go into a curl configuration file readable only by the operator,
+  never into the URL (`fetch` refuses a password there):
+
+  ```
+  # /etc/cheese/transfer.curl (mode 0600)
+  user = "jnj-cheese"
+  key = "/home/operator/.ssh/cheese_transfer"
+  pubkey = "/home/operator/.ssh/cheese_transfer.pub"
+  # or for a password:  user = "jnj-cheese:<password>"
+  # proxy = "http://proxy.example.com:3128"
+  # cacert = "/etc/ssl/certs/internal-ca.pem"
+  ```
+
+- For `sftp://`, curl checks the server's host key against the operator's
+  `~/.ssh/known_hosts`; add it once, after comparing it with the key the
+  producer sent: `ssh-keyscan -p <port> <host> >> ~/.ssh/known_hosts`.
+- `--jobs N` sets how many files are downloaded at once (default 4).
+- The very first bundle has no installed CLI to fetch it. Either bring that one
+  on a disk, or run the single script the producer sends:
+  `bash cheese-v2 fetch --from ... --output ... --trusted-digest ...`.
+
+On the producer side, publish the bundle directory unchanged (not the `.tar`),
+for example `sftp> put -r cheese-v2-bundle` or `aws s3 sync cheese-v2-bundle
+s3://<bucket>/cheese-v2-bundle` behind an HTTPS endpoint. The server needs no
+directory listing: `SHA256SUMS` names every file.
+
 ## 5. Runtime and network model
 
 One compose project per prefix, `cheese-v2-<8 hex>`; every container, network

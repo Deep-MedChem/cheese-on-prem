@@ -48,7 +48,7 @@ show_help() {
   echo "  uninstall                    Uninstall CHEESE"
   echo
   echo "--- CHEESE V2 (offline bundle) --- "
-  echo "  v2 <command>                 install/update/verify/start/status/stop/logs (cheese v2 --help)"
+  echo "  v2 <command>                 install/update/verify/fetch/start/status/stop/logs (cheese v2 --help)"
   exit 1
 }
 
