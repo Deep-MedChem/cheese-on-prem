@@ -108,6 +108,33 @@ host, and the backend reports that its mounted libraries are ready for searches.
 `--timeout SEC` to allow longer warmup on a slower host. A running update that fails
 this check restores the previous bundle.
 
+### Support bundle
+
+When something goes wrong, `cheese v2 support-bundle` packs what support needs into one file. It
+sends nothing: you read the file and attach it to the ticket or email yourself.
+
+```bash
+cheese v2 support-bundle                       # ./cheese-support-<UTC time>.tar.gz, logs of the last 24h
+cheese v2 support-bundle --since 3d --output /tmp/cheese-support.tar.gz
+```
+
+| File | Content |
+| --- | --- |
+| `install.txt` | Installed bundle and digest, releases, service health, liveness and readiness |
+| `host.txt` | Kernel, CPUs, memory, load, free disk under the prefix, Docker versions |
+| `containers.txt` | State, restarts, out-of-memory kills and current CPU and memory of each container |
+| `requests.txt` | Requests in the window by path and status, with mean and longest duration |
+| `errors.log` | Warnings, errors and requests answered with 4xx or 5xx, with their request IDs |
+| `backend-events.log` | Backend events in the window (at most 20,000), health probes left out |
+
+The file does not carry what was searched for. Backend log lines are not copied: each structured
+line is rebuilt from its event name and a fixed list of fields (database, operation, counts,
+durations, method, path, status, error code, request ID), a value is kept only when it is a single
+plain token, and paths lose their query string. Query structures, request bodies, API keys, user
+names, free-text messages and tracebacks are left out, as is all UI and edge output; `README.txt`
+in the file says how many lines were left out. The command works with the stack stopped, and
+without Docker access it still writes the install and host files.
+
 ### Python SDK (optional)
 
 If the bundle includes the SDK wheelhouse:

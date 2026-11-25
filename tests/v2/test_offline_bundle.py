@@ -16,6 +16,7 @@ import shutil
 import socket
 import stat
 import subprocess
+import tarfile
 import tempfile
 import threading
 import unittest
@@ -608,6 +609,68 @@ class OfflineBundleTest(unittest.TestCase):
     # ── compose rendering against the real docker compose parser ─────────────
 
     @unittest.skipUnless(REAL_DOCKER, "docker not available")
+    def test_support_bundle_reports_health_and_keeps_queries_out(self):
+        bundle, digest = self.build(self.payload())
+        self.install(bundle, digest)
+        self.health_servers()
+        self.cheese("start", "--timeout", "20")
+        canary, token = "CANARYc1ccccc1C(=O)N", "CANARYTOKEN"
+        self.docker_state(backend_logs="\n".join([
+            "2026-11-25 12:59:38 [info     ] search_complete                database_id=mcule-aa-in-stock operation=search returned=20 total_ms=38.2",
+            f"2026-11-25 12:59:38 [info     ] request_complete               api_key_id={token} client=cheese-web duration_ms=41.5 method=POST path=/api/v2/search?smiles={canary} request_id=req-1 status=200 user_id=alice",
+            f"2026-11-25 12:59:39 [error    ] search_failed                  error='bad smiles {canary} key={token}' code=invalid_query method=POST path=/api/v2/search request_id=req-2 status=422 duration_ms=3",
+            "Traceback (most recent call last):",
+            f"ValueError: {canary}",
+            "2026-11-25 12:59:42 [info     ] request_complete               client=cheese-api duration_ms=0.5 method=GET path=/health/live request_id=req-3 status=200",
+        ]))
+        out = self.tmp / "support.tar.gz"
+        said = self.cheese("support-bundle", "--since", "2d", "--output", out).stdout
+        self.assertIn(str(out), said)
+        # Days become hours for Docker, and the logs are read for this install's project only.
+        logs = [c for c in self.docker_calls() if c[0] == "compose" and "logs" in c]
+        self.assertTrue(logs and all(c[c.index("--since") + 1] == "48h" for c in logs))
+
+        with tarfile.open(out) as archive:
+            files = {Path(m.name).name: archive.extractfile(m).read().decode() for m in archive.getmembers() if m.isfile()}
+        self.assertEqual(
+            set(files),
+            {"README.txt", "install.txt", "host.txt", "containers.txt", "requests.txt", "errors.log", "backend-events.log"},
+        )
+        # Neither what was searched for nor a credential or user name leaves the host.
+        everything = "\n".join(files.values())
+        for secret in (canary, "CANARY", token, "alice", "bad smiles", "Traceback"):
+            self.assertNotIn(secret, everything)
+
+        self.assertIn(f"bundle_digest    {digest}", files["install.txt"])
+        self.assertIn("release          mcule-aa-in-stock / r2026-11-01", files["install.txt"])
+        self.assertIn("service          backend running/healthy", files["install.txt"])
+        self.assertIn("readiness        ready", files["install.txt"])
+        self.assertIn("cpus", files["host.txt"])
+        self.assertIn("cpu=", files["containers.txt"])
+        # Requests by path and status without the query string; health probes only counted.
+        self.assertRegex(files["requests.txt"], r"POST\s+/api/v2/search\s+200\s+1\s+42\s+42")
+        self.assertIn("health probes (left out above): 1", files["requests.txt"])
+        # The failure keeps its code and request ID, not its message.
+        self.assertEqual(
+            files["errors.log"].strip(),
+            "2026-11-25 12:59:39 error search_failed code=invalid_query method=POST path=/api/v2/search request_id=req-2 status=422 duration_ms=3",
+        )
+        self.assertIn("search_complete database_id=mcule-aa-in-stock operation=search returned=20 total_ms=38.2", files["backend-events.log"])
+        self.assertNotIn("/health/live", files["backend-events.log"])
+        self.assertIn("2 backend lines were left out", " ".join(files["README.txt"].split()))
+
+        # An existing file is never overwritten, and the window must be a plain age.
+        again = self.cheese("support-bundle", "--output", out, check=False)
+        self.assertNotEqual(again.returncode, 0)
+        self.assertIn("already exists", again.stderr)
+        bad = self.cheese("support-bundle", "--since", "yesterday", "--output", self.tmp / "x.tar.gz", check=False)
+        self.assertNotEqual(bad.returncode, 0)
+
+    def test_support_bundle_needs_an_install(self):
+        result = self.run_cmd(CHEESE, "v2", "support-bundle", check=False)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("not installed", result.stderr)
+
     def test_rendered_compose_matches_the_runtime_contract(self):
         bundle, digest = self.build(self.payload())
         self.install(bundle, digest)
