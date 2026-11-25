@@ -971,7 +971,7 @@ cmd_support_bundle() {
 
   {
     log "kernel     $(uname -srm)"
-    [ -r /etc/os-release ] && log "os         $(. /etc/os-release && printf '%s' "${PRETTY_NAME:-unknown}")"
+    [ -r /etc/os-release ] && log "os         $(sed -n 's/^PRETTY_NAME="\(.*\)"$/\1/p' /etc/os-release)"
     log "cpus       $(nproc 2>/dev/null || printf '?')"
     [ -r /proc/meminfo ] && awk '/^(MemTotal|MemAvailable|SwapTotal):/ { name = tolower($1); sub(/:$/, "", name); printf "%-10s %d MiB\n", name, $2 / 1024 }' /proc/meminfo
     [ -r /proc/loadavg ] && log "load       $(cut -d' ' -f1-3 /proc/loadavg)"
