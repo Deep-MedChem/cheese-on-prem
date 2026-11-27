@@ -1,0 +1,31 @@
+#!/usr/bin/env bash
+# Install the bundled SDK into a dedicated Jupyter kernel environment.
+set -euo pipefail
+if [[ $# != 4 ]]; then
+  echo "usage: $0 WHEELHOUSE KERNEL_PYTHON JUPYTER_PREFIX SITE_URL" >&2
+  exit 2
+fi
+wheelhouse=$(cd "$1" && pwd -P)
+python=$2
+prefix=$3
+site=$4
+"$python" - <<'PYTHON'
+import sys
+
+import ipykernel  # Required by the Jupyter server's kernel interpreter
+
+if sys.version_info[:2] != (3, 11):
+    raise SystemExit("The bundled wheelhouse requires CPython 3.11.")
+PYTHON
+(cd "$wheelhouse" && sha256sum --check --strict --quiet SHA256SUMS)
+PIP_CONFIG_FILE=/dev/null "$python" -m pip --isolated install --no-index --disable-pip-version-check \
+  --find-links "$wheelhouse" --require-hashes -r "$wheelhouse/requirements.lock"
+# Older pilot wheels do not recognize the kernel environment setting.
+DEEPMEDCHEM_ON_PREM_URL="$site" "$python" - <<'PY'
+from deepmedchem import Client
+
+with Client(on_prem=True):
+    pass
+PY
+"$python" -m ipykernel install --prefix "$prefix" --name cheese-on-prem \
+  --display-name "CHEESE (on-prem)" --env DEEPMEDCHEM_ON_PREM_URL "$site"
