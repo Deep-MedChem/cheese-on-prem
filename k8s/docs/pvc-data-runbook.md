@@ -6,8 +6,12 @@
 > The `/data` layout and kind staging commands below are unchanged. The new
 > `file-server` role also serves `/data/<jobs_data_path>` over HTTP.
 
-The five data-plane pods (`cheese-database-{app,jobs-db,jobs-exec,download-exec}`
-and `cheese-synthongpt`) all mount one shared `cheese-data-pvc` at `/data`.
+Two claims: **data** (`data.existingClaim` / `cheese-data-pvc`) holds the databases
+and `synthongpt_data/`; **state** (`data.stateClaim`, default: the data claim)
+holds `jobs/` and `licensing/`. In every pod `/data` is an `emptyDir`; each folder
+a pod needs is a `subPath` mount into it — databases and `licensing/` read-only,
+`jobs/` read-write. Only the dataSync Job (data) and the licence agent (state)
+mount a whole claim read-write.
 **The data on this volume is loaded out-of-band, not by Helm.** This runbook is
 the authoritative description of what the charts expect to find there.
 
@@ -15,8 +19,10 @@ the authoritative description of what the charts expect to find there.
 
 ```
 /data/
-├── cheese_license_file.json                  # licence file — WRITTEN BY THE AGENT, not staged
-├── jobs/                                     # cheese-database — auto-created by jobs/exec roles
+├── licensing/                                # state claim, ro in pods
+│   └── cheese_license_file.json              #   WRITTEN BY THE AGENT, not staged
+├── .dmch-licensing-agent.json                # state claim — agent bookkeeping
+├── jobs/                                     # state claim, rw — chowned 2112:0 by an initContainer
 │   └── ...                                   #   (empty at install time)
 ├── <db_name>/                                # cheese-database — one per .Values.databases entry
 │   └── ...                                   #   (per-database files; format set by index_type)
@@ -73,12 +79,12 @@ match (`cheese-local-manual` in the example), and the host path must exist.
 > v0 flow.
 
 ```
-/data/license.yaml
+/data/licensing/cheese_license_file.json
 ```
 
-The filename is set by `database.secret.cheeseLicenseFile` in
-`charts/cheese/values.yaml` (default `cheese_license_file.json`). The container
-reads it at `/data/<filename>` per `CHEESE_LICENSE_FILE`.
+The path is set by `database.secret.cheeseLicenseFile` in
+`charts/cheese/values.yaml` (default `licensing/cheese_license_file.json`, on the
+state claim). It must be inside a folder: pods mount that folder read-only.
 
 Skip this file if you set `secret.cheeseLicense` (inline license) in
 `values-secrets.yaml` instead.
@@ -134,9 +140,9 @@ the entry entirely (also drop the on-disk directory if you want the space back).
 ### `jobs/` directory
 
 `cheese-database-jobs-exec` and `-download-exec` create files under
-`/data/jobs/` at runtime (`JOBS_DATA_PATH=jobs` in values). No manual setup
-needed; the directory is created on first use. If you want a different
-location, change `env.jobs_data_path` and the workers will use that instead.
+`/data/jobs/` at runtime (`JOBS_DATA_PATH=jobs` in values), on the state claim.
+No manual setup needed: the `prepare-jobs-dir` initContainer creates it owned
+`2112:0` (`database.prepareJobsDir`). To relocate it, change `env.jobs_data_path`.
 
 ## 3. cheese-synthongpt — required files
 
@@ -193,8 +199,8 @@ docker exec kind-control-plane chmod -R u+rwX,g+rwX,o+rX /data
 # On prod (no kind layer), run those chown/chmod on the host directly.
 ```
 
-Datasets only need read; write access is required for `/data/jobs/` (workers)
-and any path the licensing path writes to.
+Datasets are mounted read-only; only `jobs/` (workers) and `licensing/` (agent)
+are written.
 
 ## 5. Verification
 
@@ -203,7 +209,7 @@ After helm install, sanity-check from inside the cluster:
 ```bash
 # License file landed where cheese-database expects it:
 kubectl -n cheese exec deploy/cheese-database-app -- \
-  ls -l /data/cheese_license_file.json
+  ls -l /data/licensing/cheese_license_file.json
 
 # A configured database is visible under /data:
 kubectl -n cheese exec deploy/cheese-database-app -- \

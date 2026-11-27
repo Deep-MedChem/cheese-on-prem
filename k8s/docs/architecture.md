@@ -31,7 +31,7 @@ flowchart TD
 
             SYN[cheese-synthongpt<br/>1 pod / 1 container<br/>optional<br/>port 8000]
 
-            PVC[(cheese-data-pvc<br/>10Ti, RWO<br/>mounted at /data)]
+            PVC[(cheese-data-pvc<br/>10Ti, RWO<br/>subPath mounts under /data)]
 
             CFG[/ConfigMap<br/>cheese-runtime-config<br/>config.yaml<br/>databases map/]
             SEC[/Secret<br/>cheese-runtime-secrets<br/>license, PRODUCTION/]
@@ -88,7 +88,7 @@ With SynthonGPT enabled: **+1 pod** (`cheese-synthongpt`, port 8000).
 ## Notes
 
 - The four database pods run from one image (`cheese-database`); only `command:` differs. Two roles expose Services (`cheese-db`, `cheese-jobs-db`); the two `*-exec` workers have no Service.
-- All five data-plane pods (`cheese-db`, `cheese-jobs-db`, `cheese-jobs-exec`, `cheese-download-exec`, `cheese-synthongpt`) mount the single `cheese-data-pvc` at `/data`. `ReadWriteOnce` is fine on the prototype because every data-plane pod is pinned to the single kind node.
+- Data-plane pods mount `cheese-data-pvc` by `subPath` under an `emptyDir` `/data`: databases and `licensing/` read-only, `jobs/` read-write. `ReadWriteOnce` is fine on the prototype because every data-plane pod is pinned to the single kind node; multi-node needs `ReadWriteMany`.
 - **Supabase is the only external dependency.** No standalone Postgres, no Keycloak. The orchestrator's psycopg2 path is dead code in the active runtime; the chart's `POSTGRES_*` env block is a vestigial cleanup item, not a live dependency.
 - Orchestrator reads SynthonGPT via `SYNTHONGPT_API_URL=http://cheese-synthongpt.cheese.svc.cluster.local:8000` (consumed by `cheese_orchestrator/cheese_core.py`).
 

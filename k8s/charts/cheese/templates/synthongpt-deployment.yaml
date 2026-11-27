@@ -29,9 +29,7 @@ spec:
       securityContext:
         {{- toYaml $sg.podSecurityContext | nindent 8 }}
       volumes:
-        - name: data
-          persistentVolumeClaim:
-            claimName: {{ include "cheese.dataClaimName" $root }}
+        {{- include "cheese.dataVolumes" (dict "root" $root "library" true "state" false) | nindent 8 }}
       containers:
         - name: synthongpt
           securityContext:
@@ -80,8 +78,7 @@ spec:
           resources:
             {{- toYaml $sg.resources | nindent 12 }}
           volumeMounts:
-            - name: data
-              mountPath: {{ $root.Values.data.mountPath | quote }}
+            {{- include "cheese.dataMounts" (dict "root" $root "synthongpt" true) | nindent 12 }}
       {{- with $sg.nodeSelector }}
       nodeSelector:
         {{- toYaml . | nindent 8 }}

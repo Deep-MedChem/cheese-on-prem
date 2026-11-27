@@ -201,16 +201,9 @@ multi-terabyte `/data`.
 If you would rather pre-create and chown the directory out of band, turn the
 initContainer off with `licensingAgent.prepareDataDir.enabled: false`.
 
-If you would rather not have `/data` itself group-writable, put the licence in a
-subdirectory and point the readers at it — the initContainer then prepares only
-that subdirectory:
-
-```yaml
-licensingAgent:   { enabled: true, licenseFile: licensing/cheese_license_file.json }
-database:       { secret: { cheeseLicenseFile: licensing/cheese_license_file.json } }
-orchestrator:   { secret: { cheeseLicenseFile: licensing/cheese_license_file.json } }
-alignment:      { secret: { cheeseLicenseFile: licensing/cheese_license_file.json } }
-```
+The licence lives in a folder (default `licensing/cheese_license_file.json`) that
+the product pods mount read-only; the initContainer prepares only that folder and
+the agent's state file's. A licence path at the volume root fails the render.
 
 Leave `licensingAgent.licenseFile` empty (the default) and the agent inherits
 `database.secret.cheeseLicenseFile`, so the writer and the readers cannot drift

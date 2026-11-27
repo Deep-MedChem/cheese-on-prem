@@ -66,7 +66,7 @@ spec:
       volumes:
         - name: data
           persistentVolumeClaim:
-            claimName: {{ include "cheese.dataClaimName" $root }}
+            claimName: {{ include "cheese.stateClaimName" $root }}
       {{- if $la.prepareDataDir.enabled }}
       {{- /* The PVC root is root-owned (see docs/pvc-data-runbook.md), so the agent
              could not create/replace a file there as 2112. This runs as root ONCE
@@ -92,8 +92,7 @@ spec:
               set -eu
               for d in {{ range $dirs }}{{ . | quote }} {{ end }}; do
                 mkdir -p "$d"
-                chgrp 0 "$d"
-                chmod g+rwxs "$d"
+                chgrp 0 "$d" && chmod g+rwxs "$d" || { echo "warn: cannot change ownership of $d (identity-enforcing volume, e.g. an EFS access point?) — continuing" >&2; }
                 ls -ld "$d"
               done
           resources:

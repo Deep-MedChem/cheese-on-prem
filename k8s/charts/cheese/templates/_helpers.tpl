@@ -269,6 +269,101 @@ chart's own object is skipped whenever the site supplies one.
 {{- .Values.data.existingClaim | default .Values.data.pvcName -}}
 {{- end -}}
 
+{{/* /data = emptyDir + per-folder subPaths: databases ro, jobs rw, licence folder ro. */}}
+
+{{/* Claim for jobs/ + licence folder; data.stateClaim or the data claim. Pass root context. */}}
+{{- define "cheese.stateClaimName" -}}
+{{- .Values.data.stateClaim | default (include "cheese.dataClaimName" .) -}}
+{{- end -}}
+
+{{/* Pod volume name for the state claim: "state" if separate, else "data". Pass root context. */}}
+{{- define "cheese.stateVolumeName" -}}
+{{- if eq (include "cheese.stateClaimName" .) (include "cheese.dataClaimName" .) -}}data{{- else -}}state{{- end -}}
+{{- end -}}
+
+{{/*
+Data-claim subPaths holding the enabled databases (JSON list): databasesRoot,
+else one per database. Mirrors database-configmap.yaml's join. Pass root context.
+*/}}
+{{- define "cheese.librarySubPaths" -}}
+{{- $dbRoot := trimAll "/" (default "" .Values.database.databasesRoot) -}}
+{{- $paths := list -}}
+{{- if $dbRoot }}{{ $paths = append $paths $dbRoot }}{{ end -}}
+{{- range $name, $db := .Values.database.databases -}}
+{{- if $db.enabled -}}
+{{- if or (hasPrefix "/" $db.output_directory) (not $dbRoot) -}}
+{{- $paths = append $paths (trimAll "/" $db.output_directory) -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- $paths | uniq | toJson -}}
+{{- end -}}
+
+{{/* Folder of a licence path; fails if it is at the volume root. Pass (list <root> <path>). */}}
+{{- define "cheese.licenseDir" -}}
+{{- $rel := trimPrefix "/" (index . 1) -}}
+{{- $d := dir $rel -}}
+{{- if or (eq $d ".") (eq $d "") -}}
+{{- fail (printf "licence file %q is at the volume root; pods mount its folder, so use e.g. \"licensing/%s\" for database/orchestrator/alignment.secret.cheeseLicenseFile." $rel (base $rel)) -}}
+{{- end -}}
+{{- $d -}}
+{{- end -}}
+
+{{/* Pod volumes for the /data layout. Pass (dict "root" $ "library" <bool> "state" <bool>). */}}
+{{- define "cheese.dataVolumes" -}}
+{{- $root := .root -}}
+{{- $stateVol := include "cheese.stateVolumeName" $root -}}
+- name: data-scratch
+  emptyDir: {}
+{{- if or .library (and .state (eq $stateVol "data")) }}
+- name: data
+  persistentVolumeClaim:
+    claimName: {{ include "cheese.dataClaimName" $root }}
+{{- end }}
+{{- if and .state (eq $stateVol "state") }}
+- name: state
+  persistentVolumeClaim:
+    claimName: {{ include "cheese.stateClaimName" $root }}
+{{- end }}
+{{- end -}}
+
+{{/* volumeMounts for the /data layout. Pass (dict "root" $ "databases" "synthongpt" "jobs" <bool> "license" <path|"">). */}}
+{{- define "cheese.dataMounts" -}}
+{{- $root := .root -}}
+{{- $mount := trimSuffix "/" $root.Values.data.mountPath -}}
+{{- $stateVol := include "cheese.stateVolumeName" $root -}}
+- name: data-scratch
+  mountPath: {{ $mount | quote }}
+{{- if .databases }}
+{{- range (include "cheese.librarySubPaths" $root | fromJsonArray) }}
+- name: data
+  mountPath: {{ printf "%s/%s" $mount . | quote }}
+  subPath: {{ . | quote }}
+  readOnly: true
+{{- end }}
+{{- end }}
+{{- if .synthongpt }}
+{{- $p := trimAll "/" $root.Values.synthongpt.dataRootSubdir }}
+- name: data
+  mountPath: {{ printf "%s/%s" $mount $p | quote }}
+  subPath: {{ $p | quote }}
+  readOnly: true
+{{- end }}
+{{- if .jobs }}
+{{- $p := trimAll "/" $root.Values.database.env.jobs_data_path }}
+- name: {{ $stateVol }}
+  mountPath: {{ printf "%s/%s" $mount $p | quote }}
+  subPath: {{ $p | quote }}
+{{- end }}
+{{- with .license }}
+{{- $d := include "cheese.licenseDir" (list $root .) }}
+- name: {{ $stateVol }}
+  mountPath: {{ printf "%s/%s" $mount $d | quote }}
+  subPath: {{ $d | quote }}
+  readOnly: true
+{{- end }}
+{{- end -}}
+
 {{/*
 Absolute in-container directory the data-sync Job writes database folders into.
 

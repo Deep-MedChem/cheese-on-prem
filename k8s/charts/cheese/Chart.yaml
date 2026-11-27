@@ -22,5 +22,5 @@ description: |
   Profiles: values-minimal.yaml (smallest real install), values-quickstart.yaml
   (kind harness).
 type: application
-version: 0.6.0
+version: 0.7.0
 appVersion: "0.0.1"
