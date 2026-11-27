@@ -26,6 +26,20 @@ docker build -f "$ui_repo/Dockerfile.cheese-classic-onprem" \
   -t cheese-classic:v2-onprem "$ui_repo"
 ```
 
+Or take the image CI already built: cheese-search-ui publishes it to
+`815935788477.dkr.ecr.us-east-1.amazonaws.com/on-prem/cheese/cheese-search-ui`
+(`v2-prod-<sha>` from main, `v2-dev-<sha>` from develop). Pass it pinned by digest;
+the producer pulls it, so log Docker in to ECR first:
+
+```bash
+aws ecr get-login-password --region us-east-1 | docker login --username AWS \
+  --password-stdin 815935788477.dkr.ecr.us-east-1.amazonaws.com
+--ui-image 815935788477.dkr.ecr.us-east-1.amazonaws.com/on-prem/cheese/cheese-search-ui@sha256:<hex>
+```
+
+`bundle.json` records the UI's registry `digest` and its `revision`
+(`org.opencontainers.image.revision`); both are `null` for a local build that was never pushed.
+
 The bundle also needs the V2 backend image and a payload directory:
 
 ```

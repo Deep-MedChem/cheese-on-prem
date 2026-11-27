@@ -7,7 +7,9 @@ assert both outcomes and that nothing outside the v2 project was touched.
 No container is ever started.
 
 Knobs (in the state file): "preflight_exit" (exit code of `docker run`),
-"unhealthy_images" (image IDs whose backend reports unhealthy).
+"unhealthy_images" (image IDs whose backend reports unhealthy),
+"registry" (ref -> {"id", "labels"} that `docker pull` can fetch),
+"image_meta" (image ID -> {"repo_digests", "labels"} for `image inspect`).
 """
 
 import json
@@ -96,8 +98,27 @@ def main(args):
             ids = [resolve(state, ref) for ref in refs]
             if None in ids:
                 return 1
-            if "--format" in args:
-                print("\n".join(ids))
+            fmt = option(args, "--format") or ""
+            for image_id in ids:
+                meta = state.get("image_meta", {}).get(image_id, {})
+                if "RepoDigests" in fmt:
+                    print("".join(f"{d}\n" for d in meta.get("repo_digests", [])), end="")
+                elif "Labels" in fmt:
+                    label = fmt.split('"')[1]
+                    print(meta.get("labels", {}).get(label, ""))
+                elif fmt:
+                    print(image_id)
+            return 0
+        if args[0] == "pull":
+            ref = args[-1]
+            image = state.get("registry", {}).get(ref)
+            if image is None:
+                print(f"fake docker: pull access denied for {ref}", file=sys.stderr)
+                return 1
+            state["images"][ref] = image["id"]
+            state.setdefault("image_meta", {})[image["id"]] = {
+                "repo_digests": [ref], "labels": image.get("labels", {}),
+            }
             return 0
         if args[0] == "save":
             output = option(args, "-o")
