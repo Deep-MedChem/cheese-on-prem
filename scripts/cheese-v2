@@ -1,0 +1,1093 @@
+#!/bin/bash
+# cheese v2 -- offline operator commands for the CHEESE V2 search stack.
+#
+# Self-contained: needs bash, coreutils and docker (compose v2), never the
+# classic ~/.config/cheese setup or cloud credentials. Only 'fetch' uses the
+# network (and needs curl); every other command works without it. Every
+# Docker resource it creates belongs to one compose project derived from the
+# install prefix, so it cannot touch the classic stack or anything else.
+#
+# Layout under the prefix:
+#   bin/cheese                -> current/cli/scripts/cheese
+#   current, previous         -> bundles/<digest12>   (atomic symlink swaps)
+#   bundles/<digest12>/       verified bundle metadata + its CLI
+#   data/releases/<db>/<rel>/ immutable signed releases, shared by bundles
+#   data/models/<sha256>/     model tree, addressed by its manifest digest
+#   config/                   v2.conf (ports), secrets.env (0600), backend.env, ui.env
+#   state/                    installed.env, runtime.env
+#
+# See docs/v2-offline.md for the operator guide and trust model.
+
+set -euo pipefail
+
+BUNDLE_FORMAT=1
+DEFAULT_UI_PORT=18780
+DEFAULT_API_PORT=18781
+ID_RE='^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$'
+
+SCRIPT_DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd -P)"
+
+log() { printf '%s\n' "$*"; }
+warn() { printf 'WARNING: %s\n' "$*" >&2; }
+die() { printf 'ERROR: %s\n' "$*" >&2; exit 1; }
+
+usage() {
+  cat <<EOF
+Usage: cheese v2 <command> [options]
+
+Offline CHEESE V2 (search-only) stack. UI on 127.0.0.1:${DEFAULT_UI_PORT}, API on 127.0.0.1:${DEFAULT_API_PORT}.
+
+Commands:
+  install --bundle DIR --trusted-digest sha256:HEX   Install (or upgrade) from an offline bundle
+  update  --bundle DIR --trusted-digest sha256:HEX   Upgrade an existing install from a newer bundle
+  verify  --bundle DIR --trusted-digest sha256:HEX   Check a bundle without changing anything
+  fetch   --from URL --output DIR --trusted-digest sha256:HEX
+                                                    Download a bundle over the network (the only online command)
+  start   [--timeout SEC]                           Start the stack and wait until it answers
+  status  [--json]                                  Show installed bundle, containers and readiness
+  stop                                              Stop the stack (data and volumes are kept)
+  logs    [SERVICE] [docker compose logs options]   Show container logs (backend, ui, edge)
+  sdk-install --venv DIR [--python PY]              Install the bundled Python SDK into a new venv, offline
+  support-bundle [--since 24h] [--output FILE]      Pack versions, health and filtered logs into one file for support
+
+Common options:
+  --prefix DIR        Install prefix (default: \$CHEESE_V2_PREFIX, else ~/.local/share/cheese-v2)
+
+install/update options:
+  --link-data                    Hard-link release/model files instead of copying (same filesystem)
+  --accept-release-key sha256:H  Accept a rotated release signing key with this digest
+  --allow-downgrade              Accept a bundle older than the installed one
+  --skip-preflight               Skip the in-image release signature pre-check
+  --force                        Re-apply a bundle that is already installed
+  --allow-untrusted              TESTING ONLY: skip the external digest anchor
+
+fetch options:
+  --from URL          Where the producer published the bundle directory (https, sftp, ftps; also http, ftp, file)
+  --output DIR        Where to write the bundle; an interrupted download continues on the next run
+  --curl-config FILE  curl options for the transfer: user, key, proxy, CA (keep passwords here, not in the URL)
+  --jobs N            Files downloaded at once (default 4)
+
+support-bundle options:
+  --since AGE         How far back the logs go: a number and m, h or d (default 24h)
+  --output FILE       The .tar.gz to write (default ./cheese-support-<UTC time>.tar.gz); nothing is sent anywhere
+EOF
+}
+
+# ── small helpers ────────────────────────────────────────────────────────────
+
+sha256_of() { sha256sum "$1" | cut -d' ' -f1; }
+
+normalize_digest() {
+  local value="${1#sha256:}"
+  value="$(printf '%s' "$value" | tr 'A-F' 'a-f')"
+  [[ "$value" =~ ^[0-9a-f]{64}$ ]] || die "not a sha256 digest: $1 (expected sha256:<64 hex>)"
+  printf '%s' "$value"
+}
+
+# Parse a KEY=VALUE file into the associative array named by $2 without
+# evaluating it: bundle metadata is data, never code.
+read_kv() {
+  local file="$1" line key
+  local -n _target="$2"
+  [ -f "$file" ] || die "missing $file"
+  while IFS= read -r line || [ -n "$line" ]; do
+    [[ -z "$line" || "$line" == \#* ]] && continue
+    key="${line%%=*}"
+    [[ "$key" =~ ^[A-Z][A-Z0-9_]*$ && "$line" == *=* ]] || die "malformed line in $file: $line"
+    _target["$key"]="${line#*=}"
+  done <"$file"
+}
+
+compose_available() {
+  docker compose version >/dev/null 2>&1 || die "docker compose (v2 plugin) is required"
+}
+
+# Pure-bash HTTP GET against the host loopback (no curl/python on the host is
+# assumed). Prints "<status code>" and the body to stdout.
+http_get() {
+  local host="$1" port="$2" path="$3"
+  # shellcheck disable=SC2016 # expanded by the inner shell
+  timeout 10 bash -c '
+    exec 3<>"/dev/tcp/$0/$1" || exit 1
+    printf "GET %s HTTP/1.0\r\nHost: %s\r\nConnection: close\r\n\r\n" "$2" "$0" >&3
+    IFS=" " read -r _ code _ <&3 || exit 1
+    printf "%s\n" "$code"
+    while IFS= read -r line <&3 && [ -n "${line//[[:space:]]/}" ]; do :; done
+    cat <&3
+  ' "$host" "$port" "$path" 2>/dev/null
+}
+
+# ── prefix and state ─────────────────────────────────────────────────────────
+
+PREFIX=""
+resolve_prefix() {
+  if [ -z "$PREFIX" ]; then
+    if [ -n "${CHEESE_V2_PREFIX:-}" ]; then
+      PREFIX="$CHEESE_V2_PREFIX"
+    elif [ -f "$SCRIPT_DIR/../../../../state/installed.env" ]; then
+      # Running from <prefix>/bundles/<id>/cli/scripts: that is our prefix.
+      PREFIX="$SCRIPT_DIR/../../../.."
+    else
+      PREFIX="${XDG_DATA_HOME:-$HOME/.local/share}/cheese-v2"
+    fi
+  fi
+  mkdir -p "$PREFIX" 2>/dev/null || true
+  [ -d "$PREFIX" ] || die "cannot use prefix $PREFIX"
+  PREFIX="$(cd "$PREFIX" && pwd -P)"
+}
+
+project_name() { printf 'cheese-v2-%s' "$(printf '%s' "$PREFIX" | sha256sum | cut -c1-8)"; }
+
+declare -A STATE=()
+load_state() {
+  [ -f "$PREFIX/state/installed.env" ] || die "CHEESE V2 is not installed in $PREFIX (run <bundle>/install.sh)"
+  read_kv "$PREFIX/state/installed.env" STATE
+}
+
+write_state() {
+  local tmp="$PREFIX/state/.installed.env.$$"
+  {
+    printf 'CURRENT_DIGEST=%s\n' "${STATE[CURRENT_DIGEST]}"
+    printf 'CURRENT_CREATED_UTC=%s\n' "${STATE[CURRENT_CREATED_UTC]}"
+    printf 'CURRENT_BUNDLE_VERSION=%s\n' "${STATE[CURRENT_BUNDLE_VERSION]}"
+    printf 'PREVIOUS_DIGEST=%s\n' "${STATE[PREVIOUS_DIGEST]:-}"
+    printf 'PINNED_RELEASE_KEY_SHA256=%s\n' "${STATE[PINNED_RELEASE_KEY_SHA256]}"
+    printf 'PROJECT=%s\n' "${STATE[PROJECT]}"
+    printf 'INSTALLED_UTC=%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  } >"$tmp"
+  mv -f "$tmp" "$PREFIX/state/installed.env"
+}
+
+# Point $PREFIX/<name> at bundles/<digest12> atomically.
+swap_link() {
+  local name="$1" target="$2"
+  ln -sfn "$target" "$PREFIX/.$name.$$"
+  mv -T "$PREFIX/.$name.$$" "$PREFIX/$name"
+}
+
+with_lock() {
+  mkdir -p "$PREFIX/state"
+  exec 9>"$PREFIX/state/.lock"
+  if command -v flock >/dev/null 2>&1; then
+    flock -n 9 || die "another cheese v2 command is running on $PREFIX"
+  fi
+}
+
+ensure_config() {
+  mkdir -p "$PREFIX/config"
+  chmod 700 "$PREFIX/config"
+  if [ ! -f "$PREFIX/config/v2.conf" ]; then
+    cat >"$PREFIX/config/v2.conf" <<EOF
+# CHEESE V2 host settings; applied by the next 'cheese v2 start'.
+# Keep BIND on loopback unless a reverse proxy on this host fronts the stack.
+CHEESE_V2_BIND=127.0.0.1
+CHEESE_V2_UI_PORT=${DEFAULT_UI_PORT}
+CHEESE_V2_API_PORT=${DEFAULT_API_PORT}
+EOF
+  fi
+  for service in backend ui; do
+    [ -f "$PREFIX/config/$service.env" ] || cat >"$PREFIX/config/$service.env" <<EOF
+# Extra environment for the $service container (KEY=VALUE per line).
+# Cannot override the release contract set in compose.yaml.
+EOF
+  done
+  # ONPREM_SEARCH_ONLY is account-free, so a clean install holds no secrets.
+  # The file exists (empty, 0600) for sites that later need to add one.
+  [ -f "$PREFIX/config/secrets.env" ] || (umask 077 && : >"$PREFIX/config/secrets.env")
+  chmod 600 "$PREFIX/config/secrets.env"
+}
+
+declare -A HOSTCONF=()
+load_host_conf() {
+  HOSTCONF=([CHEESE_V2_BIND]=127.0.0.1 [CHEESE_V2_UI_PORT]=$DEFAULT_UI_PORT [CHEESE_V2_API_PORT]=$DEFAULT_API_PORT)
+  [ -f "$PREFIX/config/v2.conf" ] && read_kv "$PREFIX/config/v2.conf" HOSTCONF
+  [[ "${HOSTCONF[CHEESE_V2_BIND]}" =~ ^[0-9]{1,3}(\.[0-9]{1,3}){3}$ ]] || die "CHEESE_V2_BIND must be an IPv4 address"
+  local port
+  for port in CHEESE_V2_UI_PORT CHEESE_V2_API_PORT; do
+    if ! [[ "${HOSTCONF[$port]}" =~ ^[0-9]+$ ]] || ((HOSTCONF[$port] < 1 || HOSTCONF[$port] > 65535)); then
+      die "$port must be a TCP port"
+    fi
+  done
+  [ "${HOSTCONF[CHEESE_V2_BIND]}" = 127.0.0.1 ] \
+    || warn "CHEESE_V2_BIND=${HOSTCONF[CHEESE_V2_BIND]}: the stack is reachable beyond this host"
+}
+
+# ── bundle verification ──────────────────────────────────────────────────────
+
+declare -A BUNDLE=()
+RELEASE_LINES=()
+
+# The paths a SHA256SUMS lists, one per line; fails on an entry that is not
+# "<sha256>  <plain relative path>".
+listed_paths() {
+  awk '
+    !/^[0-9a-f]{64}  [^\/\\]/ { bad = 1; exit }
+    { path = substr($0, 67) }
+    path ~ /(^|\/)\.\.?(\/|$)/ { bad = 1; exit }
+    { print path }
+    END { exit bad }' "$1"
+}
+
+# Verify a bundle directory end to end. Nothing from the bundle is executed
+# or loaded before this returns.
+verify_bundle() {
+  local dir="$1" trusted="$2" allow_untrusted="$3"
+  [ -d "$dir" ] || die "bundle directory not found: $dir"
+  [ -f "$dir/SHA256SUMS" ] || die "$dir is not a CHEESE V2 bundle (no SHA256SUMS)"
+
+  local digest
+  digest="$(sha256_of "$dir/SHA256SUMS")"
+  if [ -n "$trusted" ]; then
+    [ "$digest" = "$trusted" ] || die "bundle digest sha256:$digest does not match the trusted digest sha256:$trusted -- do not install this bundle"
+    log "Bundle digest matches the trusted digest (sha256:${digest:0:12}...)."
+  elif [ "$allow_untrusted" = 1 ]; then
+    warn "no --trusted-digest: integrity is checked but AUTHENTICITY IS NOT (sha256:$digest)"
+  else
+    die "--trusted-digest sha256:<hex> is required; get it from the bundle producer over a separate channel (this bundle is sha256:$digest)"
+  fi
+
+  # Every listed path must be a plain relative path; every file present must
+  # be listed. Symlinks and special files are refused outright.
+  local listed unlisted
+  listed="$(mktemp)"; unlisted="$(mktemp)"
+  # shellcheck disable=SC2064
+  trap "rm -f '$listed' '$unlisted'" RETURN
+  if ! listed_paths "$dir/SHA256SUMS" | LC_ALL=C sort >"$listed"; then
+    die "SHA256SUMS contains an unsafe or malformed entry"
+  fi
+  [ -s "$listed" ] || die "SHA256SUMS is empty"
+  if [ -n "$(find "$dir" ! -type f ! -type d -print -quit)" ]; then
+    die "bundle contains symlinks or special files: $(find "$dir" ! -type f ! -type d -print -quit)"
+  fi
+  (cd "$dir" && find . -type f ! -path ./SHA256SUMS -printf '%P\n') | LC_ALL=C sort \
+    | LC_ALL=C comm -23 - "$listed" >"$unlisted"
+  [ -s "$unlisted" ] && die "bundle contains files not covered by SHA256SUMS: $(head -3 "$unlisted" | tr '\n' ' ')"
+
+  local count workers
+  count="$(wc -l <"$listed")"
+  workers="${CHEESE_V2_VERIFY_JOBS:-$(nproc 2>/dev/null || echo 2)}"
+  ((workers > 8)) && workers=8
+  log "Verifying $count files ($(du -sh "$dir" | cut -f1)) against SHA256SUMS with $workers workers..."
+  # Missing files fail here too: sha256sum -c reports them as unreadable.
+  local chunks
+  chunks="$(mktemp -d)"
+  split -n "r/$workers" "$dir/SHA256SUMS" "$chunks/part."
+  local failed=0 part pids=()
+  for part in "$chunks"/part.*; do
+    [ -s "$part" ] || continue
+    (cd "$dir" && sha256sum --check --strict --quiet "$part") &
+    pids+=("$!")
+  done
+  for part in "${pids[@]}"; do wait "$part" || failed=1; done
+  rm -rf "$chunks"
+  [ "$failed" = 0 ] || die "bundle checksum verification FAILED; the bundle is corrupt or was modified"
+  log "All $count files verified."
+
+  BUNDLE=()
+  read_kv "$dir/bundle.env" BUNDLE
+  BUNDLE[DIGEST]="$digest"
+  [ "${BUNDLE[BUNDLE_FORMAT]:-}" = "$BUNDLE_FORMAT" ] \
+    || die "bundle format ${BUNDLE[BUNDLE_FORMAT]:-?} is not supported by this CLI (supports $BUNDLE_FORMAT); after checking the digest, run <bundle>/install.sh --prefix $PREFIX instead"
+  local key
+  for key in CREATED_UTC BACKEND_IMAGE_ID UI_IMAGE_ID MODEL_MANIFEST_SHA256 RELEASE_PUBLIC_KEY_SHA256; do
+    [ -n "${BUNDLE[$key]:-}" ] || die "bundle.env lacks $key"
+  done
+  [ "$(sha256_of "$dir/payload/release-public-key.txt")" = "${BUNDLE[RELEASE_PUBLIC_KEY_SHA256]}" ] \
+    || die "release public key does not match bundle.env"
+  [ "$(sha256_of "$dir/payload/models/manifest.json")" = "${BUNDLE[MODEL_MANIFEST_SHA256]}" ] \
+    || die "models/manifest.json does not match bundle.env"
+
+  # releases.tsv must describe exactly the releases present, one per database.
+  RELEASE_LINES=()
+  local db rel sha extra seen=" "
+  while read -r db rel sha extra; do
+    [ -z "$db" ] && continue
+    [[ "$db" =~ $ID_RE && "$rel" =~ $ID_RE && "$sha" =~ ^[0-9a-f]{64}$ && -z "$extra" ]] \
+      || die "malformed releases.tsv line: $db $rel"
+    [[ "$seen" == *" $db "* ]] && die "database $db appears twice in releases.tsv"
+    seen+="$db "
+    [ -f "$dir/payload/releases/$db/$rel/manifest.json" ] || die "release $db/$rel is missing"
+    [ -f "$dir/payload/releases/$db/$rel/manifest.sig" ] || die "release $db/$rel is not signed (no manifest.sig)"
+    [ "$(sha256_of "$dir/payload/releases/$db/$rel/manifest.json")" = "$sha" ] \
+      || die "release $db/$rel manifest does not match releases.tsv"
+    RELEASE_LINES+=("$db $rel $sha")
+  done <"$dir/releases.tsv"
+  ((${#RELEASE_LINES[@]} > 0)) || die "bundle contains no releases"
+  local present
+  present="$(cd "$dir/payload/releases" && find . -mindepth 2 -maxdepth 2 -type d -printf '%P\n' | LC_ALL=C sort)"
+  [ "$present" = "$(printf '%s\n' "${RELEASE_LINES[@]}" | awk '{print $1 "/" $2}' | LC_ALL=C sort)" ] \
+    || die "payload/releases does not match releases.tsv"
+}
+
+print_bundle_summary() {
+  log "Bundle ${BUNDLE[BUNDLE_VERSION]:-?} (created ${BUNDLE[CREATED_UTC]}, sha256:${BUNDLE[DIGEST]:0:12}...)"
+  local line
+  for line in "${RELEASE_LINES[@]}"; do
+    read -r db rel _ <<<"$line"
+    log "  release  $db / $rel"
+  done
+  log "  models   sha256:${BUNDLE[MODEL_MANIFEST_SHA256]:0:12}..."
+  log "  key      sha256:${BUNDLE[RELEASE_PUBLIC_KEY_SHA256]:0:12}..."
+}
+
+# ── fetch (network download) ─────────────────────────────────────────────────
+
+# The data directory of an existing install, without creating anything.
+installed_data_dir() {
+  local prefix="$PREFIX"
+  if [ -z "$prefix" ]; then
+    if [ -n "${CHEESE_V2_PREFIX:-}" ]; then
+      prefix="$CHEESE_V2_PREFIX"
+    elif [ -f "$SCRIPT_DIR/../../../../state/installed.env" ]; then
+      prefix="$SCRIPT_DIR/../../../.."
+    else
+      prefix="${XDG_DATA_HOME:-$HOME/.local/share}/cheese-v2"
+    fi
+  fi
+  [ -f "$prefix/state/installed.env" ] && [ -d "$prefix/data" ] && (cd "$prefix/data" && pwd -P)
+}
+
+# Percent-encode a bundle path for a URL, keeping the slashes.
+url_path() {
+  local path="$1" out="" char i
+  for ((i = 0; i < ${#path}; i++)); do
+    char="${path:i:1}"
+    case "$char" in
+      [A-Za-z0-9._~/-]) out+="$char" ;;
+      *) out+="$(printf '%%%02X' "'$char")" ;;
+    esac
+  done
+  printf '%s' "$out"
+}
+
+# curl ignores ~/.curlrc here (-q): only --curl-config shapes the transfer.
+fetch_url() {
+  local url="$1" target="$2" status=0
+  local options=(-q --fail --silent --show-error --location --connect-timeout 30 --retry 5 --retry-delay 5)
+  [ -z "$CURL_CONFIG" ] || options+=(--config "$CURL_CONFIG")
+  curl "${options[@]}" --continue-at - --output "$target" "$url" || status=$?
+  case "$status" in
+    0) return 0 ;;
+    # The server cannot continue a partial file (22, 33, 36): start this file again.
+    22 | 33 | 36)
+      [ -s "$target" ] || return "$status"
+      rm -f "$target"
+      curl "${options[@]}" --output "$target" "$url" ;;
+    *) return "$status" ;;
+  esac
+}
+
+# One bundle file into the partial directory: kept if already complete, taken
+# from the installed data if it is there, downloaded otherwise. Always checked
+# against its SHA256SUMS entry before it gets its final name.
+fetch_file() {
+  local base="$1" stage="$2" data="$3" models="$4" sha="$5" path="$6"
+  local target="$stage/$path" local_copy=""
+  mkdir -p "$(dirname "$target")"
+  if [ -f "$target" ]; then
+    if [ "$(sha256_of "$target")" = "$sha" ]; then
+      printf 'kept     %s\n' "$path"
+      return 0
+    fi
+    rm -f "$target"
+  fi
+  if [ -n "$data" ]; then
+    case "$path" in
+      payload/releases/*) local_copy="$data/releases/${path#payload/releases/}" ;;
+      payload/models/*) [ -z "$models" ] || local_copy="$data/models/$models/${path#payload/models/}" ;;
+    esac
+    if [ -n "$local_copy" ] && [ -f "$local_copy" ] && [ ! -L "$local_copy" ] && [ "$(sha256_of "$local_copy")" = "$sha" ]; then
+      rm -f "$target.part"
+      cp -l "$local_copy" "$target" 2>/dev/null || cp --reflink=auto "$local_copy" "$target"
+      printf 'reused   %s\n' "$path"
+      return 0
+    fi
+  fi
+  if [ ! -f "$target.part" ] || [ "$(sha256_of "$target.part")" != "$sha" ]; then
+    if ! fetch_url "$base/$(url_path "$path")" "$target.part"; then
+      printf 'ERROR: could not download %s\n' "$path" >&2
+      return 1
+    fi
+  fi
+  if [ "$(sha256_of "$target.part")" != "$sha" ]; then
+    rm -f "$target.part"
+    printf 'ERROR: %s does not match SHA256SUMS; the source is corrupt or was modified\n' "$path" >&2
+    return 1
+  fi
+  mv -f "$target.part" "$target"
+  printf 'fetched  %s\n' "$path"
+}
+
+stop_downloads() {
+  local pid
+  for pid in $(jobs -p); do
+    pkill -TERM -P "$pid" 2>/dev/null || true
+    kill "$pid" 2>/dev/null || true
+  done
+}
+
+cmd_fetch() {
+  command -v curl >/dev/null 2>&1 || die "fetch needs curl on this host"
+  [ -n "$FROM" ] || die "fetch needs --from URL"
+  [ -n "$OUTPUT" ] || die "fetch needs --output DIR"
+  [[ "$FROM" =~ ^(https|sftp|ftps|http|ftp|file)://[^[:space:]]+$ ]] \
+    || die "--from must be an https, sftp, ftps, http, ftp or file URL"
+  [[ ! "$FROM" =~ ^[a-z]+://[^/@]*:[^/@]*@ ]] \
+    || die "do not put a password in the URL (it ends up in the process list and shell history); use --curl-config FILE"
+  [ -z "$CURL_CONFIG" ] || [ -f "$CURL_CONFIG" ] || die "--curl-config file not found: $CURL_CONFIG"
+  [[ "$JOBS" =~ ^[1-9][0-9]?$ ]] || die "--jobs takes a number from 1 to 99"
+  [ -n "$TRUSTED" ] || [ "$ALLOW_UNTRUSTED" = 1 ] \
+    || die "--trusted-digest sha256:<hex> is required; get it from the bundle producer over a separate channel"
+  case "$FROM" in
+    http://* | ftp://*) warn "${FROM%%://*} is not encrypted: others on the network can read the bundle (its integrity is still checked)" ;;
+  esac
+
+  local base="${FROM%/}" output stage
+  mkdir -p "$(dirname "$OUTPUT")"
+  output="$(cd "$(dirname "$OUTPUT")" && pwd -P)/$(basename "$OUTPUT")"
+  [ ! -e "$output" ] || die "$output already exists; check it with: cheese v2 verify --bundle $output --trusted-digest sha256:<hex>"
+  stage="$output.partial"
+  mkdir -p "$stage"
+  exec 8>"$stage/.lock"
+  if command -v flock >/dev/null 2>&1; then
+    flock -n 8 || die "another cheese v2 fetch is writing $stage"
+  fi
+
+  # The list first: nothing else is downloaded from a source whose list is not the trusted one.
+  rm -f "$stage/.SHA256SUMS.new"
+  fetch_url "$base/SHA256SUMS" "$stage/.SHA256SUMS.new" || die "could not download $base/SHA256SUMS"
+  local digest
+  digest="$(sha256_of "$stage/.SHA256SUMS.new")"
+  if [ -n "$TRUSTED" ]; then
+    if [ "$digest" != "$TRUSTED" ]; then
+      rm -f "$stage/.SHA256SUMS.new"
+      die "the bundle at $FROM is sha256:$digest, not the trusted sha256:$TRUSTED -- nothing was downloaded from it"
+    fi
+    log "The bundle list matches the trusted digest (sha256:${digest:0:12}...)."
+  else
+    warn "no --trusted-digest: integrity is checked but AUTHENTICITY IS NOT (sha256:$digest)"
+  fi
+  if [ -f "$stage/SHA256SUMS" ] && [ "$(sha256_of "$stage/SHA256SUMS")" != "$digest" ]; then
+    die "$stage holds part of a different bundle; remove it or choose another --output"
+  fi
+  listed_paths "$stage/.SHA256SUMS.new" >/dev/null || die "SHA256SUMS contains an unsafe or malformed entry"
+  mv -f "$stage/.SHA256SUMS.new" "$stage/SHA256SUMS"
+
+  # Releases and models this installation already has are taken from it, not downloaded.
+  local data="" models="" count
+  data="$(installed_data_dir)" || data=""
+  models="$(awk '$2 == "payload/models/manifest.json" { print $1 }' "$stage/SHA256SUMS")"
+  count="$(wc -l <"$stage/SHA256SUMS")"
+  log "Fetching $count files from $base, $JOBS at once${data:+ (files already installed under ${data%/data} are reused)}..."
+
+  # Interrupted (Ctrl-C, a closed session): stop the transfers too; the next run continues.
+  # shellcheck disable=SC2064
+  trap "stop_downloads; exit 130" INT TERM
+  local line failed=0 running=0
+  while IFS= read -r line; do
+    if ((running >= JOBS)); then
+      wait -n || failed=1
+      running=$((running - 1))
+    fi
+    fetch_file "$base" "$stage" "$data" "$models" "${line:0:64}" "${line:66}" &
+    running=$((running + 1))
+  done <"$stage/SHA256SUMS"
+  while ((running > 0)); do
+    wait -n || failed=1
+    running=$((running - 1))
+  done
+  trap - INT TERM
+  [ "$failed" = 0 ] || die "the download is incomplete; run the same command again to continue (kept in $stage)"
+
+  # A transfer keeps no file modes: make the bundle's scripts executable again.
+  local script
+  while IFS= read -r script; do
+    [ "$(head -c 2 "$script")" != '#!' ] || chmod +x "$script"
+  done < <(find "$stage/cli" "$stage/install.sh" -type f 2>/dev/null)
+  rm -f "$stage/.lock"
+  mv -T "$stage" "$output"
+  log ""
+  log "Bundle downloaded to $output ($(du -sh "$output" | cut -f1)); every file matches the list. Apply it with:"
+  log "  cheese v2 update --bundle $output --trusted-digest sha256:$digest"
+  log "(on a host without CHEESE V2: $output/install.sh --trusted-digest sha256:$digest)"
+}
+
+# ── apply (install / update) ─────────────────────────────────────────────────
+
+# Copy (or hard-link) a verified tree into place via a temp dir + rename, so a
+# directory under data/ is either complete or absent.
+stage_tree() {
+  local source="$1" target="$2" link="$3"
+  local tmp
+  tmp="$(dirname "$target")/.staging.$(basename "$target").$$"
+  rm -rf "$tmp"
+  mkdir -p "$(dirname "$target")"
+  if [ "$link" = 1 ]; then
+    cp -R -l "$source" "$tmp" || die "hard-linking $source failed (different filesystem?); retry without --link-data"
+  else
+    cp -R --reflink=auto "$source" "$tmp"
+  fi
+  chmod -R a+rX "$tmp"
+  mv -T "$tmp" "$target"
+}
+
+load_images() {
+  local dir="$1" short="${BUNDLE[DIGEST]:0:12}" role id
+  if docker image inspect "${BUNDLE[BACKEND_IMAGE_ID]}" >/dev/null 2>&1 \
+      && docker image inspect "${BUNDLE[UI_IMAGE_ID]}" >/dev/null 2>&1; then
+    log "Images already present in Docker; skipping load."
+  else
+    log "Loading images (docker load)..."
+    docker load -i "$dir/images/images.tar" >/dev/null
+  fi
+  for role in BACKEND UI; do
+    id="${BUNDLE[${role}_IMAGE_ID]}"
+    [ "$(docker image inspect --format '{{.Id}}' "$id" 2>/dev/null)" = "$id" ] \
+      || die "image ${role,,} $id is not present after docker load; images.tar does not match bundle.env"
+    docker tag "$id" "cheese-v2/${role,,}:$short"
+  done
+}
+
+preflight_signatures() {
+  local dir="$1" manifests=() line db rel
+  for line in "${RELEASE_LINES[@]}"; do
+    read -r db rel _ <<<"$line"
+    manifests+=("/payload/releases/$db/$rel/manifest.json")
+  done
+  log "Checking release signatures with the new backend image (no network)..."
+  local status=0
+  docker run --rm -i --network none --cap-drop ALL --security-opt no-new-privileges:true \
+    -v "$dir/payload:/payload:ro" \
+    -e RELEASE_PUBLIC_KEY_B64="$(tr -d '[:space:]' <"$dir/payload/release-public-key.txt")" \
+    --entrypoint python "${BUNDLE[BACKEND_IMAGE_ID]}" -I - "${manifests[@]}" \
+    <"$dir/cli/v2/verify-releases.py" || status=$?
+  case "$status" in
+    0) ;;
+    3) warn "backend image has no release verifier; signatures will be checked by the backend at startup" ;;
+    *) die "release signature pre-check failed; nothing was changed" ;;
+  esac
+}
+
+stack_running() {
+  [ -n "$(docker ps -q --filter "label=com.docker.compose.project=$(project_name)" 2>/dev/null)" ]
+}
+
+cmd_verify() {
+  verify_bundle "$BUNDLE_DIR" "$TRUSTED" "$ALLOW_UNTRUSTED"
+  print_bundle_summary
+  log "Bundle OK."
+}
+
+cmd_apply() {
+  local mode="$1"
+  compose_available
+  with_lock
+  local installed=0
+  [ -f "$PREFIX/state/installed.env" ] && installed=1
+  if [ "$mode" = update ] && [ "$installed" = 0 ]; then
+    die "nothing installed in $PREFIX; use <bundle>/install.sh (or cheese v2 install)"
+  fi
+
+  verify_bundle "$BUNDLE_DIR" "$TRUSTED" "$ALLOW_UNTRUSTED"
+  print_bundle_summary
+  local dir short
+  dir="$(cd "$BUNDLE_DIR" && pwd -P)"
+  short="${BUNDLE[DIGEST]:0:12}"
+
+  STATE=()
+  if [ "$installed" = 1 ]; then
+    load_state
+    if [ "${STATE[CURRENT_DIGEST]}" = "${BUNDLE[DIGEST]}" ] && [ "$FORCE" = 0 ]; then
+      log "This bundle is already installed in $PREFIX; nothing to do (use --force to re-apply)."
+      return 0
+    fi
+    # Compatibility gates: all are checked before anything changes.
+    if [ "${STATE[PINNED_RELEASE_KEY_SHA256]}" != "${BUNDLE[RELEASE_PUBLIC_KEY_SHA256]}" ]; then
+      [ "$ACCEPT_KEY" = "${BUNDLE[RELEASE_PUBLIC_KEY_SHA256]}" ] \
+        || die "the release signing key changed (pinned sha256:${STATE[PINNED_RELEASE_KEY_SHA256]}, bundle sha256:${BUNDLE[RELEASE_PUBLIC_KEY_SHA256]}); confirm the rotation with the producer, then pass --accept-release-key sha256:${BUNDLE[RELEASE_PUBLIC_KEY_SHA256]}"
+      warn "accepting rotated release key sha256:${BUNDLE[RELEASE_PUBLIC_KEY_SHA256]}"
+    fi
+    if [[ "${BUNDLE[CREATED_UTC]}" < "${STATE[CURRENT_CREATED_UTC]}" ]] && [ "$ALLOW_DOWNGRADE" = 0 ]; then
+      die "bundle (${BUNDLE[CREATED_UTC]}) is older than the installed one (${STATE[CURRENT_CREATED_UTC]}); pass --allow-downgrade to roll back deliberately"
+    fi
+  fi
+  local line db rel sha
+  for line in "${RELEASE_LINES[@]}"; do
+    read -r db rel sha <<<"$line"
+    local existing="$PREFIX/data/releases/$db/$rel/manifest.json"
+    if [ -f "$existing" ] && [ "$(sha256_of "$existing")" != "$sha" ]; then
+      die "release $db/$rel is already installed with different content; release IDs must be immutable -- refusing"
+    fi
+  done
+  if [ -d "$PREFIX/bundles/$short" ] && [ -f "$PREFIX/bundles/$short/SHA256SUMS" ] \
+      && [ "$(sha256_of "$PREFIX/bundles/$short/SHA256SUMS")" != "${BUNDLE[DIGEST]}" ]; then
+    die "$PREFIX/bundles/$short belongs to a different bundle"
+  fi
+
+  load_images "$dir"
+  [ "$SKIP_PREFLIGHT" = 1 ] || preflight_signatures "$dir"
+
+  # Stage data. Existing, identical releases are reused (idempotent updates).
+  mkdir -p "$PREFIX/data/releases" "$PREFIX/data/models" "$PREFIX/bundles" "$PREFIX/bin"
+  # The backend runs as uid 10001: data must be world-readable whatever the umask.
+  chmod 755 "$PREFIX/data" "$PREFIX/data/releases" "$PREFIX/data/models"
+  for line in "${RELEASE_LINES[@]}"; do
+    read -r db rel sha <<<"$line"
+    mkdir -p "$PREFIX/data/releases/$db" && chmod 755 "$PREFIX/data/releases/$db"
+    if [ -f "$PREFIX/data/releases/$db/$rel/manifest.json" ]; then
+      log "Release $db/$rel already staged."
+    else
+      log "Staging release $db/$rel..."
+      stage_tree "$dir/payload/releases/$db/$rel" "$PREFIX/data/releases/$db/$rel" "$LINK_DATA"
+    fi
+  done
+  local models="$PREFIX/data/models/${BUNDLE[MODEL_MANIFEST_SHA256]}"
+  if [ -f "$models/manifest.json" ]; then
+    log "Models already staged."
+  else
+    log "Staging models..."
+    stage_tree "$dir/payload/models" "$models" "$LINK_DATA"
+  fi
+
+  if [ ! -d "$PREFIX/bundles/$short" ]; then
+    local tmp="$PREFIX/bundles/.staging.$short.$$"
+    rm -rf "$tmp"; mkdir -p "$tmp"
+    cp -R "$dir/cli" "$tmp/cli"
+    cp "$dir/bundle.env" "$dir/releases.tsv" "$dir/SHA256SUMS" "$tmp/"
+    cp "$dir/payload/release-public-key.txt" "$tmp/"
+    [ -f "$dir/bundle.json" ] && cp "$dir/bundle.json" "$tmp/"
+    [ -d "$dir/sdk" ] && cp -R "$dir/sdk" "$tmp/sdk"
+    chmod -R a+rX "$tmp"
+    mv -T "$tmp" "$PREFIX/bundles/$short"
+  fi
+  ensure_config
+
+  local was_running=0 old_digest="${STATE[CURRENT_DIGEST]:-}"
+  [ "$installed" = 1 ] && stack_running && was_running=1
+  if [ -n "$old_digest" ] && [ "$old_digest" != "${BUNDLE[DIGEST]}" ]; then
+    swap_link previous "bundles/${old_digest:0:12}"
+    STATE[PREVIOUS_DIGEST]="$old_digest"
+  fi
+  swap_link current "bundles/$short"
+  ln -sfn ../current/cli/scripts/cheese "$PREFIX/bin/.cheese.$$" && mv -T "$PREFIX/bin/.cheese.$$" "$PREFIX/bin/cheese"
+  STATE[CURRENT_DIGEST]="${BUNDLE[DIGEST]}"
+  STATE[CURRENT_CREATED_UTC]="${BUNDLE[CREATED_UTC]}"
+  STATE[CURRENT_BUNDLE_VERSION]="${BUNDLE[BUNDLE_VERSION]:-}"
+  STATE[PINNED_RELEASE_KEY_SHA256]="${BUNDLE[RELEASE_PUBLIC_KEY_SHA256]}"
+  STATE[PROJECT]="$(project_name)"
+  mkdir -p "$PREFIX/state"
+  write_state
+
+  if [ "$was_running" = 1 ]; then
+    log "The stack is running; switching it to the new bundle..."
+    if ! (start_stack "$START_TIMEOUT"); then
+      if [ -n "$old_digest" ] && [ -d "$PREFIX/bundles/${old_digest:0:12}" ]; then
+        warn "new bundle did not become healthy; rolling back to sha256:${old_digest:0:12}..."
+        swap_link current "bundles/${old_digest:0:12}"
+        swap_link previous "bundles/$short"
+        STATE[CURRENT_DIGEST]="$old_digest"
+        local -A OLD=()
+        read_kv "$PREFIX/bundles/${old_digest:0:12}/bundle.env" OLD
+        STATE[CURRENT_CREATED_UTC]="${OLD[CREATED_UTC]}"
+        STATE[CURRENT_BUNDLE_VERSION]="${OLD[BUNDLE_VERSION]:-}"
+        STATE[PINNED_RELEASE_KEY_SHA256]="${OLD[RELEASE_PUBLIC_KEY_SHA256]}"
+        STATE[PREVIOUS_DIGEST]="${BUNDLE[DIGEST]}"
+        write_state
+        start_stack "$START_TIMEOUT" || warn "rollback start failed too; see 'cheese v2 logs'"
+      fi
+      die "update to sha256:$short failed; see 'cheese v2 logs'"
+    fi
+  fi
+
+  log ""
+  log "CHEESE V2 bundle sha256:$short installed in $PREFIX."
+  if [ "$was_running" = 0 ]; then
+    log "Start it with:"
+    log "  $PREFIX/bin/cheese v2 start"
+    log "(or add it to PATH: export PATH=\"$PREFIX/bin:\$PATH\")"
+  fi
+}
+
+# ── runtime ──────────────────────────────────────────────────────────────────
+
+CURRENT=""
+render_runtime_env() {
+  load_state
+  load_host_conf
+  ensure_config
+  CURRENT="$(readlink -f "$PREFIX/current")"
+  [ -f "$CURRENT/bundle.env" ] || die "current bundle is missing under $PREFIX"
+  local -A B=()
+  read_kv "$CURRENT/bundle.env" B
+  local short="${STATE[CURRENT_DIGEST]:0:12}" json="" line db rel
+  while read -r db rel _; do
+    [ -z "$db" ] && continue
+    [[ "$db" =~ $ID_RE && "$rel" =~ $ID_RE ]] || die "bad release id in $CURRENT/releases.tsv"
+    [ -f "$PREFIX/data/releases/$db/$rel/manifest.json" ] || die "release $db/$rel is not staged"
+    json+="${json:+,}\"$db\":\"/data/releases/$db/$rel/manifest.json\""
+  done <"$CURRENT/releases.tsv"
+  # Preview hosts only (the internal demo follows the develop UI build): run a
+  # UI image pulled by digest instead of the bundle's. Backend, data and edge
+  # stay the bundle's. Customer installs never set it.
+  local ui_image="cheese-v2/ui:$short"
+  if [ -n "${HOSTCONF[CHEESE_V2_UI_IMAGE_OVERRIDE]:-}" ]; then
+    ui_image="${HOSTCONF[CHEESE_V2_UI_IMAGE_OVERRIDE]}"
+    [[ "$ui_image" =~ ^[A-Za-z0-9._/:-]+@sha256:[0-9a-f]{64}$ ]] \
+      || die "CHEESE_V2_UI_IMAGE_OVERRIDE must be an image pinned by digest (<repository>@sha256:<64 hex>)"
+  fi
+  local key
+  key="$(tr -d '[:space:]' <"$CURRENT/release-public-key.txt")"
+  [[ "$key" =~ ^[A-Za-z0-9+/=]+$ ]] || die "release public key is not base64"
+  # Single-quoted values are literal for docker compose; none can contain a quote.
+  local tmp="$PREFIX/state/.runtime.env.$$"
+  {
+    printf "CHEESE_V2_BACKEND_IMAGE='cheese-v2/backend:%s'\n" "$short"
+    printf "CHEESE_V2_UI_IMAGE='%s'\n" "$ui_image"
+    printf "CHEESE_V2_CONFIG_DIR='%s'\n" "$PREFIX/config"
+    printf "CHEESE_V2_DATA_DIR='%s'\n" "$PREFIX/data"
+    printf "CHEESE_V2_EDGE_SCRIPT='%s'\n" "$CURRENT/cli/v2/edge-forward.py"
+    printf "CHEESE_V2_LIBRARY_MANIFESTS_JSON='{%s}'\n" "$json"
+    printf "CHEESE_V2_MODEL_ROOT='/data/models/%s'\n" "${B[MODEL_MANIFEST_SHA256]}"
+    printf "CHEESE_V2_MODEL_MANIFEST_SHA256='%s'\n" "${B[MODEL_MANIFEST_SHA256]}"
+    printf "CHEESE_V2_RELEASE_PUBLIC_KEY_B64='%s'\n" "$key"
+    printf "CHEESE_V2_BIND='%s'\n" "${HOSTCONF[CHEESE_V2_BIND]}"
+    printf "CHEESE_V2_UI_PORT='%s'\n" "${HOSTCONF[CHEESE_V2_UI_PORT]}"
+    printf "CHEESE_V2_API_PORT='%s'\n" "${HOSTCONF[CHEESE_V2_API_PORT]}"
+  } >"$tmp"
+  mv -f "$tmp" "$PREFIX/state/runtime.env"
+  [[ "$PREFIX" != *"'"* ]] || die "install prefix must not contain a quote"
+}
+
+compose() {
+  docker compose -p "${STATE[PROJECT]}" -f "$CURRENT/cli/v2/compose.yaml" \
+    --env-file "$PREFIX/state/runtime.env" "$@"
+}
+
+service_health() {
+  local id
+  id="$(compose ps -q "$1" 2>/dev/null | head -1)"
+  [ -n "$id" ] || { printf 'absent'; return; }
+  docker inspect --format '{{.State.Status}}{{if .State.Health}}/{{.State.Health.Status}}{{end}}' "$id" 2>/dev/null || printf 'absent'
+}
+
+start_stack() {
+  local timeout="$1"
+  compose_available
+  render_runtime_env
+  log "Starting CHEESE V2 (project ${STATE[PROJECT]}, bundle sha256:${STATE[CURRENT_DIGEST]:0:12})..."
+  local deadline=$((SECONDS + timeout)) service health all_ok
+  compose up -d --pull never --remove-orphans || return 1
+  while :; do
+    all_ok=1
+    for service in backend ui edge; do
+      health="$(service_health "$service")"
+      case "$health" in
+        running/healthy) ;;
+        exited* | dead* | */unhealthy)
+          warn "$service is $health"
+          compose logs --tail 40 "$service" >&2 || true
+          return 1 ;;
+        *) all_ok=0 ;;
+      esac
+    done
+    [ "$all_ok" = 1 ] && break
+    ((SECONDS < deadline)) || { warn "timed out after ${timeout}s waiting for the stack to become healthy"; return 1; }
+    sleep 3
+  done
+  local bind="${HOSTCONF[CHEESE_V2_BIND]}" ui_port="${HOSTCONF[CHEESE_V2_UI_PORT]}" api_port="${HOSTCONF[CHEESE_V2_API_PORT]}"
+  [ "$bind" = 0.0.0.0 ] && bind=127.0.0.1
+  [ "$(http_get "$bind" "$api_port" /health/live | head -1)" = 200 ] \
+    || { warn "backend is healthy but not reachable from the host on $bind:$api_port"; return 1; }
+  [ "$(http_get "$bind" "$ui_port" /health | head -1)" = 200 ] \
+    || { warn "UI is healthy but not reachable from the host on $bind:$ui_port"; return 1; }
+  until [ "$(readiness_summary "$bind" "$api_port")" = ready ]; do
+    ((SECONDS < deadline)) || { warn "search libraries did not become ready within ${timeout}s"; return 1; }
+    sleep 2
+  done
+  log "CHEESE V2 is up:"
+  log "  UI   http://$bind:$ui_port/"
+  log "  API  http://$bind:$api_port/   (readiness: ready)"
+}
+
+readiness_summary() {
+  local response code
+  response="$(http_get "$1" "$2" /health/ready || true)"
+  code="$(head -1 <<<"$response")"
+  case "$code" in
+    200) printf 'ready' ;;
+    503) printf 'loading search assets -- check again with cheese v2 status' ;;
+    "") printf 'unreachable' ;;
+    *) printf 'HTTP %s' "$code" ;;
+  esac
+}
+
+cmd_start() {
+  with_lock
+  start_stack "$START_TIMEOUT" || die "CHEESE V2 did not start cleanly; see 'cheese v2 logs'"
+}
+
+cmd_stop() {
+  compose_available
+  with_lock
+  render_runtime_env
+  # down removes this project's containers and networks only; volumes stay.
+  compose down --remove-orphans
+  log "CHEESE V2 stopped (data, volumes and images kept)."
+}
+
+cmd_status() {
+  render_runtime_env
+  local bind="${HOSTCONF[CHEESE_V2_BIND]}" ui_port="${HOSTCONF[CHEESE_V2_UI_PORT]}" api_port="${HOSTCONF[CHEESE_V2_API_PORT]}"
+  [ "$bind" = 0.0.0.0 ] && bind=127.0.0.1
+  local backend ui edge readiness
+  backend="$(service_health backend)"; ui="$(service_health ui)"; edge="$(service_health edge)"
+  readiness="$(readiness_summary "$bind" "$api_port")"
+  if [ "$JSON" = 1 ]; then
+    printf '{"prefix":"%s","project":"%s","bundle_digest":"sha256:%s","bundle_version":"%s","services":{"backend":"%s","ui":"%s","edge":"%s"},"ui_url":"http://%s:%s/","api_url":"http://%s:%s/","readiness":"%s"}\n' \
+      "$PREFIX" "${STATE[PROJECT]}" "${STATE[CURRENT_DIGEST]}" "${STATE[CURRENT_BUNDLE_VERSION]}" \
+      "$backend" "$ui" "$edge" "$bind" "$ui_port" "$bind" "$api_port" "${readiness%% --*}"
+    return
+  fi
+  log "Prefix    $PREFIX"
+  log "Project   ${STATE[PROJECT]}"
+  log "Bundle    ${STATE[CURRENT_BUNDLE_VERSION]} sha256:${STATE[CURRENT_DIGEST]} (installed ${STATE[INSTALLED_UTC]:-?})"
+  while read -r db rel _; do [ -n "$db" ] && log "Release   $db / $rel"; done <"$CURRENT/releases.tsv"
+  [ -n "${HOSTCONF[CHEESE_V2_UI_IMAGE_OVERRIDE]:-}" ] && log "UI image  ${HOSTCONF[CHEESE_V2_UI_IMAGE_OVERRIDE]} (CHEESE_V2_UI_IMAGE_OVERRIDE)"
+  log "Services  backend=$backend ui=$ui edge=$edge"
+  log "UI        http://$bind:$ui_port/"
+  log "API       http://$bind:$api_port/  readiness: $readiness"
+}
+
+cmd_sdk_install() {
+  load_state
+  [ -n "$VENV" ] || die "sdk-install needs --venv DIR"
+  local wheelhouse
+  wheelhouse="$(readlink -f "$PREFIX/current")/sdk/wheelhouse"
+  [ -f "$wheelhouse/requirements.lock" ] || die "the installed bundle has no SDK wheelhouse"
+  (cd "$wheelhouse" && sha256sum --check --strict --quiet SHA256SUMS) || die "SDK wheelhouse checksum mismatch"
+  command -v "$PYTHON" >/dev/null 2>&1 || die "$PYTHON not found (the SDK wheels target CPython 3.11; pass --python)"
+  "$PYTHON" -m venv "$VENV"
+  # No index, no pip.conf: every wheel comes from the bundle and must match its pinned hash.
+  PIP_CONFIG_FILE=/dev/null "$VENV/bin/pip" install --no-index --no-cache-dir --disable-pip-version-check \
+    --find-links "$wheelhouse" --require-hashes -r "$wheelhouse/requirements.lock"
+  log "SDK installed in $VENV. Use it with: dmc.Client(api_url=\"http://127.0.0.1:${DEFAULT_API_PORT}\", on_prem=True)"
+}
+
+cmd_logs() {
+  render_runtime_env
+  compose logs "$@"
+}
+
+# ── support bundle ───────────────────────────────────────────────────────────
+#
+# One file an operator can read through and then attach to a ticket. It must not carry what was
+# searched for, so backend log lines are not copied: each structured line is rebuilt from its event
+# name and the fields named below, a value is kept only when it is a plain token, and a request path
+# loses its query string. Everything else (free text, tracebacks, UI and edge output) is counted, not copied.
+
+SUPPORT_FIELDS="attempt client code database database_id database_release duration_ms duration_s freed_mb method operation path peak_rss_mb request_id returned rows rss_mb scorer seconds slots status total_ms trim_ms version wall_ms"
+SUPPORT_MAX_EVENTS=20000
+
+# stdin: raw backend log; stdout: the rebuilt lines; $1: file that gets the number of lines left out.
+support_filter() {
+  awk -v fields="$SUPPORT_FIELDS" -v dropped_file="$1" '
+    BEGIN { n = split(fields, list, " "); for (i = 1; i <= n; i++) allowed[list[i]] = 1; dropped = 0 }
+    {
+      if ($1 !~ /^[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]$/ || $2 !~ /^[0-9:.]+$/ || $3 !~ /^\[[a-z]+\]?$/) { dropped++; next }
+      level = $3; gsub(/[^a-z]/, "", level); at = 4
+      if ($4 == "]") at = 5
+      event = $at
+      if (event !~ /^[a-z0-9_]+$/) { dropped++; next }
+      line = $1 " " $2 " " level " " event
+      for (i = at + 1; i <= NF; i++) {
+        eq = index($i, "="); if (eq < 2) continue
+        key = substr($i, 1, eq - 1); value = substr($i, eq + 1)
+        if (!(key in allowed)) continue
+        if (key == "path") sub(/\?.*$/, "", value)
+        if (value ~ /^[A-Za-z0-9_.:\/-]+$/) line = line " " key "=" value
+      }
+      print line
+    }
+    END { print dropped > dropped_file }
+  '
+}
+
+# stdin: rebuilt lines; stdout: requests by path and status, slowest first within the table.
+support_requests() {
+  awk '
+    $4 != "request_complete" { next }
+    {
+      path = ""; status = ""; method = ""; ms = 0
+      for (i = 5; i <= NF; i++) {
+        split($i, kv, "=")
+        if (kv[1] == "path") path = kv[2]; else if (kv[1] == "status") status = kv[2]
+        else if (kv[1] == "method") method = kv[2]; else if (kv[1] == "duration_ms") ms = kv[2] + 0
+      }
+      if (path ~ /^\/health/) { health++; next }
+      key = method " " path " " status
+      count[key]++; total[key] += ms; if (ms > max[key]) max[key] = ms
+    }
+    END {
+      printf "%-8s %-40s %-6s %8s %12s %12s\n", "method", "path", "status", "count", "mean_ms", "max_ms"
+      for (key in count) { split(key, part, " "); printf "%-8s %-40s %-6s %8d %12.0f %12.0f\n", part[1], part[2], part[3], count[key], total[key] / count[key], max[key] | "LC_ALL=C sort -k2,2 -k3,3" }
+      close("LC_ALL=C sort -k2,2 -k3,3")
+      printf "\nhealth probes (left out above): %d\n", health
+    }
+  '
+}
+
+cmd_support_bundle() {
+  load_state
+  [[ "$SINCE" =~ ^[0-9]+[mhd]$ ]] || die "--since takes a number and m, h or d (for example 24h)"
+  local since="$SINCE"
+  [ "${since: -1}" = d ] && since="$(( ${since%d} * 24 ))h"
+  local stamp name work out
+  stamp="$(date -u +%Y%m%dT%H%M%SZ)"
+  name="cheese-support-$stamp"
+  out="${OUTPUT:-$PWD/$name.tar.gz}"
+  [ ! -e "$out" ] || die "$out already exists"
+  [ -d "$(dirname "$out")" ] || die "no such directory: $(dirname "$out")"
+  work="$(mktemp -d)"
+  # shellcheck disable=SC2064
+  trap "rm -rf '$work'" EXIT
+  local dir="$work/$name"
+  mkdir -p "$dir"
+
+  # The bundle is still worth having when Docker is down or not usable by this user.
+  local docker_ok=1
+  docker compose version >/dev/null 2>&1 || docker_ok=0
+  if [ "$docker_ok" = 1 ]; then render_runtime_env; else CURRENT="$(readlink -f "$PREFIX/current")"; fi
+
+  {
+    log "created_utc      $stamp"
+    log "log_window       last $SINCE"
+    log "bundle_version   ${STATE[CURRENT_BUNDLE_VERSION]:-?}"
+    log "bundle_digest    sha256:${STATE[CURRENT_DIGEST]:-?}"
+    log "bundle_created   ${STATE[CURRENT_CREATED_UTC]:-?}"
+    log "installed_utc    ${STATE[INSTALLED_UTC]:-?}"
+    log "previous_digest  ${STATE[PREVIOUS_DIGEST]:+sha256:}${STATE[PREVIOUS_DIGEST]:-none}"
+    log "bundle_format    $BUNDLE_FORMAT"
+    while read -r db rel _; do [ -n "$db" ] && log "release          $db / $rel"; done <"$CURRENT/releases.tsv"
+    if [ "$docker_ok" = 1 ]; then
+      local bind="${HOSTCONF[CHEESE_V2_BIND]}" service
+      [ "$bind" = 0.0.0.0 ] && bind=127.0.0.1
+      for service in backend ui edge; do log "service          $service $(service_health "$service")"; done
+      log "liveness         HTTP $(http_get "$bind" "${HOSTCONF[CHEESE_V2_API_PORT]}" /health/live | head -1)"
+      log "readiness        $(readiness_summary "$bind" "${HOSTCONF[CHEESE_V2_API_PORT]}")"
+    else
+      log "service          docker compose is not available to this user"
+    fi
+  } >"$dir/install.txt" 2>/dev/null
+
+  {
+    log "kernel     $(uname -srm)"
+    [ -r /etc/os-release ] && log "os         $(sed -n 's/^PRETTY_NAME="\(.*\)"$/\1/p' /etc/os-release)"
+    log "cpus       $(nproc 2>/dev/null || printf '?')"
+    [ -r /proc/meminfo ] && awk '/^(MemTotal|MemAvailable|SwapTotal):/ { name = tolower($1); sub(/:$/, "", name); printf "%-10s %d MiB\n", name, $2 / 1024 }' /proc/meminfo
+    [ -r /proc/loadavg ] && log "load       $(cut -d' ' -f1-3 /proc/loadavg)"
+    log "disk       $(df -Pk "$PREFIX" | awk 'NR == 2 { printf "%d GiB free of %d GiB (%s used)", $4 / 1048576, $2 / 1048576, $5 }')"
+    if [ "$docker_ok" = 1 ]; then
+      log "docker     $(docker version --format '{{.Server.Version}}' 2>/dev/null || printf '?')"
+      log "compose    $(docker compose version --short 2>/dev/null || printf '?')"
+    fi
+  } >"$dir/host.txt" 2>/dev/null
+
+  local unstructured=0 other=0
+  if [ "$docker_ok" = 1 ]; then
+    local ids=() id service
+    for service in backend ui edge; do
+      id="$(compose ps -q "$service" 2>/dev/null | head -1)"
+      [ -n "$id" ] || { log "$service: no container" >>"$dir/containers.txt"; continue; }
+      ids+=("$id")
+      docker inspect --format "$service: status={{.State.Status}} health={{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}} restarts={{.RestartCount}} oom_killed={{.State.OOMKilled}} exit_code={{.State.ExitCode}} started={{.State.StartedAt}} image={{.Image}}" \
+        "$id" >>"$dir/containers.txt" 2>/dev/null || log "$service: not inspectable" >>"$dir/containers.txt"
+    done
+    if [ "${#ids[@]}" -gt 0 ]; then
+      { log ""; docker stats --no-stream --format '{{.Name}}: cpu={{.CPUPerc}} memory={{.MemUsage}} ({{.MemPerc}}) pids={{.PIDs}}' "${ids[@]}"; } >>"$dir/containers.txt" 2>/dev/null || true
+    fi
+    compose logs --no-color --no-log-prefix --since "$since" backend 2>/dev/null \
+      | support_filter "$work/dropped" | tail -n "$SUPPORT_MAX_EVENTS" >"$work/events" || true
+    unstructured="$(cat "$work/dropped" 2>/dev/null || printf 0)"
+    other="$(compose logs --no-color --no-log-prefix --since "$since" ui edge 2>/dev/null | wc -l | tr -d ' ' || true)"
+    support_requests <"$work/events" >"$dir/requests.txt"
+    # Health probes answer 503 while the libraries load; that is start-up, not an error.
+    grep -v ' request_complete .* path=/health' "$work/events" \
+      | awk '$3 != "info" && $3 != "debug" { print; next } { for (i = 5; i <= NF; i++) if ($i ~ /^status=[45]/) { print; next } }' >"$dir/errors.log" || true
+    grep -v ' request_complete .* path=/health' "$work/events" >"$dir/backend-events.log" || true
+  fi
+
+  cat >"$dir/README.txt" <<EOF
+CHEESE V2 support bundle, written by 'cheese v2 support-bundle' on this host. Nothing was sent
+anywhere: read it, then attach it to the ticket or email agreed with DeepMedChem.
+
+install.txt         installed bundle, releases, service health, liveness and readiness
+host.txt            kernel, CPUs, memory, load, free disk under the install prefix, Docker versions
+containers.txt      state, restarts, out-of-memory kills and current CPU and memory of each container
+requests.txt        requests of the last $SINCE by path and status, with mean and longest duration
+errors.log          warnings, errors and requests answered with 4xx or 5xx (with their request IDs)
+backend-events.log  backend events of the last $SINCE (at most $SUPPORT_MAX_EVENTS), health probes left out
+
+What is left out. Query structures, request bodies, API keys, user names and free-text messages are
+not in this file. A backend log line is rebuilt from its event name and these fields only, and a
+value is kept only when it is a single plain token:
+  $SUPPORT_FIELDS
+Request paths lose their query string. Lines that are not structured events (free text and
+tracebacks) are not copied: $unstructured backend lines were left out. UI and edge output is not
+copied either: $other lines in the window.
+EOF
+
+  tar -czf "$out" -C "$work" "$name"
+  log "Support bundle written: $out"
+  log "It holds versions, health, resource use and filtered backend events of the last $SINCE; no query structures."
+  log "Read $name/README.txt inside it for what each file is, then send it yourself."
+}
+
+# ── argument parsing ─────────────────────────────────────────────────────────
+
+[ $# -gt 0 ] || { usage; exit 1; }
+COMMAND="$1"; shift
+BUNDLE_DIR="" TRUSTED="" ALLOW_UNTRUSTED=0 LINK_DATA=0 ACCEPT_KEY="" ALLOW_DOWNGRADE=0
+SKIP_PREFLIGHT=0 FORCE=0 JSON=0 START_TIMEOUT=600 VENV="" PYTHON=python3.11
+FROM="" OUTPUT="" CURL_CONFIG="" JOBS=4 SINCE=24h
+PASSTHROUGH=()
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --prefix) PREFIX="${2:?--prefix needs a directory}"; shift 2 ;;
+    --bundle) BUNDLE_DIR="${2:?--bundle needs a directory}"; shift 2 ;;
+    --from) FROM="${2:?--from needs a URL}"; shift 2 ;;
+    --output) OUTPUT="${2:?--output needs a path}"; shift 2 ;;
+    --since) SINCE="${2:?--since needs an age such as 24h}"; shift 2 ;;
+    --curl-config) CURL_CONFIG="${2:?--curl-config needs a file}"; shift 2 ;;
+    --jobs) JOBS="${2:?--jobs needs a number}"; shift 2 ;;
+    --trusted-digest) TRUSTED="$(normalize_digest "${2:?--trusted-digest needs sha256:<hex>}")"; shift 2 ;;
+    --accept-release-key) ACCEPT_KEY="$(normalize_digest "${2:?}")"; shift 2 ;;
+    --allow-untrusted) ALLOW_UNTRUSTED=1; shift ;;
+    --allow-downgrade) ALLOW_DOWNGRADE=1; shift ;;
+    --link-data) LINK_DATA=1; shift ;;
+    --skip-preflight) SKIP_PREFLIGHT=1; shift ;;
+    --force) FORCE=1; shift ;;
+    --json) JSON=1; shift ;;
+    --venv) VENV="${2:?--venv needs a directory}"; shift 2 ;;
+    --python) PYTHON="${2:?--python needs an interpreter}"; shift 2 ;;
+    --timeout) START_TIMEOUT="${2:?}"; [[ "$START_TIMEOUT" =~ ^[0-9]+$ ]] || die "--timeout takes seconds"; shift 2 ;;
+    -h | --help) usage; exit 0 ;;
+    *)
+      [ "$COMMAND" = logs ] || die "unknown option for '$COMMAND': $1 (see cheese v2 --help)"
+      PASSTHROUGH+=("$1"); shift ;;
+  esac
+done
+
+case "$COMMAND" in
+  install | update | verify)
+    [ -n "$BUNDLE_DIR" ] || die "$COMMAND needs --bundle DIR"
+    if [ "$COMMAND" = verify ]; then cmd_verify; else resolve_prefix; cmd_apply "$COMMAND"; fi ;;
+  fetch) cmd_fetch ;;
+  start) resolve_prefix; cmd_start ;;
+  stop) resolve_prefix; cmd_stop ;;
+  status) resolve_prefix; cmd_status ;;
+  logs) resolve_prefix; cmd_logs "${PASSTHROUGH[@]}" ;;
+  sdk-install) resolve_prefix; cmd_sdk_install ;;
+  support-bundle) resolve_prefix; cmd_support_bundle ;;
+  -h | --help | help) usage ;;
+  *) usage; die "unknown command: $COMMAND" ;;
+esac
