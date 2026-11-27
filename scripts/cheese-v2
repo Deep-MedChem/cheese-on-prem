@@ -726,6 +726,15 @@ render_runtime_env() {
     [ -f "$PREFIX/data/releases/$db/$rel/manifest.json" ] || die "release $db/$rel is not staged"
     json+="${json:+,}\"$db\":\"/data/releases/$db/$rel/manifest.json\""
   done <"$CURRENT/releases.tsv"
+  # Preview hosts only (the internal demo follows the develop UI build): run a
+  # UI image pulled by digest instead of the bundle's. Backend, data and edge
+  # stay the bundle's. Customer installs never set it.
+  local ui_image="cheese-v2/ui:$short"
+  if [ -n "${HOSTCONF[CHEESE_V2_UI_IMAGE_OVERRIDE]:-}" ]; then
+    ui_image="${HOSTCONF[CHEESE_V2_UI_IMAGE_OVERRIDE]}"
+    [[ "$ui_image" =~ ^[A-Za-z0-9._/:-]+@sha256:[0-9a-f]{64}$ ]] \
+      || die "CHEESE_V2_UI_IMAGE_OVERRIDE must be an image pinned by digest (<repository>@sha256:<64 hex>)"
+  fi
   local key
   key="$(tr -d '[:space:]' <"$CURRENT/release-public-key.txt")"
   [[ "$key" =~ ^[A-Za-z0-9+/=]+$ ]] || die "release public key is not base64"
@@ -733,7 +742,7 @@ render_runtime_env() {
   local tmp="$PREFIX/state/.runtime.env.$$"
   {
     printf "CHEESE_V2_BACKEND_IMAGE='cheese-v2/backend:%s'\n" "$short"
-    printf "CHEESE_V2_UI_IMAGE='cheese-v2/ui:%s'\n" "$short"
+    printf "CHEESE_V2_UI_IMAGE='%s'\n" "$ui_image"
     printf "CHEESE_V2_CONFIG_DIR='%s'\n" "$PREFIX/config"
     printf "CHEESE_V2_DATA_DIR='%s'\n" "$PREFIX/data"
     printf "CHEESE_V2_EDGE_SCRIPT='%s'\n" "$CURRENT/cli/v2/edge-forward.py"
@@ -843,6 +852,7 @@ cmd_status() {
   log "Project   ${STATE[PROJECT]}"
   log "Bundle    ${STATE[CURRENT_BUNDLE_VERSION]} sha256:${STATE[CURRENT_DIGEST]} (installed ${STATE[INSTALLED_UTC]:-?})"
   while read -r db rel _; do [ -n "$db" ] && log "Release   $db / $rel"; done <"$CURRENT/releases.tsv"
+  [ -n "${HOSTCONF[CHEESE_V2_UI_IMAGE_OVERRIDE]:-}" ] && log "UI image  ${HOSTCONF[CHEESE_V2_UI_IMAGE_OVERRIDE]} (CHEESE_V2_UI_IMAGE_OVERRIDE)"
   log "Services  backend=$backend ui=$ui edge=$edge"
   log "UI        http://$bind:$ui_port/"
   log "API       http://$bind:$api_port/  readiness: $readiness"
