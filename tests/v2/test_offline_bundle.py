@@ -671,6 +671,30 @@ class OfflineBundleTest(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("not installed", result.stderr)
 
+    def test_ui_image_override_replaces_only_the_ui_image(self):
+        bundle, digest = self.build(self.payload())
+        self.install(bundle, digest)
+        short = digest[7:19]
+        runtime = self.prefix / "state/runtime.env"
+        conf = self.prefix / "config/v2.conf"
+        base = conf.read_text()
+
+        self.cheese("status")
+        self.assertIn(f"CHEESE_V2_UI_IMAGE='cheese-v2/ui:{short}'", runtime.read_text())
+
+        image = "815935788477.dkr.ecr.us-east-1.amazonaws.com/on-prem/cheese/cheese-search-ui@sha256:" + "a" * 64
+        conf.write_text(base + f"CHEESE_V2_UI_IMAGE_OVERRIDE={image}\n")
+        self.assertIn(f"UI image  {image}", self.cheese("status").stdout)
+        rendered = runtime.read_text()
+        self.assertIn(f"CHEESE_V2_UI_IMAGE='{image}'", rendered)
+        self.assertIn(f"CHEESE_V2_BACKEND_IMAGE='cheese-v2/backend:{short}'", rendered)
+
+        # A moving tag is refused: the preview must run exactly the published build.
+        conf.write_text(base + "CHEESE_V2_UI_IMAGE_OVERRIDE=example.com/ui:v2-dev\n")
+        failed = self.cheese("status", check=False)
+        self.assertNotEqual(failed.returncode, 0)
+        self.assertIn("pinned by digest", failed.stderr)
+
     def test_rendered_compose_matches_the_runtime_contract(self):
         bundle, digest = self.build(self.payload())
         self.install(bundle, digest)

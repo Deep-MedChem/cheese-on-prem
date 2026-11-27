@@ -281,7 +281,7 @@ Operator settings in `<prefix>/config/` (applied on the next `cheese v2 start`):
 
 | file | purpose |
 |---|---|
-| `v2.conf` | `CHEESE_V2_BIND` (default `127.0.0.1`), `CHEESE_V2_UI_PORT`, `CHEESE_V2_API_PORT` |
+| `v2.conf` | `CHEESE_V2_BIND` (default `127.0.0.1`), `CHEESE_V2_UI_PORT`, `CHEESE_V2_API_PORT`<br>`CHEESE_V2_UI_IMAGE_OVERRIDE`: internal preview hosts only, never customer sites. A UI image pinned by digest (`<repository>@sha256:<hex>`, pulled beforehand) that replaces the bundle's UI; backend, data and edge stay the bundle's. |
 | `backend.env`, `ui.env` | extra container environment (cannot override the contract above) |
 | `secrets.env` | empty by default, mode 0600; passed to both containers |
 
