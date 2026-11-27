@@ -25,6 +25,9 @@ services:
       MODEL_ROOT: ${CHEESE_V2_MODEL_ROOT:?}
       MODEL_MANIFEST_SHA256: ${CHEESE_V2_MODEL_MANIFEST_SHA256:?}
       RELEASE_PUBLIC_KEY_B64: ${CHEESE_V2_RELEASE_PUBLIC_KEY_B64:?}
+      # No cross-origin browser access: the UI reaches the backend server-side,
+      # and the hosted default would trust deepmedchem.com pages.
+      CORS_ORIGINS: ""
     volumes:
       - ${CHEESE_V2_DATA_DIR:?}:/data:ro
       - runtime:/var/lib/dmc-platform
