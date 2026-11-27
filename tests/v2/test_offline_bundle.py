@@ -692,6 +692,7 @@ class OfflineBundleTest(unittest.TestCase):
         self.assertRegex(backend["MODEL_MANIFEST_SHA256"], r"^[0-9a-f]{64}$")
         for absent in ("PLATFORM_API_KEYS", "PLATFORM_WORKER_API_KEY", "AUTH_DISABLED"):
             self.assertNotIn(absent, backend)
+        self.assertEqual(backend["CORS_ORIGINS"], "")
         self.assertEqual(ui["PLATFORM_API_URL"], "http://backend:8000")
         self.assertEqual(ui["VITE_ONPREM_SEARCH_ONLY"], "true")
         self.assertEqual(ui["PORT"], "3000")
