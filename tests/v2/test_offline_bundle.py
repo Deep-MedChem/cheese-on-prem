@@ -142,12 +142,12 @@ class OfflineBundleTest(unittest.TestCase):
         (root / "release-public-key.txt").write_text((key or self.key) + "\n")
         return root
 
-    def build(self, payload, name="bundle", epoch=1_800_000_000, extra=(), check=True):
+    def build(self, payload, name="bundle", epoch=1_800_000_000, extra=(), check=True, ui_image="dmc/ui:test"):
         output = self.tmp / name
         result = self.run_cmd(
             PRODUCER,
             "--backend-image", "dmc/backend:test",
-            "--ui-image", "dmc/ui:test",
+            "--ui-image", ui_image,
             "--payload", payload,
             "--output", output,
             *extra,
@@ -214,11 +214,35 @@ class OfflineBundleTest(unittest.TestCase):
             self.assertIn(required, listed)
         meta = json.loads((bundle / "bundle.json").read_text())
         self.assertEqual(meta["images"]["backend"]["image_id"], BACKEND_ID)
+        # A locally built UI image has no registry digest or revision label.
+        self.assertEqual(meta["images"]["ui"], {"source_ref": "dmc/ui:test", "image_id": UI_ID, "digest": None, "revision": None})
         self.assertEqual(meta["releases"][0]["release_id"], "r2026-11-01")
         self.assertEqual(meta["bundle_version"], "pilot-1")
         self.assertEqual(meta["created_utc"], "2027-01-15T08:00:00Z")
         self.assertTrue(os.access(bundle / "install.sh", os.X_OK))
         self.assertFalse((self.tmp / "bundle.partial").exists())
+
+    def test_producer_pulls_ui_image_by_digest_and_records_its_revision(self):
+        ecr = "815935788477.dkr.ecr.us-east-1.amazonaws.com/on-prem/cheese/cheese-search-ui"
+        ref = f"{ecr}@sha256:{'d' * 64}"
+        revision = "e" * 40
+        pulled_id = "sha256:" + "f" * 64
+        self.docker_state(registry={ref: {"id": pulled_id, "labels": {"org.opencontainers.image.revision": revision}}})
+        bundle, digest = self.build(self.payload(), ui_image=ref)
+        self.assertIn(["pull", "--quiet", ref], self.docker_calls())
+        meta = json.loads((bundle / "bundle.json").read_text())
+        self.assertEqual(
+            meta["images"]["ui"],
+            {"source_ref": ref, "image_id": pulled_id, "digest": "sha256:" + "d" * 64, "revision": revision},
+        )
+        self.assertIn(f"UI_IMAGE_ID={pulled_id}", (bundle / "bundle.env").read_text())
+        # The pulled image installs like a local one.
+        self.install(bundle, digest)
+
+        # A tag is not a pin: only digest refs are pulled.
+        result = self.build(self.payload("p2"), "b2", ui_image=f"{ecr}:v2-dev", check=False)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("not present locally", result.stderr)
 
     def test_producer_includes_sdk_wheelhouse(self):
         wheelhouse = self.tmp / "wheelhouse"
