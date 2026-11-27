@@ -1047,7 +1047,9 @@ EOF
 [ $# -gt 0 ] || { usage; exit 1; }
 COMMAND="$1"; shift
 BUNDLE_DIR="" TRUSTED="" ALLOW_UNTRUSTED=0 LINK_DATA=0 ACCEPT_KEY="" ALLOW_DOWNGRADE=0
-SKIP_PREFLIGHT=0 FORCE=0 JSON=0 START_TIMEOUT=600 VENV="" PYTHON=python3.11
+# The backend may take up to two hours to load its libraries (compose start_period 7200s, #66);
+# a real synthon-space set took over 10 minutes on the demo (2026-11-27), so 600 s rolled back good updates.
+SKIP_PREFLIGHT=0 FORCE=0 JSON=0 START_TIMEOUT=7200 VENV="" PYTHON=python3.11
 FROM="" OUTPUT="" CURL_CONFIG="" JOBS=4 SINCE=24h
 PASSTHROUGH=()
 while [ $# -gt 0 ]; do
