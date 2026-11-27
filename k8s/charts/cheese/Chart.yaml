@@ -24,3 +24,5 @@ description: |
 type: application
 version: 0.6.0
 appVersion: "0.0.1"
+# "-0" admits vendor builds such as v1.30.4-eks-1a2b3c.
+kubeVersion: ">=1.28.0-0"
