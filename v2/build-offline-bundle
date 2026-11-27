@@ -1,0 +1,200 @@
+#!/bin/bash
+# Build an offline CHEESE V2 bundle (run on the connected build host).
+#
+#   v2/build-offline-bundle --backend-image REF --ui-image REF --payload DIR --output DIR
+#                           [--sdk-wheelhouse DIR] [--bundle-version LABEL] [--archive] [--hardlink]
+#
+# Payload layout (read-only input):
+#   release-public-key.txt                           one base64 DER Ed25519 public key
+#   releases/<database_id>/<release_id>/manifest.json + manifest.sig + release files
+#   models/manifest.json + model files
+#
+# The bundle is unsigned. Its trust anchor is the BUNDLE_DIGEST printed last
+# (sha256 of SHA256SUMS): deliver it to the operator over a separate channel.
+# See docs/v2-offline.md.
+
+set -euo pipefail
+
+REPO="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/.." && pwd -P)"
+ID_RE='^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$'
+# DER SubjectPublicKeyInfo prefix of an Ed25519 key (RFC 8410), as hex.
+ED25519_SPKI_PREFIX=302a300506032b6570032100
+
+die() { printf 'ERROR: %s\n' "$*" >&2; exit 1; }
+log() { printf '%s\n' "$*" >&2; }
+
+usage() { sed -n '2,15p' "$0" | sed 's/^# \{0,1\}//'; }
+
+BACKEND_REF="" UI_REF="" PAYLOAD="" OUTPUT="" SDK="" VERSION="" ARCHIVE=0 HARDLINK=0
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --backend-image) BACKEND_REF="${2:?}"; shift 2 ;;
+    --ui-image) UI_REF="${2:?}"; shift 2 ;;
+    --payload) PAYLOAD="${2:?}"; shift 2 ;;
+    --output) OUTPUT="${2:?}"; shift 2 ;;
+    --sdk-wheelhouse) SDK="${2:?}"; shift 2 ;;
+    --bundle-version) VERSION="${2:?}"; shift 2 ;;
+    --archive) ARCHIVE=1; shift ;;
+    --hardlink) HARDLINK=1; shift ;;
+    -h | --help) usage; exit 0 ;;
+    *) usage >&2; die "unknown argument: $1" ;;
+  esac
+done
+[ -n "$BACKEND_REF" ] && [ -n "$UI_REF" ] && [ -n "$PAYLOAD" ] && [ -n "$OUTPUT" ] \
+  || { usage >&2; die "--backend-image, --ui-image, --payload and --output are required"; }
+
+# SOURCE_DATE_EPOCH (reproducible-builds convention) pins the creation time,
+# which update uses to refuse accidental downgrades.
+EPOCH="${SOURCE_DATE_EPOCH:-$(date +%s)}"
+CREATED="$(date -u -d "@$EPOCH" +%Y-%m-%dT%H:%M:%SZ)"
+VERSION="${VERSION:-$(date -u -d "@$EPOCH" +%Y%m%dT%H%M%SZ)}"
+[[ "$VERSION" =~ ^[A-Za-z0-9][A-Za-z0-9._+:-]{0,63}$ ]] || die "--bundle-version may only use [A-Za-z0-9._+:-]"
+OUTPUT="$(readlink -m "$OUTPUT")"
+[ -e "$OUTPUT" ] && die "$OUTPUT already exists; choose a new output path"
+PAYLOAD="$(cd "$PAYLOAD" && pwd -P)" || die "payload directory not found"
+
+# ── validate the payload before doing anything expensive ─────────────────────
+
+key_file="$PAYLOAD/release-public-key.txt"
+[ -f "$key_file" ] || die "missing $key_file"
+[ "$(grep -c . "$key_file")" = 1 ] || die "release-public-key.txt must hold exactly one key (one non-empty line)"
+key="$(tr -d '[:space:]' <"$key_file")"
+[[ "$key" =~ ^[A-Za-z0-9+/]+=*$ ]] || die "release-public-key.txt is not base64"
+key_hex="$(printf '%s' "$key" | base64 -d 2>/dev/null | od -An -tx1 | tr -d ' \n')" || die "release key does not decode"
+[ "${#key_hex}" = 88 ] && [ "${key_hex:0:24}" = "$ED25519_SPKI_PREFIX" ] \
+  || die "release-public-key.txt is not a base64 DER Ed25519 public key (what RELEASE_PUBLIC_KEY_B64 expects)"
+
+[ -f "$PAYLOAD/models/manifest.json" ] || die "missing $PAYLOAD/models/manifest.json"
+[ -d "$PAYLOAD/releases" ] || die "missing $PAYLOAD/releases"
+releases=()
+for db_dir in "$PAYLOAD"/releases/*/; do
+  db="$(basename "$db_dir")"
+  [[ "$db" =~ $ID_RE ]] || die "invalid database_id directory: $db"
+  rels=("$db_dir"*/)
+  [ -d "${rels[0]}" ] || die "database $db has no release directory"
+  ((${#rels[@]} == 1)) || die "database $db has ${#rels[@]} releases; a bundle serves exactly one release per database"
+  rel="$(basename "${rels[0]}")"
+  [[ "$rel" =~ $ID_RE ]] || die "invalid release_id directory: $db/$rel"
+  [ -f "$db_dir$rel/manifest.json" ] || die "release $db/$rel has no manifest.json"
+  [ -f "$db_dir$rel/manifest.sig" ] || die "release $db/$rel has no manifest.sig; the backend refuses unsigned releases"
+  releases+=("$db $rel")
+done
+((${#releases[@]} > 0)) || die "no releases under $PAYLOAD/releases"
+if [ -n "$(find "$PAYLOAD" -name $'*\n*' -print -quit)" ]; then
+  die "payload contains a file name with a newline"
+fi
+if [ -n "$SDK" ]; then
+  SDK="$(cd "$SDK" && pwd -P)" || die "SDK wheelhouse not found"
+  [ -f "$SDK/requirements.lock" ] && [ -f "$SDK/SHA256SUMS" ] || die "SDK wheelhouse needs requirements.lock and SHA256SUMS"
+  (cd "$SDK" && sha256sum --check --strict --quiet SHA256SUMS) || die "SDK wheelhouse fails its own SHA256SUMS"
+fi
+
+image_id() { docker image inspect --format '{{.Id}}' "$1" 2>/dev/null || die "image $1 is not present locally"; }
+BACKEND_ID="$(image_id "$BACKEND_REF")"
+UI_ID="$(image_id "$UI_REF")"
+
+# ── assemble into <output>.partial, rename when complete ─────────────────────
+
+STAGE="$OUTPUT.partial"
+rm -rf "$STAGE"
+mkdir -p "$STAGE"/{images,cli,payload}
+trap 'rm -rf "$STAGE" "$OUTPUT.sums.tmp"' EXIT
+
+log "Copying payload ($(du -shL "$PAYLOAD" | cut -f1))..."
+copy_opts=(-R -L)
+[ "$HARDLINK" = 1 ] && copy_opts+=(-l)
+for item in release-public-key.txt models releases; do
+  cp "${copy_opts[@]}" "$PAYLOAD/$item" "$STAGE/payload/$item"
+done
+[ -n "$SDK" ] && { mkdir -p "$STAGE/sdk"; cp -R -L "$SDK" "$STAGE/sdk/wheelhouse"; }
+
+log "Copying the cheese CLI from $REPO..."
+for item in scripts install config v2 docs README.md install-cheese.sh docker-compose.yml docker-compose.supabase.yml; do
+  [ -e "$REPO/$item" ] && cp -R -L "$REPO/$item" "$STAGE/cli/$item"
+done
+cp "$REPO/v2/install.sh" "$STAGE/install.sh"
+chmod +x "$STAGE/install.sh" "$STAGE/cli/scripts/"* "$STAGE/cli/v2/build-offline-bundle"
+cli_commit="$(git -C "$REPO" rev-parse HEAD 2>/dev/null || echo unknown)"
+[ -n "$(git -C "$REPO" status --porcelain 2>/dev/null)" ] && cli_commit="$cli_commit-dirty"
+
+log "Saving images (docker save $BACKEND_REF $UI_REF)..."
+docker save -o "$STAGE/images/images.tar" "$BACKEND_REF" "$UI_REF"
+
+# ── metadata ─────────────────────────────────────────────────────────────────
+
+model_sha="$(sha256sum "$PAYLOAD/models/manifest.json" | cut -d' ' -f1)"
+key_sha="$(sha256sum "$STAGE/payload/release-public-key.txt" | cut -d' ' -f1)"
+: >"$STAGE/releases.tsv"
+json_releases=""
+for line in "${releases[@]}"; do
+  read -r db rel <<<"$line"
+  sha="$(sha256sum "$STAGE/payload/releases/$db/$rel/manifest.json" | cut -d' ' -f1)"
+  printf '%s %s %s\n' "$db" "$rel" "$sha" >>"$STAGE/releases.tsv"
+  json_releases+="${json_releases:+,}
+    {\"database_id\": \"$db\", \"release_id\": \"$rel\", \"manifest_sha256\": \"$sha\"}"
+done
+
+# Image refs are echoed into metadata; keep them to characters that need no escaping.
+for ref in "$BACKEND_REF" "$UI_REF"; do
+  [[ "$ref" =~ ^[A-Za-z0-9._/:@-]+$ ]] || die "unexpected characters in image ref $ref"
+done
+cat >"$STAGE/bundle.env" <<EOF
+BUNDLE_FORMAT=1
+BUNDLE_VERSION=$VERSION
+CREATED_UTC=$CREATED
+CLI_COMMIT=$cli_commit
+BACKEND_SOURCE_REF=$BACKEND_REF
+BACKEND_IMAGE_ID=$BACKEND_ID
+UI_SOURCE_REF=$UI_REF
+UI_IMAGE_ID=$UI_ID
+MODEL_MANIFEST_SHA256=$model_sha
+RELEASE_PUBLIC_KEY_SHA256=$key_sha
+SDK_INCLUDED=$([ -n "$SDK" ] && echo true || echo false)
+EOF
+cat >"$STAGE/bundle.json" <<EOF
+{
+  "format": "cheese-v2-offline-bundle/1",
+  "bundle_version": "$VERSION",
+  "created_utc": "$CREATED",
+  "cli_commit": "$cli_commit",
+  "images": {
+    "archive": "images/images.tar",
+    "backend": {"source_ref": "$BACKEND_REF", "image_id": "$BACKEND_ID"},
+    "ui": {"source_ref": "$UI_REF", "image_id": "$UI_ID"}
+  },
+  "releases": [$json_releases
+  ],
+  "model_manifest_sha256": "$model_sha",
+  "release_public_key_sha256": "$key_sha",
+  "sdk_wheelhouse": $([ -n "$SDK" ] && echo '"sdk/wheelhouse"' || echo null),
+  "ports": {"ui": "127.0.0.1:18780", "api": "127.0.0.1:18781"}
+}
+EOF
+
+# ── checksums + trust anchor ─────────────────────────────────────────────────
+
+log "Computing SHA256SUMS..."
+# Written outside the stage so the list never includes itself.
+(
+  cd "$STAGE"
+  find . -type f -printf '%P\n' | LC_ALL=C sort \
+    | xargs -d '\n' -n 64 -P "$(nproc 2>/dev/null || echo 2)" sha256sum \
+    | awk '{ print substr($0, 67) "\t" $0 }' | LC_ALL=C sort -t "$(printf '\t')" -k1,1 | cut -f2-
+) >"$OUTPUT.sums.tmp"
+mv "$OUTPUT.sums.tmp" "$STAGE/SHA256SUMS"
+digest="$(sha256sum "$STAGE/SHA256SUMS" | cut -d' ' -f1)"
+mv -T "$STAGE" "$OUTPUT"
+trap - EXIT
+printf 'BUNDLE_DIGEST=sha256:%s\n' "$digest" >"$OUTPUT.digest"
+
+if [ "$ARCHIVE" = 1 ]; then
+  log "Writing $OUTPUT.tar..."
+  tar -C "$(dirname "$OUTPUT")" -cf "$OUTPUT.tar" "$(basename "$OUTPUT")"
+  (cd "$(dirname "$OUTPUT")" && sha256sum "$(basename "$OUTPUT").tar" >"$(basename "$OUTPUT").tar.sha256")
+fi
+
+log ""
+log "Bundle written to $OUTPUT ($(du -sh "$OUTPUT" | cut -f1)); releases:"
+cat "$OUTPUT/releases.tsv" >&2
+log "Deliver this digest to the operator over a separate trusted channel (also in $OUTPUT.digest):"
+printf 'BUNDLE_DIGEST=sha256:%s\n' "$digest"

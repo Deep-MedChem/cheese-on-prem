@@ -1,0 +1,29 @@
+# Tests for the CHEESE V2 offline bundle path (producer, verification, install,
+# start/status/stop, update). Docker is faked except for `docker compose config`,
+# so no images are needed. The real-Docker test is opt-in (docs/v2-offline.md).
+name: v2-offline
+
+on:
+  push:
+    paths:
+      - "v2/**"
+      - "scripts/cheese"
+      - "scripts/cheese-v2"
+      - "tests/v2/**"
+      - ".github/workflows/v2-offline.yml"
+  pull_request:
+    paths:
+      - "v2/**"
+      - "scripts/cheese"
+      - "scripts/cheese-v2"
+      - "tests/v2/**"
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: shellcheck
+        run: shellcheck scripts/cheese-v2 v2/build-offline-bundle v2/install.sh
+      - name: unit tests
+        run: python3 -m unittest discover -s tests/v2 -v
