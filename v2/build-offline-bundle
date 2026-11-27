@@ -4,6 +4,9 @@
 #   v2/build-offline-bundle --backend-image REF --ui-image REF --payload DIR --output DIR
 #                           [--sdk-wheelhouse DIR] [--bundle-version LABEL] [--archive] [--hardlink]
 #
+# --ui-image is a local image or a registry image pinned by digest
+# (<repository>@sha256:<hex>), pulled if absent; docker login to the registry first.
+#
 # Payload layout (read-only input):
 #   release-public-key.txt                           one base64 DER Ed25519 public key
 #   releases/<database_id>/<release_id>/manifest.json + manifest.sig + release files
@@ -23,7 +26,7 @@ ED25519_SPKI_PREFIX=302a300506032b6570032100
 die() { printf 'ERROR: %s\n' "$*" >&2; exit 1; }
 log() { printf '%s\n' "$*" >&2; }
 
-usage() { sed -n '2,15p' "$0" | sed 's/^# \{0,1\}//'; }
+usage() { sed -n '2,18p' "$0" | sed 's/^# \{0,1\}//'; }
 
 BACKEND_REF="" UI_REF="" PAYLOAD="" OUTPUT="" SDK="" VERSION="" ARCHIVE=0 HARDLINK=0
 while [ $# -gt 0 ]; do
@@ -89,9 +92,30 @@ if [ -n "$SDK" ]; then
   (cd "$SDK" && sha256sum --check --strict --quiet SHA256SUMS) || die "SDK wheelhouse fails its own SHA256SUMS"
 fi
 
+# The UI can come straight from the registry (cheese-search-ui CI publishes it to
+# ECR); only a digest-pinned ref is pulled, so the bundle gets exactly that build.
+if [[ "$UI_REF" == *@* ]] && ! docker image inspect "$UI_REF" >/dev/null 2>&1; then
+  [[ "$UI_REF" =~ ^[A-Za-z0-9._/:-]+@sha256:[0-9a-f]{64}$ ]] \
+    || die "--ui-image $UI_REF must be <repository>@sha256:<64 hex>"
+  log "Pulling $UI_REF..."
+  docker pull --quiet "$UI_REF" >/dev/null || die "could not pull $UI_REF (docker login to its registry first)"
+fi
+
 image_id() { docker image inspect --format '{{.Id}}' "$1" 2>/dev/null || die "image $1 is not present locally"; }
 BACKEND_ID="$(image_id "$BACKEND_REF")"
 UI_ID="$(image_id "$UI_REF")"
+# Registry digest and source revision of the UI build, as JSON values (null if unknown):
+# a digest ref names its own digest; a local image has one only if it was pushed or pulled.
+if [[ "$UI_REF" == *@* ]]; then
+  ui_digest="${UI_REF#*@}"
+else
+  ui_digest="$(docker image inspect --format '{{range .RepoDigests}}{{println .}}{{end}}' "$UI_REF")"
+  ui_digest="${ui_digest%%$'\n'*}"
+  ui_digest="${ui_digest#*@}"
+fi
+ui_revision="$(docker image inspect --format '{{index .Config.Labels "org.opencontainers.image.revision"}}' "$UI_REF")"
+[[ "$ui_digest" =~ ^sha256:[0-9a-f]{64}$ ]] && ui_digest="\"$ui_digest\"" || ui_digest=null
+[[ "$ui_revision" =~ ^[0-9a-f]{7,64}$ ]] && ui_revision="\"$ui_revision\"" || ui_revision=null
 
 # ── assemble into <output>.partial, rename when complete ─────────────────────
 
@@ -160,7 +184,7 @@ cat >"$STAGE/bundle.json" <<EOF
   "images": {
     "archive": "images/images.tar",
     "backend": {"source_ref": "$BACKEND_REF", "image_id": "$BACKEND_ID"},
-    "ui": {"source_ref": "$UI_REF", "image_id": "$UI_ID"}
+    "ui": {"source_ref": "$UI_REF", "image_id": "$UI_ID", "digest": $ui_digest, "revision": $ui_revision}
   },
   "releases": [$json_releases
   ],
